@@ -32,13 +32,14 @@ jobs:
 
           URL="${SYNC_BASE_URL%/}/api/sync/travels"
           MAX_ITERATIONS=30
+          BATCH_SIZE=30
           RUN_ID=""
 
           for i in $(seq 1 "$MAX_ITERATIONS"); do
             if [ -n "$RUN_ID" ]; then
-              BODY=$(jq -n --arg runId "$RUN_ID" '{runId: $runId}')
+              BODY=$(jq -n --arg runId "$RUN_ID" --argjson batchSize "$BATCH_SIZE" '{runId: $runId, batchSize: $batchSize}')
             else
-              BODY="{}"
+              BODY=$(jq -n --argjson batchSize "$BATCH_SIZE" '{batchSize: $batchSize}')
             fi
 
             echo "iteration $i: POST $URL"

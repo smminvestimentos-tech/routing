@@ -8,6 +8,10 @@ import {
   type TrackitTravel,
 } from "@/lib/trackit/client";
 
+// Vercel Hobby plan hard cap — without this the default function timeout is
+// much shorter than what a full batch needs.
+export const maxDuration = 60;
+
 // Only one TRACKiT account/credential pair is wired up today (TRACKIT_USER/TRACKIT_PASS).
 // When a second account is added, this becomes one iteration of a loop over
 // {account, user, pass} entries, each with its own sync_runs row.
@@ -16,7 +20,9 @@ const TRACKIT_ACCOUNT = "default";
 // TRACKiT enforces a global ~1 req/sec rate limit per account (see
 // src/lib/trackit/client.ts), so vehicles are processed sequentially within
 // a batch — that limit rules out real parallelism against this API anyway.
-const DEFAULT_BATCH_SIZE = 50;
+// 30 vehicles * ~1.1s pacing =~ 33s, leaving headroom under the 60s
+// maxDuration above for network/Supabase overhead.
+const DEFAULT_BATCH_SIZE = 30;
 
 type VehicleError = { vehicleId: number; error: string };
 
