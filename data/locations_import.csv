@@ -1,0 +1,684 @@
+code,arp2_code,name,type,address,locality,latitude,longitude
+H58,8092,A Ver-o-Mar,loja,"Rua José Moreira Amorim, nº 723",Póvoa de Varzim,41.40888,-8.77395
+E12,7062,A-dos-Cunhados,loja,"Rua 25 de Abril, n.º 3 - Loja R",A-dos-Cunhados,39.15416,-9.30525
+B64,9805,Abrantes,loja,Avenida D. João IV,Abrantes,39.46791667,-8.206130556
+D48,8925,Abraveses,loja,"Zona Industrial de Abraveses, S/N",Viseu,40.679606,-7.922715
+A82,9784,Abrigada,loja,"Cruzinha, Lt 29",Abrigada,39.1424,-9.01722
+DAF,,ACRV,oficina,"Quinta das Areias, Várzea",Castanheira do Ribatejo,38.9796657226468,-8.976714550831074
+I472,,Adega Cooperativa Cantanhede,fornecedor,"Rua Eng.º Amaro da Costa, 117 -",Beira Litoral,40.358408,-8.596503
+718,,AF Ariz,loja,Rua Engenheiro Manuel Carneiro Geraldes,Marco Canaveses,41.1159611,-8.2164352
+703,,AF Barcelos – Rio Covo,loja,Rua de Santa Eugenia nº7 – Freguesia de Rio Couvo,Barcelos,41.490456,-8.578477
+724,,AF Beja,loja,"Rua Sousa Porto, Nº 17 e 19",Beja,38.013944,-7.871142
+712,,AF Maceira do Lis,loja,"Rua de Leiria, 32",Maceira,39.688184,-8.883077
+717,,AF Mértola,loja,Zona Industrial de Beja - Rua dos Marceneiros 16,Beja,38.020406,-7.852328
+727,,AF Miranda do Corvo,loja,"Rua João Paulo II, Nº21",Coimbra,40.092381,-8.330118
+714,,AF Montemor - O -Velho,loja,Rua do lavaris - Pelamos-,Carapinheira,40.178106,-8.681969
+708,,AF Pataias,loja,Avenida Dom Dinis n.50,Pataias,39.688267,-9.000672
+729,,AF Penacova,loja,Rua Principal da Espinheira 404,"Sazes Do Lorvao, Penacova, Coimbra",40.2021364,-8.4566756
+710,,AF Penamacor,loja,Zona Ind. Cabeça de Porca,Penamacor,40.169755,-7.171522
+739,,"AF Quinta do Janeiro, Almada",loja,"R. António Sérgio, 1D",Almada,38.6652234364153,-9.15630891386632
+711,,AF Sabugal,loja,"Avenida Dr. João Pereira, 20",Sabugal,40.379639,-7.049818
+730,,AF Vila Velha Rodão,loja,Av Bela Vista - Vila Velha de Rodão,Castelo Branco,39.657474,-7.67638
+B03,9621,Afonso III,loja,"Avenida Afonso III, nº72",Lisboa,38.72625,-9.118736111
+C956,,Águas da Penacova,fornecedor,"Lugar Mata Das Caldas, Penacova, Coimbra -",Beira Litoral,40.27902,-8.27154
+A605,,Águas de Monchique,fornecedor,Mexilhoeira Grande,,37.1626272,-8.635953
+E40,8823,Águeda,loja,"Rua Celestino Neto, S/N",Águeda,40.57234,-8.44463
+E30,8042,Aguiar da Beira,loja,"Zona Industrial, lote 9",Aguiar da Beira,40.81117,-7.54418
+B78,9833,Albufeira,loja,Vale Paraíso,Albufeira,37.11773056,-8.243422222
+F02,7915,Alcácer do Sal,loja,Alameda José Saramago,Alcácer do Sal,38.37570833,-8.509872222
+H15,7051,Alcains,loja,"Rua de São Domingos, nº 50",Alcains,39.91552,-7.46666
+E97,7714,Alcanena,loja,"Rua da Saudade, Lote 2, R/chão",Alcanena,39.4556755,-8.6677448
+A97,9611,Alcântara,loja,Rua dos Lusíadas nº 59,Lisboa,38.70480556,-9.181275
+E63,7805,Alcobaça,loja,"Praça João de Deus Ramos, Loja 4 - Lote H, I",Alcobaça,39.5513535,-8.9753526
+D58,7747,Alexandre Herculano,loja,"Rua Alexandre Herculano, nº 43",Lisboa,38.72126667,-9.151952778
+H26,7601,Alfarim,loja,"Largo das Forças Armadas, Nº6",Sesimbra,38.47698,-9.15988
+B92,439,Alfena,loja,"Rua Nossa Senhora da Piedade, nº 331",Alfena,41.237091667,-8.529525
+25,,Alfragide,loja,C.Comercial Alegro - Av. dos Cavaleiros,Carnaxide,38.728158,-9.21796
+E26,7877,Algés,loja,"Avenida Bombeiros Voluntários de Algés, n.º 54 a 54ª e Rua Margarida Palla, n.º 4",Algés,38.706036111,-9.226191667
+A38,2046,Algés,loja,"Rua Major Afonso Pala, 22/30",Algés,38.69892778,-9.228291667
+A44,2059,Algueirão,loja,"Estrada de Mem Martins, 274 - Algueirão",Mem-Martins,38.79676111,-9.342019444
+D90,7723,Alhandra,loja,"Rua Passos Manuel, nº 12",Alhandra,38.92719722,-9.008077778
+F01,7923,Alhos Vedros,loja,"Estrada Nacional 11, Vale Grou",Alhos Vedros,38.65267222,-9.013183333
+D49,8907,Alijó,loja,"Rua Dr. César Ferreira, S/N",Alijó,41.276713889,-7.472897222
+E14,7066,Aljezur,loja,"Rua da Escola, nº 21",Aljezur,37.31638,-8.79802
+F23,,Aljustrel,loja,R. de Santa Bárbara,Aljustrel,37.8727096858189,-8.16806904142731
+12,,Almada,loja,Rua António Calado,Almada,38.659912,-9.174984
+A40,2048,Almada I,loja,"Rua Heliodoro Salgado, 11/B",Almada,38.68273056,-9.157330556
+E49,7735,Almada I,loja,Rua Bernardo Francisco da Costa nº 6 A,Almada,38.68239722,-9.153369444
+D73,7721,Almada II,loja,"Rua Capitão Leitão, 87/D",Almada,38.67998889,-9.160222222
+A96,9605,Almada II,loja,"Avenida D.Nuno Alvares Pereira, nº 14",Almada,38.67969167,-9.157569444
+95,,Almada Natureza,loja,Forum Almada,Almada,38.659912,-9.174984
+E43,8832,Almeida,loja,"EN 332 - Bairro de S. Pedro, r/ch",Almeida,40.719130556,-6.901511111
+B57,9782,Almirante Reis,loja,"Avenida Almirante Reis, 114",Lisboa,38.731675,-9.134615
+E23,7872,Almodôvar,loja,"Rua António Cândido Colaço, S/N",Almodôvar,37.51523,-8.05998
+E36,8067,Alpendurada,loja,"Estrada da Barragem, fracção C",Alpendurada,41.09007,-8.25643
+B59,9793,Alta de Lisboa,loja,"Rua Helena Vaz da Silva, 7 A",Lisboa,38.77265833,-9.153480556
+H03,7005,Alvaiazere,loja,Quinta da Rosa - Alvaiazere,Alvaiazere,39.8167472,-8.3770226
+H33,7620,Alvalade do Sado,loja,Rua Duque da Terceira nº 17 - Alvalade do Sado,Santiago do Cacém,37.939755,-8.392103
+H78,8620,Alvares,loja,"Rua Hermano Neves, 8",Alvares,40.018514,-8.100364
+H40,7644,Alvega,loja,"Rua 5 de Outubro, 54",Alvega,39.4643257,-8.0424618
+29,,Alverca,loja,"Quinta das Drogas e da Verdelha, Estrada Nacional N10",Alverca do Ribatejo,38.88831,-9.043897
+A48,2078,Alverca,loja,"Rua da Estação, 109 R/C",Alverca,38.89624167,-9.038319444
+14,,Amadora,loja,"Centro Comercial UBBO, Casal da Mira - Brandoa",Amadora,38.77677,-9.219259
+141,,Amadora Comercio Electrónico,loja,"Centro Comercial Dolce Vita Tejo, Casal da Mira – Brandoa",Amadora,38.77677,-9.219259
+A39,2047,Amadora I,loja,"Avenida D.Nuno A.Pereira, 4/A",Amadora,38.75991667,-9.24095
+A54,2108,Amadora II,loja,"Largo Dr.Dário Gandra Nunes, 2/A e 2/E",Amadora,38.75833889,-9.234336111
+A66,2161,Amadora III,loja,Avenida Gago Coutinho - C.C.Babilónia,Amadora,38.75968,-9.23716
+B42,9740,Amadora Mina,loja,"Av. General Humberto Delgado, Nº34",Amadora,38.761433333,-9.233783333
+243A,,Amaral e Filhos Ambiente (Armazém Cliente Porto),armazem,"Rua da Póvoa, Armazém 687, Zona Industrial Amorim",Póvoa de Varzim,41.160885,-8.628367
+243C,,Amaral e Filhos Congelado (Bitralis STEF),fornecedor,Estrada da Quinta dos Conegos,Carregado,39.035054,-8.969912
+D25,8932,Amarante,loja,"Avenida 1º de Maio, s/n",Amarante,41.271955556,-8.076544444
+H27,7604,Amareleja,loja,"Rua do Coro, Nº19 A",Amareleja,38.20861,-7.22901
+D52,8933,Amares,loja,"Rua 25 de Abril, S/N",Amares,41.630327778,-8.359891667
+B11,9652,Amora,loja,"Travessa Guilherme Kjolner, nº 6 A",Amora,38.62577222,-9.115419444
+24,,Amoreiras,loja,C.Comercial das Amoreiras - Avª Engº Duarte Pacheco,Lisboa,38.723212,-9.162244
+A27,437,Anadia,loja,EN 1/IC2 Malaposta,Anadia,40.44602,-8.45069
+357C,,ANGELO C.BRAGA,fornecedor,,,38.9857447632756,-8.96636076475308
+357A,,ANGELO C.BRAGA,fornecedor,,,41.1993,-8.62602
+Anteo,,Anteo,oficina,"Estrada Nacional 118, 177 C Armazem B3",Salvaterra de Magos,39.01553077669349,-8.798842068470156
+4,,APH Exportação - Beletrans,fornecedor,"Lezíria Park Bloco 2, Armazém 5",Forte da Casa,38.869009,-9.056908
+4RC,,APH Exportação Refriferado/Congelado - Beletrans,fornecedor,,,38.969401,-9.056565
+D50,8953,Arcos de Valdevez,loja,"Rua Soares Pereira ,N 46",Arcos de Valdevez,41.846802778,-8.419844444
+D39,8957,Arcozelo,loja,"Estrada Nacional 109 / Rua Heróis da Pátria, s/n",Arcozelo,41.056444444,-8.647061111
+A57,2116,Areeiro,loja,"Avenida Padre Manuel da Nobrega, nº 5",Lisboa,38.74312222,-9.133838889
+A72,2256,Areosa,loja,"Rua Diamantina, nº 435/461",Porto,41.1805,-8.582686111
+A67,2166,Armação de Pera,loja,"Avenida Beira Mar, nº 5 R/C",Armação de Pêra,37.101636,-8.36298
+H46,8030,Armamar,loja,"Rua Gaspar e Manuel Cardoso, S/N",Armamar,41.10916,-7.68973
+01,,Armazém  Azambuja,centro_distribuicao,Rua da Lezíria do Tejo,Vila Nova da Rainha,39.0430977552197,-8.91879872883603
+AUCHAN-03,,ARMAZÉM ALVERCA,armazem,,,38.8860096710356,-9.05620084448319
+7001,,Armazém-Azambuja,armazem,"Estrada Nacional 3, Km 5.7 - Pq Ind Da Azambuja, Vila Nova Da Rainha, Lisboa",Maia,39.0427014,-8.9214547
+7091,,Armazém-Vialonga,centro_distribuicao,,,38.8860096710356,-9.05620084448319
+D44,8915,Arouca,loja,"Quinta do Outeiro, Lugar do Burgo",Arouca,40.92692,-8.26373
+E94,7746,Arraiolos,loja,"Largo do Lagar, s/n",Arraiolos,38.72336111,-7.984872222
+H34,7627,Arranhó,loja,"Rua 8 de Setembro, nº 42-44, Nossa Senhora da Ajuda",Arruda dos Vinhos,38.95295,-9.13561
+B55,9777,Arroja,loja,"Rua Dr. João Santos, 11 r/c dto e r/c esq",Odivelas,38.797211111,-9.191505556
+E13,7063,Arronches,loja,"Bairro Novo, Lt. 12",Arronches,39.11939,-7.28532
+7005,,Aucham Congelados,armazem,"N3, Vila Nova da Rainha",Vila Nova da Rainha,39.04265530996473,-8.920986142111294
+B14,9660,Av Brasil,loja,"Avenida do Brasil, nº 194 - A",Lisboa,38.759225,-9.137511111
+32,,Aveiro,loja,Estrada Nacional 109,Aveiro,40.626868,-8.644656
+E01,8815,Aveiro,loja,"Avenida Dr. Lourenço Peixinho, nº 134",Aveiro,40.642657,-8.647636
+144,,Aveiro Comercio Electrónico,loja,Estrada Nacional 109,Aveiro,40.626868,-8.644656
+D08,8835,Aveiro II,loja,"Rua S. Sebastião, 117",Aveiro,40.635124,-8.649075
+H05,7012,Avelar,loja,Rua da Fonte da Bucha,Ansião,39.92197,-8.3568
+B47,9758,Avenida de Berna,loja,"Rua Marquês Sá da Bandeira, nº120 B",Lisboa,38.73880278,-9.152544444
+H23,7112,Avis,loja,"Bairro do Serradão, Nº 2",Avis,39.050380556,-7.887927778
+E16,7092,Azambuja,loja,"Rua Jaime da Mota, nº7 A/Z",Azambuja,39.06797,-8.86802
+H32,7619,Azinhaga da Golegã,loja,"Rua 25 de Abril, nº2",Azinhaga da Golegã,39.34876,-8.531824
+E44,104,Baião,loja,"Rua de Camões, nº 131, 133 e 135",Baião,41.158413889,-8.039316667
+F17,B09 - 7705,Baixa da Banheira,loja,"Estrada Nacional 11, nº 3, 5 e 7",Baixa da Banheira,38.661305556,-9.050277778
+461-B73,9821,Baixa da Banheira,loja,Rua da Liberdade / Estrada da Amizade,Baixa da Banheira,38.65418611,-9.046830556
+D64,7729,Baixa da Banheira,loja,"Rua Padre José Feliciano, 46/8",Barreiro,38.65832778,-9.043316667
+E34,8058,Balazar,loja,"Rua da Fábrica, nº 496 R/C",Balazar,41.41452,-8.65053
+D80,7766,Barata Salgueiro,loja,"Rua Barata Salgueiro, nº 4",Lisboa,38.72275833,-9.145947222
+D09,8848,Barcelos,loja,"Largo Campo 25 de Abril, 49",Barcelos,41.535528,-8.615547
+D60,7720,Barreiro,loja,"Rua Professor Egas Moniz, nº 3",Barreiro,38.6617944,-9.0771278
+A99,9614,Barreiro I,loja,"Av Alfredo da Silva, nº 32 A",Barreiro,38.660339,-9.079413
+E57,7734,Barreiro II,loja,"Rua Bartolomeu Dias, 6A",Barreiro,38.659908,-9.062813
+E67,7713,Barreiro III,loja,"Largo da Quinta Grande, nº 19",Barreiro,38.65681944,-9.070922222
+D56,8942,Barroselas,loja,"Rua dos Reis Magos s/n, Mujães",Viana do Castelo,41.6482241,-8.7061271
+F09,7816,Beja,loja,Mercado Municipal - Rua D. Afonso Henriques,Beja,38.01205,-7.85849
+B70,9816,Belas,loja,"Rua Dona Mariana Vitória, Lote 182  Massamá Norte",Belas,38.76255833,-9.277027778
+H14,7050,Belmonte,loja,"Rua Pedro Alvares Cabral, nº 107",Belmonte,40.35746,-7.35202
+B77,9828,Benavente,loja,"Rua Dr.António Sousa Dias, s/n – EN 118",Benavente,38.97451111,-8.814622222
+D62,7764,Benfica,loja,"Estrada de Benfica, nº 350",Lisboa,38.74491667,-9.180138889
+B89,9604,Benfica I,loja,Estrada de Benfica nº 402,Lisboa,38.747134,-9.186901
+A61,2134,Benfica II,loja,"Avenida Gomes Pereira, 93/A",Lisboa,38.747192,-9.197816
+E71,7745,Benfica V,loja,"Rua Jorge Barradas, nº 212",Lisboa,38.756125,-9.202869444
+A52,2104,Boa Hora,loja,"Travessa da Boa Hora à Ajuda, nº 39",Lisboa,38.703474,-9.197153
+D70,7854,Bobadela,loja,"Rua Martires do Tarrafal, 19 - Bobadela",Sacavém,38.80753,-9.10203
+E77,7813,Bom Sucesso,loja,"Largo Catarina Eufémia, nº2",Bom Sucesso,38.90351,-9.04736
+H48,8039,Boticas,loja,Rua do Municipio,Boticas,41.6874,-7.66727
+A34,486,Braga,loja,"Rua Ponte Pedrinha, S/N",Braga,41.538237,-8.43239
+D54,8938,Braga - São Vicente,loja,"Rua Doutor Loureiro Amorim, Nº 40",Braga,41.559105556,-8.414144444
+A04,11,Braga I,loja,"Avenida da Liberdade, nº 454",Braga,41.548030556,-8.420977778
+D91,8858,Braga I,loja,"Rua do Caires, nº 232",Braga,41.547011,-8.433479
+D02,8846,Braga II,loja,"Avenida Dr. Porfírio da Silva, n.º 264",Braga,41.545195,-8.412585
+D07,8843,Braga III,loja,"Rua Gabriel Ferreira de Castro, n.º37",Braga,41.554966,-8.423646
+D28,8939,Braga Real,loja,"Urbanização de Santa Bárbara, Lote 11",Braga,41.555941667,-8.434113889
+E42,8829,Bragança,loja,"Alameda de Santa Apolónia, nºA e nº20 - Bairro Artur Mirandela",Bragança,41.792819,-6.769231
+E06,8814,Bragança,loja,"Avenida Francisco Sá Carneiro, 98 - 100",Bragança,41.80374,-6.76039
+B05,7881,Brandoa,loja,"Rua Herculano de Carvalho, Lote 652 - Loja Esquerda",Amadora,38.766989,-9.213711
+B27,9697,Brandoa,loja,"Rua da Liberdade, lote 112",Brandoa,38.768024,-9.215073
+F10,7914,Brejos de Azeitão,loja,"Avenida Luisa Tody, S/N",Azeitão,38.545575,-9.030341667
+I691,,Brioxa,fornecedor,"Rua praca general humberto, 60","reguenga, Santo tirso",41.3404643,-8.4792388
+B24,9685,Buraca,loja,"Rua Tristão Vaz, lote 5",Amadora,38.74143611,-9.206886111
+H30,7611,Burgau,loja,Rua Principal. Centro Comercial do Burgau. 1ª Loja,Burgau,37.0742,-8.77373
+A68,2185,Cacém,loja,"Rua D. Maria II, nº 2 cv",Agualva - Cacém,38.76860556,-9.301197222
+D59,7719,Cacém,loja,"Rua Afonso Albuquerque, n.º6",Cacém,38.76748056,-9.298561111
+A85,9780,Cacém,loja,"Rua Coração de Maria, 01 loja M-45 Centro Comercial Cacém",Cacém,38.76966,-9.31048
+B21,9680,Cacém II,loja,"Avenida dos Bons Amigos, 44 A",Cacém,38.76952467071154,-9.294668732491292
+E22,7837,Cadaval,loja,"Av. Dr. Francisco Sá Carneiro, Nº 49",Cadaval,39.24069,-9.10381
+B66,9807,Caldas da Rainha,loja,Avenida Timor Lorosae,Caldas da Rainha,39.4026524,-9.1489178
+D68,7808,Caldas da Rainha,loja,"Rua Eng. Duarte Pacheco,5/9",Caldas da Rainha,39.406251,-9.1351372
+52,,Caldas Rainha,loja,Centro comercial Lavie,Caldas da Rainha,39.401216,-9.136873
+A55,2114,Calhariz,loja,"Largo do Calhariz, nº 10",Lisboa,38.71074444,-9.145619444
+A50,2089,Calvário,loja,"Largo do Calvário, 29",Lisboa,38.70484444,-9.177466667
+A53,2107,Camarate,loja,"Praça 1º de Maio, Lote 7 e 8 - Camarate",Sacavém,38.801661,-9.1290787
+E04,8801,Caminha,loja,"Lugar Fonte da Vila, loja A",Caminha,41.87151,-8.83376
+A77,2312,Campanhã,loja,"Rua do Heroismo, 152/164",Porto,41.146886,-8.591293
+D06,8874,Campanhã,loja,"Rua da Estação, nº 105 a 109",Porto,41.147712,-8.586229
+57,,Campera,loja,"Cento Comercial Campera - Estrada Nacional 3, km 0,149",Carregado,39.027952,-8.967014
+A43,2051,Campo de Ourique,loja,"Rua Saraiva de Carvalho, nº 254",Lisboa,38.715422206456346,-9.164526267041643
+E51,7824,Campolide,loja,"Rua de Campolide, nº 108",Lisboa,38.72926,-9.16254
+H37,7635,Caneças,loja,"Rua dos Bombeiros Voluntários de Caneças, loja nº 13",Caneças,38.798141,-9.1622803
+65,,Canidelo,loja,"Rua do Emissor, 236/238",Vila Nova Gaia,41.131535,-8.647068
+A26,434,Canidelo,loja,Rua da Bélgica nº 2735,Canidelo,41.127955556,-8.6405
+H31,7615,Cano,loja,"Rua Capitão Pais Falcato, nº 4",Cano,38.963586,-7.7588925
+H69,8132,Cantanhede,loja,"Rua dos Namorados, nº58 e 60",Cantanhede,40.3459599,-8.5921798
+E25,7876,Caranguejeira,loja,"Rua de Fátima, nº 52 - A",Caranguejeira,39.73232,-8.70521
+B01,9617,Carlos Mardel,loja,"Rua Carlos Mardel, nº 49 - A",Lisboa,38.73531389,-9.133233333
+Nobre,,Carnes Nobre,fornecedor,835P+GH Rio Maior,Rio Maior,39.308913404567726,-8.913610264374782
+H52,8068,Carrazeda de Ansiães,loja,"Rua Luís de Camões, nº 952",Carrazeda de Ansiães,41.24189,-7.30685
+H07,7014,Carriço,loja,"Estrada Nacional, nº 109, S/N",Pombal,39.96557,-8.79109
+F05,7909,Cartaxo,loja,"Rua 16 de Novembro, S/N",Cartaxo,39.155038889,-8.789841667
+H76,8618,Carvalhais,loja,"Rua Padre José Rodrigues de Barros, nº 94 Anta",Carvalhais,40.908289,-8.059002
+H35,7628,Carvoeiro,loja,Rua do Cerro s/n,Carvoeiro,37.098255,-8.465538
+E78,7899,Casal de S. Brás,loja,"Rua 17 de Setembro, n.º2",Amadora,38.768397222,-9.230236111
+E24,7875,Casal do Chapim,loja,Rua Diogo de Silves,Odivelas,38.799525,-9.180249
+A60,2133,Cascais,loja,"Avenida 25 de Abril, nº 92",Cascais,38.70123056,-9.421394444
+22,,Cascais Nascente,loja,Av Marechal Carmona,Cascais,38.7018325,-9.4148383
+A83,9785,Castanheira do Ribatejo,loja,"Rua João Batista Correia, Nº 1 J Lj 5",Castanheira do Ribatejo,38.994695,-8.972169
+B91,9745,Castelo Branco,loja,"Avenida General Humberto Delgado, nº 74",Castelo Branco,39.8241265,-7.4898353
+B65,9806,Castelo Branco,loja,Estrada do Salgueiro,Castelo Branco,39.83372222,-7.496766667
+28,,Castelo Branco,loja,"Centro Comercial Alegro Castelo Branco , Rua A - Zona Industrial",Castelo Branco,39.815722,-7.520939
+D33,8952,Castelo de Paiva,loja,"Rua D José de Arrochela, S/N",Castelo de Paiva,41.044261111,-8.271241667
+I104,,Caves Avelar,fornecedor,"Estrada de Coimbra, Pontão -",Ribatejo,39.9955212,-8.7549925
+H20,7103,Caxarias,loja,"R. 9 de Junho, nº 47",Caxarias,39.71609,-8.54736
+E05,8853,Caxinas,loja,"Avenida Dr. Carlos Pinto Ferreira,360 a 366",Vila do Conde,41.362857,-8.758008
+E32,8054,Celorico da Beira,loja,"E.N. 17, n.º 16",Casas de Soeiro,40.6243456,-7.4029937
+H38,7640,Cercal,loja,"Rua Principal, 63",Cercal,39.70730268097645,-8.664708559082433
+C756,,Cerealis,fornecedor,"Rua Manuel Gonçalves Lage, 988 -",Douro Litoral,41.201578,-8.593861
+H19,7098,Cernache de Bonjardim II,loja,"Rua dos Pinheiros, S/ nº",Cernache de Bonjardim,39.80959,-8.1942
+B51,9769,Chamusca,loja,"Rua Rui Gomes da Silva, 1",Chamusca,39.35691111,-8.481202778
+F11,7912,Charneca da Caparica,loja,"R. António Andrade, Nº 1022",Charneca da Caparica,38.61698611,-9.192188889
+D36,8940,Chaves,loja,Avenida Heróis de Chaves,Chaves,41.753175,-7.474461111
+E54,7769,Chelas,loja,Rua Keill do Amaral Lt. 225 - D1,Lisboa,38.75937222,-9.124575
+B32,9709,Chelas II,loja,"Rua Eng. Ferreira Dias, lote 106, loja A",Lisboa,38.75227222,-9.114591667
+D30,8924,Cinfães,loja,"Rua Capitão Salgueiro Maia, S/N",Cinfães,41.073845,-8.089292
+B50,9765,Codivel,loja,"Rua Ricardo Reis, 7, Bairro Codivel",Odivelas,38.79676944,-9.172633333
+D24,8881,Coimbra,loja,"Praça 8 de Maio, nº11 - 13",Coimbra,40.21082,-8.429326
+D97,8880,Coimbra,loja,"Rua Dr.António Granjo, 6",Coimbra,40.2093389,-8.4322222
+9,,Coimbra,loja,"Rua Dom João III, Centro Comercial Dolce Vita",Coimbra,40.205656,-8.407166
+D55,8943,Coimbra,loja,"Estrada da Beira, S/N",Coimbra,40.196877778,-8.402077778
+19,,Coina,loja,"Barreiro Retail Park - Estrada Nacional 10, Km 18,5",Coina,38.583063,-9.043518
+E84,7843,Colinas do Cruzeiro,loja,"Rua Pulido Valente, Lt 23",Odivelas,38.79095278,-9.190983333
+I622,,Colreis,fornecedor,"Rua do Ribeiro, nº 70 - Vila de Lobão -",Douro Litoral,40.965307,-8.489805
+D51,8956,Condeixa-a-nova,loja,Lugar da Venda Nova,Condeixa-a-Nova,40.1070881,-8.4927077
+C763,,Cordeiro e Filhos,fornecedor,Faro -,Algarve,37.081099,-7.963979
+H24,7113,Correeiros,loja,"Rua dos Correeiros, 61 A,B,C",Lisboa,38.711412,-9.137551
+A59,2129,Corroios,loja,"Rua Quinta do Campo, 1/1 A",Setúbal,38.64199722,-9.153505556
+A78,2344,Corujeira,loja,"Rua Nova da Corujeira, nº 13/19",Porto,41.158681,-8.580005
+E80,7756,Costa da Caparica,loja,"Avenida Da República, n 13 A",Costa da Caparica,38.64476944,-9.235305556
+D74,7743,Costa da Caparica II,loja,"Rua Dr. Aresta Branco, 12/12 A",Costa da Caparica,38.64137222,-9.231816667
+A51,2102,Cova da Piedade,loja,"Estrada do Brejo, 20",Almada,38.66915,-9.159363889
+E93,7701,Cova da Piedade,loja,"Praça Professor Egas Moniz, nº 13",Cova da Piedade,38.674792,-9.16134
+E69,7869,Cova da Piedade I,loja,"Rua Francisco Vieira Almeida, 9",Almada,38.66578,-9.157871
+E08,7028,Crato,loja,Rua 25 de Abril (Tapada da Câmara),Crato,39.29027,-7.64861
+I685,,Cruz Caliços,fornecedor,"Urb. Comercial Vale de Santa Maria, Lt. 13 -",Algarve,37.101148,-8.270675
+B07,9636,Cruz de Pau,loja,"Rua Infante D. Augusto, lote 1",Seixal,38.6245728,-9.1249164
+A90,9779,Cruz de Pau,loja,"Estrada dos Foros de Amora, Nº 22 A e B",Amora,38.622052778,-9.125977778
+E10,7039,Cuba,loja,"Rua 1º de Maio, nº 58",Cuba,38.16261,-7.89258
+A32,474,Custóias,loja,Rua Cândido dos Reis s/n,Custóias,41.201480556,-8.645669444
+B97-E72,7825,Dafundo,loja,"Rua Direita do Dafundo, nº 43 A, B, C",Algés,38.6999067,-9.2394914
+B23,9684,Damaia II,loja,"Largo Cristovão da Gama, 10 B",Amadora,38.74893611,-9.211661111
+B41,9734,Damaia III,loja,"R. Mouzinho de Albuquerque, nº 5/A e B",Damaia,38.74758333,-9.2179
+P371A,,Decante A,fornecedor,Rua Faustino da Fonseca 2-2A -,Estremadura,38.736887,-9.216879
+Dhollandia,,"Dhollandia - Plataformas, Lda",oficina,,Vila Franca de Xira,38.974306902645026,-8.976799208552235
+A41,2049,Duque de Loulé,loja,"Avenida Duque de Loulé, nº 77",Lisboa,38.72682222,-9.146636111
+62,,Eiras,loja,Ribeira de Eiras,Eiras,40.254172,-8.43026
+F03,7910,Encarnação,loja,EN 9 - Rua Marita,Encarnação,39.030146,-9.36874
+B30,9707,Encarnação,loja,"Rua Circular do Sul, nº 35, 35 A",Lisboa,38.770848,-9.112791
+203,,"Entreposto Auchan/Minipreço (Valongo), N15-3 826, Gandra",centro_distribuicao,"N15-3 826, Gandra",Valongo,41.1755981535077,-8.44386115427077
+206,,Entreposto Auchan/Minipreço Torres Novas,centro_distribuicao,Zibreira,Torres Novas,39.4769806318898,-8.62480393033487
+201,,Entreposto Minipreço/Auchan Vialonga,centro_distribuicao,Estr. da Alfarrobeira 24,Vialonga,38.8860096710356,-9.05620084448319
+B75,9823,Ericeira,loja,"Rua Alto da Camacha, S/N",Ericeira,38.96676111,-9.406613889
+A74,2284,Espinho,loja,"Rua 23, nº 29",Espinho,41.007221,-8.64293
+D31,8955,Esposende,loja,"Avenida José Inácio Areias, Marinhas (Outeiro)",Esposende,41.546530556,-8.781655556
+B48,9761,Estefânia,loja,"Rua Almirante Barroso, 1-1B",Lisboa,38.73149444,-9.141291667
+E86,7873,Estrada da Luz,loja,"Estrada da Luz, 173/173E",Lisboa,38.75539,-9.176367
+21,,Evora,loja,Rua Adelino Fonseca,Evora,38.549669,-7.90556
+B83,9853,Évora,loja,"Ferragial da Eira e do Couto, E.N. 18- Bairro do Frei Aleixo",Évora,38.581375,-7.902733333
+E91,7895,Expo,loja,"Alameda dos Oceanos, 4.48.01 R/C",Lisboa,38.7783,-9.095319
+3,,Fabrica do Peixe - Peniche,loja,"Porto Pesca, Peniche",Peniche,39.357197,-9.371346
+A29,453,Fafe,loja,"Rua José Cardoso de Castro, nº 35",Fafe,41.449947222,-8.16485
+E58,7773,Falagueira,loja,"Rua do Moinho, Lote 4 / Rua das Industrias, Lote 4 Armaz.",Falagueira,38.7572591,-9.2256854
+D05,8809,Famalicão,loja,"Avenida 25 de Abril, nº4",Vila Nova de Famalicão,41.40937,-8.51922
+31,,Famalicão,loja,Av. do Brasil - Quinta da Barberia - Antas,Famalicão,41.411321,-8.511765
+D27,8937,Famalicão,loja,"Rua Alberto Sampaio, S/N",Vila Nova de Famalicão,41.400144444,-8.535091667
+A33,477,Fânzeres,loja,"Rua da Poesia, 152/178",Fânzeres,41.160011111,-8.529883333
+33,,Faro,loja,Forum Algarve - Estrada Nacional 125,Faro,37.028835,-7.94471
+145,,Faro Comercio Electrónico,loja,Forum Algarve - Estrada Nacional 125,Faro,37.028835,-7.94471
+D79,7733,Faro I,loja,"Largo do Terreiro do Bispo, nº 8/10",Faro,37.0172,-7.933005556
+58,,Faro Mercado,loja,Mercado Municipal de Faro - Largo Dr. Francisco Sá Carneiro,Pa Faro,37.020107,-7.928665
+H08,7022,Fátima,loja,Av. Irmã Lúcia de Jesus 68,Fátima,39.62252,-8.66141
+256A,,Fayal Kompras Ambiente (Marfrete São João da Talha),fornecedor,"Estrada Nacional, 10 Edificio Edipad, Armazém B8; B9S",S. João da Talha,38.824307,-9.096561
+256C,,Fayal Kompras Congelados (Bitralis STEF),fornecedor,"Estrada Nac. 10, Edificio Edipad,Armazém B8; B9S.",S. João da Talha,38.9857447632756,-8.96636076475308
+256R,,Fayal Kompras Frutas e Refrigerados (Bitralis STEF),fornecedor,Quinta das Drogas Fração D/H,Alverca,38.824307,-9.096561
+H50,8065,Febres,loja,"Rua Dr.Américo de Oliveira, S/N",Febres,40.4009956,-8.6239027
+E61,7704,Feijó,loja,"Rua Dr. António Elvas, n.º 88 A/C",Almada,38.6543556,-9.161225
+N095,,Ferbar,fornecedor,Maia,,41.2598873,-8.6361824
+F14,7916,Fernão Ferro,loja,"Avenida 25 de Abril, lote 528 - I",Fernão Ferro,38.581764,-9.097308
+B87,2335,Fernão Magalhães,loja,"Avenida Fernão Magalhães, nº 611",Porto,41.155238889,-8.595325
+E09,7032,Ferreira do Alentejo,loja,Avenida Gago Coutinho e Sacadura Cabral s/n,Ferreira do Alentejo,38.061780556,-8.118011111
+H11,7031,Ferreira do Zêzere,loja,"Qta. Do Adro, Lt. 39",Ferreira do Zêzere,39.693781,-8.2875964
+H28,7607,Ferro,loja,"R. Dr. Duarte Simões 44, 6200-571",Ferro,40.23298114097432,-7.445983550122045
+B31,9708,Fetais,loja,"Rua Cidade de Viseu, Lote 14, Fetais",Camarate,38.7981167,-9.1452784
+34,,Figueira da Foz,loja,Centro Comercial Foz Plaza - Rua dos Condados,Figueira da Foz,40.16615,-8.860315
+E37,8080,Figueira de Castelo Rodrigo,loja,"Rua Alvaros Castelões, S/N",Figueira de Castelo Rodrigo,40.89655,-6.9647
+H16,7054,Figueiró dos Vinhos,loja,"Rua do Campo de Futebol, s/n",Figueiró dos Vinhos,39.89624,-8.28407
+B25,9687,Filipa Vilhena,loja,"Rua D. Filipa de Vilhena, nº 30B",Lisboa,38.738401,-9.142124
+E89,7771,Fitares,loja,"Est. Marquês de Pombal, S/Nº",Rio de Mouro,38.785138889,-9.315666667
+368,,Florcash Lajes,fornecedor,"Quinta da Mata Zona E, Sete Casas",Loures,38.8435155011784,-9.17680628010037
+H77,8619,Fonte Boa,loja,"Avenida da Igreja, nº 19",Fonte Boa,41.49992,-8.73953
+B56,9781,Fontes Pereira de Melo,loja,"Av. Fontes Pereira de Melo, nº 25",Lisboa,38.730121,-9.147322
+A56,2115,Forno do Tijolo,loja,"Rua Forno do Tijolo, nº 75",Lisboa,38.72598333,-9.134311111
+E45,8836,Fornos de Algodres,loja,"Estrada Nacional 16, nº68",Fornos de Algodres,40.6164403,-7.5442118
+E73,7811,Forte da Casa,loja,"Rua da Liberdade, nº 29, célula A",Forte da Casa,38.87393,-9.05545
+E81,7715,Francisco Metrass,loja,"Rua Francisco Metrass, nº 71",Lisboa,38.71766389,-9.166533333
+D41,8929,Freamunde,loja,Rua D. Mercedes de Barros,Freamunde,41.287108333,-8.335936111
+E15,7075,Freixianda,loja,"Rua Principal, nº 52",Freixianda,39.759,-8.46036
+H54,8081,Freixo de Espada-a-Cinta,loja,"Mercado Municipal, Av Guerra Junqueiro, S/N",Freixo de Espada-a-Cinta,41.08826,-6.80753
+Frioglacial,,Frioglacial,oficina,"Rua Casal Viegas, nº1,  Carapinha",Alenquer,39.07176704647022,-9.006122845009267
+H25,7114,Fronteira,loja,"Rua Maximiano Hipólito Cupeto Barradas, nº2",Fronteira,39.05478,-7.64898
+D88,7763,Fundão,loja,"Av. da Liberdade, Edifício Acropole",Fundão,40.1389786,-7.5007301
+E39,8821,Gafanha da Encarnação,loja,"Rua Padre António Diogo, S/N",Gafanha da Encarnação,40.61473,-8.73403
+D53,8857,Gafanha da Nazaré,loja,"Avenida José Estevão, nº 481",Gafanha da Nazaré,40.637141667,-8.713161111
+8,,Gaia,loja,Centro Comercial Arrábida Shopping Praceta Henrique Moreira,Vila Nova de Gaia,41.141307,-8.636677
+D04,8870,Gaia II,loja,"Avenida da República, nº 313",Vila Nova de Gaia,41.135925,-8.607897222
+K009,,GFS,fornecedor,Horta dos Velhos -,Estremadura,38.9682743,-9.04611
+E48,8919,Góis,loja,"Avenida Combatentes do Ultramar, S/N",Góis,40.15792,-8.10992
+B43,2276,Gondomar,loja,"Rampa dos Combatentes da Gr.Guerra, 15 R/C",Gondomar,41.143838889,-8.534383333
+35,,Gondomar,loja,"Praceta Parque Nascente, 30 - Lugar da Ranha",Gondomar,41.175149,-8.565262
+A36,2043,Graça,loja,"Largo da Graça, 101/2",Lisboa,38.71748889,-9.130161111
+D34,8922,Guarda,loja,"Avenida de São Miguel, S/N",Guarda,40.5554428,-7.2456193
+54,,Guarda,loja,"Av. dos Bombeiros Voluntários Egitanienses, nº 5",Guarda,40.541591,-7.266578
+A37,2045,Guerra Junqueiro,loja,"Avenida Guerra Junqueiro, 8/A",Lisboa,38.7381167,-9.1346722
+E46,8837,Guifões,loja,"Avenida Joaquim Neves dos Santos, 699",Guifões,41.192425,-8.668232
+17,,Guimarães,loja,"Espaço Guimarães, E.N. 206",Guimarães,41.449096,-8.342499
+351A,,Hipercais Ambiente (E.T.E. São João Talha),fornecedor,,,38.824307,-9.096561
+351C,,Hipercais Congelados (Logislink),fornecedor,,,38.9857447632756,-8.96636076475308
+351R,,Hipercais Refrigerados (Logislink),fornecedor,,,38.9857447632756,-8.96636076475308
+E87,7868,Infantado,loja,"Rua Vasco da Gama, Nº 38",Loures,38.83984,-9.1601
+C744,,Jacquot,fornecedor,Alverca,,38.9095692,-9.0284605
+B16,9662,Jardim Constantino,loja,"Rua José Estevão, nº 129",Lisboa,38.73092222,-9.137736111
+M018,,José Maria Fonseca,fornecedor,"Quinta da Bassaqueira, EN 10, Km 26 -",Estremadura,38.519392,-9.014051
+A79,465,Laborim,loja,"Rua Nova de Laborim, nº266",Vila Nova de Gaia,41.104158,-8.603276
+D558,,Lactogal Modivas,fornecedor,R. da Aldeia Nova 520 -,Modivas Douro Litoral,41.3026,-8.6957
+63,,Lagoa,loja,Sitio da Bemposta,Lagoa,37.138341,-8.565812
+E41,8826,Lamego,loja,"Avenida 5 de outubro, nº11",Lamego,41.096569,-7.80919
+B58,9791,Lapa,loja,"Rua da Lapa, Nº2",Lisboa,38.71077778,-9.158913889
+B60,9794,Laranjeiras,loja,"Rua Virgílio Correia, nº 4-A",Lisboa,38.751467,-9.1721495
+A62,2138,Laranjeiro,loja,"Rua Dr.António Elvas, nº 26 D",Laranjeiro,38.65554444,-9.155575
+E98,7728,Laranjeiro,loja,"Terreiro João de Barros, nº 2 - Impasse III, nº2",Almada,38.6571957,-9.1530718
+D01,8864,Latino Coelho,loja,"Rua Latino Coelho, 267/271",Porto,41.159580556,-8.601869444
+B61,9801,Leiria,loja,"Rua Dr. Virgílio Vieira da Cunha, Pavilhão B, Barro Ruívo",Leiria,39.74658611,-8.820252778
+E59,7757,Linda - a - Velha I,loja,"Avenida D. Pedro V, lote 59/60",Carnaxide,38.71135556,-9.246227778
+A71,2253,Loios,loja,"Largo dos Loios, nº 46",Porto,41.145509,-8.612287
+I443,,Longa Vida,fornecedor,Perafita -,Douro Litoral,41.23191,-8.704853
+E29,8019,Lordelo,loja,Estrada Nacional 209 nº3428,Lordelo,41.2349,-8.41887
+D86,7890,Loulé,loja,"Avenida 25 de Abril, n.º 6/8",Loulé,37.139013889,-8.021344444
+D76,7726,Loures,loja,"Rua da República, nº 84, A, B, C e D",Loures,38.83117778,-9.16875
+H12,7035,Louriçal,loja,Estrada Nacional 237 -  Casal do Queijo,Louriçal,39.99505,-8.71827
+H02,7003,Lourinhã,loja,"Rua Dr. Francisco Sá Carneiro - Edificio Praiamar, Lote 7",Lourinhã,39.238325,-9.310305556
+D46,8902,Lousã,loja,"Rua Engenheiro Duarte Pacheco, S/N",Lousã,40.11744,-8.24636
+B54,9776,Luciano Cordeiro,loja,"Rua Luciano Cordeiro, nº 34",Lisboa,38.724872222,-9.143730556
+B49,9762,Lumiar,loja,"Alameda das Linhas de Torres, nº 257",Lisboa,38.7729331,-9.1616266
+B20,9679,Lumiar II,loja,"Rua Alexandre Ferreira, lote 1",Lisboa,38.776501,-9.163177
+429,,MA A Cabete Carnide,loja,"Rua Adelaide Cabete, 10 (Carnide)",Lisboa,38.758095,-9.186208
+434,,MA A Joao II Setubal,loja,"Rua D. João II, 22B",Setubal,38.530009,-8.8812016
+459,,"MA A.L.Torres,Lumiar",loja,Alameda das linhas de Torres 257,Lisboa,38.7739021,-9.1644639
+421,,MA Alm Reis 203,loja,"Av. Almirante Reis, 203",Lisboa,38.7361568,-9.1339771
+409,,MA Almirante Reis,loja,"Avenida Almirante Reis, 64",Lisboa,38.727381,-9.134754
+440,,MA Alvares Cabral,loja,Avenida Álvares Cabral nº41,Lisboa,38.7182581,-9.1610958
+A89,,MA Ansião,loja,"R. Rosa Falcão, nº 103",Ansião,39.9141775874561,-8.435375753935748
+A13,,MA Apúlia,loja,Lugar da Areia (Avenida da Praia),Apúlia,41.47913,-8.76455
+A95,,MA Areosa,loja,"Av. da Povoença, 690",Areosa,41.70538,-8.79953
+454,,MA AV Boavista Porto,loja,Av da Boavista 53,Porto,41.1570139306721,-8.62447313191966
+413,,MA Av Republica,loja,"Avenida da República, 59A,",Lisboa,38.739681,-9.146553
+446,,MA BJ Caraça (Porto),loja,Rua Professor Bento de Jesus Caraça 247,Porto,41.163561,-8.598026
+A08,,MA Bonfim_Firmeza,loja,"Rua Firmeza, nº 12",Bonfim,41.15103,-8.60119
+A15,,MA Buarcos,loja,"Rua da República 105, Figueira da foz",Buarcos,40.14872138604415,-8.852224369764455
+414,,MA C Bord Pinheiro,loja,"Av. Columbano Bordalo Pinheiro, 89A",Lisboa,38.738487,-9.163332
+451,,MA C Leitao Almada,loja,Rua Capitão Leitão 97,Almada,38.679591706308,-9.1606421182113
+408,,MA C Quint Campolide,loja,"Calçada da Quintinha, 9 (Campolide)",Lisboa,38.726576,-9.165685
+443,,MA C Reis (Cacilhas),loja,Rua Cândido dos Reis 144,Almada,38.6856321,-9.1497719
+450,,MA C. Alegre (Porto),loja,"Rua do Campo Alegre 712, Massarelos",Porto,41.1528584,-8.6394458
+444,,MA C.G.Guerra (VFX),loja,"Rua dos Combatentes da Grande Guerra, 53",Vila Franca de Xira,38.95472558,-8.98834715
+439,,MA Calçada da Ajuda,loja,"Rua General João de Almeida, 2",Lisboa,38.7010338,-9.2027559
+B95,,MA Campelo,loja,"Rua de Camões, nº 131, 133 e 135",Campelo,41.11794,-8.08519
+B39,,MA Caparica_Quintas,loja,"R. A da Quinta, Nº 32/38",Caparica,38.66673,-9.18687
+B93,,MA Carquere,loja,,,41.1023467,-7.977125
+419,,MA Comb GrandeGue-Al,loja,"Av. dos Combatentes da Grande Guerra, 54",Algés,38.7004537,-9.2297558
+445,,MA Conde Redondo,loja,"Rua do Conde Redondo 145,",Lisboa,38.724841753,-9.14586794
+A02,,MA Custóias_NovSeixo,loja,"Rua Nova do Seixo, 1436/1450",Custóias,41.19523,-8.63458
+406,,MA D Monteiro Graça,loja,"Rua Damasceno Monteiro, 113 (Graça)",Lisboa,38.722906,-9.132297
+407,,MA D PedroIV Queluz,loja,"Rua Dom Pedro ​lV, 35",Queluz,38.756693,-9.25103
+455,,MA D. Manuel II Maia,loja,"Avenida D. Manuel II, 2029",Maia,41.2333660096095,-8.6206696887231
+417,,MA DNAlvaresP Almada,loja,"Av. D.Nuno Alvares Pereira, 68 (Stand mirco)",Almada,38.676738,-9.164291
+404,,MA Duque Avila,loja,"Av. D´Avila, 72B",Lisboa,38.735394,-9.149791
+430,,MA E Garcia Amadora,loja,"Rua Elias Garcia, 197",Amadora,38.758236,-9.234536
+A14,,MA Ermesinde_LourMar,loja,"Rua Lourenço Marques, 64, 68, 80",Ermesinde,41.2173916,-8.5770859
+427,,MA Est Benfica 418,loja,"Estrada de Benfica, 418D",Lisboa,38.7472775,-9.1901766
+447,,MA Exercito Li Porto,loja,Praça Exército Libertador 75,Porto,41.1666016,-8.6250936
+441,,MA Fabrica 1921,loja,Av. Gomes Pereira 11,Lisboa,38.74968,-9.19705
+436,,MA Ferreira Borges,loja,"Rua Ferreira Borges, 125",Lisboa,38.71848,-9.1642
+416,,MA FNamora Odivelas,loja,"Rua Fernando Namora, Lote 25 (Colinas do Cruzeiro)",Odivelas,38.789379,-9.192287
+412,,MA G Vicente Almada,loja,"Praça Gil Vicente, 5,",Almada,38.682266,-9.152797
+A07,,MA Guimarães_Sampaio,loja,"Rua Dr. José Sampaio, 411",Guimarães Centro,41.43177,-8.27096
+B88,102,MA Ílhavo,loja,"Avenida 25 de Abril, Nº54",Ílhavo,40.600906567941564,-8.666961319128331
+420,,MA JFontana Bobadela,loja,"Praceta José Fontana, 4 e 5",Bobadela,38.80696,-9.100687
+402,,MA João XXI,loja,"Av. João XXI, 3B",Lisboa,38.742387,-9.139655
+435,,MA Jose Ricardo,loja,"Rua José Ricardo, 26B",Lisboa,38.734642,-9.131891
+424,,MA L Pastor Macedo,loja,"Rua Luís Pastor de Macedo, 5B (Lumiar)",Lisboa,38.767808,-9.157017
+462,,"MA L.Graça,S.Vicente",loja,Largo da Graça 101,Lisboa,38.7174873,-9.1300433
+461,,"MA Liber,Bx Banheira",loja,"Rua da Liberdade, Est da Amizade",Baixa da Banheira,38.6578521,-9.0698818
+425,,MA Luis Queiroz,loja,"Rua Luiz de Queiróz, 10A",Almada,38.6788693,-9.1576185
+411,,MA M NAbreu Benfica,loja,"Rua Major Neutel Abreu, 8 e 9​,",Lisboa,38.747105,-9.181041
+453,,MA M. Saldanha Porto,loja,"R. do Marechal Saldanha, n.290",Porto,41.1572748524422,-8.67922851920981
+A63,,MA Mafamude_Repúblic,loja,"Avenida da República, nº 2489",Mafamude,41.18787,-8.60412
+A12,,MA Matosinhos_FAroso,loja,"Avenida Dr. Fernando Aroso, nº 229 e 239",Matosinhos Centro,41.19674,-8.68519
+442,,MA Morais Soares,loja,"Rua Morais Soares, 72, Penha de França",Lisboa,38.7326781,-9.1342827
+433,,MA Oscar M Torres,loja,"Av. Oscar Monteiro Torres, 57 (São João de Deus)",Lisboa,38.743957,-9.140078
+423,,MA P Bento Goncalves,loja,"Praceta Bento Gonçalves, 14",Almada,38.671115,-9.166278
+432,,MA P NS Navegantes,loja,"Praceta Nossa Senhora dos Navegantes, 64A",Costa Caparica,38.638871,-9.230882
+A06,,MA Paranhos_9 Abril,loja,"Praça 9 de Abril, nº 135",Paranhos,41.1314115,-8.5666152
+A01,,MA Paranhos_CostaCab,loja,"Rua Costa Cabral, nº 808",Paranhos,41.167279,-8.5973433
+A03,,MA Paranhos_PiresLim,loja,"Rua Dr. Pires de Lima, nº 5",Paranhos,41.16642,-8.59747
+403,,MA Pascoal Melo,loja,"Rua Pascoal de Melo, 47A",Lisboa,38.731661,-9.137118
+437,,MA Pedro Nunes,loja,"Rua Pedro Nunes, 27B",Lisboa,38.7327496,-9.1503174
+A10,,MA Pedrouços,loja,"Rua Gonçalo Mendes da Maia, nº 1346",Pedrouços,41.18434,-8.58512
+410,,MA Penha França,loja,"Rua da Penha de França, 118",Lisboa,38.725068,-9.12952
+A19,,MA Peso Régua,loja,"Rua da Ferreirinha, nº 116 a 124",Peso Régua,41.16739,-7.77103
+B12,,MA Pinhal Novo,loja,"Rua Luís de Camões, nº 5",Pinhal Novo,38.66026,-8.89455
+A17,,MA Porto_Cedofeita,loja,Rua de Cedofeita 80,Porto Centro,41.14917,-8.61639
+A16,,MA Porto_FernandesTo,loja,Rua Fernandes Tomás 416,Porto Centro,41.14931,-8.60365
+A18,,MA Porto_PrExército,loja,"Praça Exército Libertador, nº 12",Porto Centro,41.16953,-8.6227
+A05,,MA Pv Varzim_Marquês,loja,Praça Marquês de Pombal,Póvoa Varzim,41.3812066,-8.7629421
+A93,,MA Pv Varzim_Pinheir,loja,Rua do Pinheiro nº3,Póvoa Varzim,41.3799856,-8.7582637
+422,,MA R Beneficiencia,loja,"Rua da Beneficência ,119",Lisboa,38.743245,-9.1567
+449,,MA R Camões (Porto),loja,"Rua de Camões 105, Santo Ildefonso",Porto,41.15285,-8.61019
+452,,MA R Venezuela Porto,loja,"Rua da Venezuela, 40 - Lordelo do Ouro",Porto,41.157453,-8.641853
+405,,MA R.Pescadores,loja,"Rua dos Pescadores, 22 a 24",Costa da Caparica,38.643552,-9.2352858
+A92,,MA Recarei,loja,,,41.15451,-8.41039
+458,,"MA Rinchoa, R.Mouro",loja,Calçada da Rinchoa Nº16,Rio de Mouro,38.7864505,-9.3248028
+B53,9774,MA SDBenfica_EBen212,loja,"Estrada de Benfica, nº 212 - A",S Domingos Benfica,38.74342,-9.17512
+A09,,MA V Andorinho_D Est,loja,"Rua Vila D'Este, Lote 70",Vilar Andorinho,41.0983139,-8.5951095
+B34,,MA Vale Amoreira,loja,Rua José da Conceição Nunes,Vale Amoreira,38.6455943,-9.040156
+A91,,MA Venda Pinheiro,loja,"Avenida 9 de Julho, 83 B",Venda Pinheiro,38.92386,-9.2159
+B94,,MA Vila Pouca Aguiar,loja,"Avenida da Noruega, nº 10",Vila Pouca Aguiar,41.48246,-7.65416
+438,,MA Visconde Santarem,loja,Lisboa,Lisboa,38.7348066,-9.1376818
+H70,8134,Macedo de Cavaleiros,loja,Rua Doutor Luís Olaio nº14,Macedo de Cavaleiros,41.5371203,-6.95952
+26,,Maia,loja,"Estrada Nacional 14, Apartado 1254",Maia,41.249225,-8.621099
+A69,2201,Maia,loja,"Avenida Santos Leite, nº 108",Maia,41.2300505,-8.6210732
+142,,Maia Comércio Eletrónico,loja,"Rua Castanheira N14, Maia",Maia,41.249225,-8.621099
+7659,,Mais Perto Auchan - Samouco,loja," Praça da República 32, 2890-210 Samouco",Samouco,38.7228755657556,-9.00489199428948
+D43,8903,Marco de Canaveses,loja,"Avenida dos Bombeiros Voluntários, S/N",Marco de Canaveses,41.17921,-8.15524
+A47,2077,Marinha Grande,loja,"Avenida Vitor Gallo, Loja 1, n.º 36",Marinha Grande,39.746785,-8.930789
+B76,9825,Marinha Grande,loja,"Avenida Dr. José Henriques Vareda, s/n",Marinha Grande,39.73905833,-8.93455
+H41,7650,Marmelete,loja,Rua Inácio Veríssimo Cabrita s/n,Marmelete,37.309399,-8.666675
+B45,9755,Marvila,loja,"Rua Ovar, 3 D - Bairro do Condado",Lisboa,38.74360278,-9.11305
+B04,9624,Massamá,loja,"Avenida Heróis da Liberdade, 1",Massamá,38.7520526,-9.2777889
+B44,9748,Massamá,loja,"Rua Direita de Massamá, nº 91 (antigo lote 135)",Queluz,38.75680278,-9.276725
+16,,Matosinhos,loja,"Centro Comercial Mar Shopping, Leça da Palmeira",Matosinhos,41.207976,-8.687452
+D22,8863,Matosinhos Stara,loja,"Rua Alfredo da Cunha, nº 241",Matosinhos,41.184997222,-8.681197222
+H01,7001,Meirinhas,loja,Estrada Nacional  1 - nº 24,Pombal,39.84602,-8.70645
+D40,8926,Meixomil,loja,"Avenida do Marco, S/N",Meixomil,41.282127778,-8.386947222
+H62,8111,Melgaço,loja,"Rua Dr António Durães, S/N",Melgaço,42.112928,-8.2570119
+B71,9817,Mem Martins,loja,Estrada de Mem Martins - Bairro de S. Carlos - Algueirão,Mem-Martins,38.78275556,-9.346861111
+B029,,Mendes & Gonçalves,fornecedor,"Zona Industrial, lote 6, Golegã -",Ribatejo,39.4120104,-8.4866763
+190,,Mercados Couto Estarreja,fornecedor,"Rua do Desembargador Correia Teles, nro 1",Estarreja,40.75467,-8.573739
+89,,Mercados Virtuais,loja,Rua Duque Saldanha 9,Famões,38.7924367268734,-9.20818882883488
+D13,8850,Miragaia,loja,"Rua Miguel Bombarda, n.º 313",Porto,41.149657,-8.620604
+H43,8006,Mirandela,loja,Avenida Amoreiras Lote F,Mirandela,41.48417,-7.18062
+A98,9613,Miratejo,loja,"Praceta Mário Sacramento, 60 C",Seixal,38.64916111,-9.144680556
+A46,2068,Miratejo,loja,Urbanização Quinta Sto.Amaro - Miratejo/Laranjeiro,Almada,38.65191111,-9.148761111
+I958,,MMPET,fornecedor,Zona Industrial de Soure -,Beira Litoral,40.1209447,-8.8508231
+E35,8064,Moimenta da Beira,loja,"Avenida República, S/N",Moimenta da Beira,40.97047,-7.60805
+E62,7718,Moita,loja,"Rua de Liége, nº 61",Moita,38.64795833,-8.989763889
+Molavide,,Molavide,oficina,"Urbanização Carambacha, Lt. 13, Carambacha De Baixo",Carregado,39.03056605256794,-8.98408027092075
+D12,8811,Montalegre,loja,"Rua da Ponte Moinho, Lote 24, Loja 0",Montalegre,41.83072,-7.7845
+H21,7109,Monte Abraão,loja,"Av. Luís de Camões, Nº 12",Queluz,38.75834,-9.26462
+B35,9714,Monte Caparica,loja,"Rua Da Bela Vista, 55 - A  Monte de Caparica",Almada,38.66495833,-9.188827778
+I463,,Monte D'Alva (Ambiente),fornecedor,Estrada Vaza Borracha -,Estremadura,38.713853,-8.972435
+I463R,,Monte D'Alva (Refrigerados),fornecedor,Estrada Vaza Borracha -,Estremadura,38.713912,-8.968848
+E95,7762,Monte Gordo,loja,"Avenida Infante D. Henrique, nº 10",Monte Gordo,37.1795886,-7.4499425
+E79,7801,Montemor-o-Novo,loja,"Rua Comandante Fragoso, 11 - 13",Montemor-o-Novo,38.648366667,-8.216175
+B62,9802,Montijo,loja,"Pau Queimado, Est. Nacio.5, Apead. Sarilhos",Montijo,38.68958056,-8.946386111
+D69,7710,Montijo,loja,"Praça Gomes Freire de Andrade, 1/3",Montijo,38.704786111,-8.976308333
+F04,7918,Montijo II,loja,Avenida Garcia de Orta / Cova da Loba,Montijo,38.707625,-8.945772222
+H13,7044,Mora,loja,"Rua da Cooperativa, nº 4",Mora,38.9462602,-8.1595744
+D78,7759,Morais Soares,loja,"Rua Morais Soares, nº 58",Lisboa,38.732043,-9.1283
+B28,9700,Moscavide,loja,"Rua António Maria Pais, nº 19",Moscavide,38.77588611,-9.102091667
+B72,9819,Moura,loja,"Avenida Dos Bombeiros Voluntários, Lt 20",Moura,38.14049444,-7.458261111
+H51,8066,Murtosa,loja,Lugar Chão Monte S/N,Bunheiro,40.76274,-8.64589
+D57,8869,Nazaré,loja,"Rua da Sub-Vila, 45",Nazaré,39.5996346,-9.070614
+160,,Neomáquinas Benedita,fornecedor,"Rua Monges de Cister, s/n",Benedita,39.423499,-8.985873
+161,,Neomáquinas Pombal,fornecedor,Parque Comercial Europa - Travasso,Pombal,39.893162,-8.657837
+N126,,Nestlé,fornecedor,Rua da Nestlé -,Beira Litoral,40.804479,-8.618529
+D19,8841,Nevogilde - Foz,loja,"Rua de Gondarém, Nº 514",Porto,41.159339,-8.682495
+F18,9786/A84,Nisa,loja,"Rua Dr. Sidónio Pais, Nº 2 e 4",Nisa,39.51423,-7.64782
+I990,,Nutre,fornecedor,"Zona Industrial de Vagos, lote 104 -",Beira Litoral,40.5443193,-8.7204768
+A58,2128,Odivelas,loja,"Rua Prof. Dr. Augusto Abreu Lopes, 2/4 cave",Odivelas,38.791283,-9.176565
+B19,9668,Odivelas II,loja,"Rua D. Dinis, nº 39 B",Odivelas,38.78806056,-9.178805556
+B40,9728,Odivelas Metro,loja,"R. José Gomes Monteiro, Nº. 17/19",Odivelas,38.793086,-9.173562
+D03,7760,Oeiras,loja,"Rua Candido dos Reis, nº 72",Oeiras,38.69275,-9.310969444
+E74,7883,Oeiras II,loja,"Rua de Belém, nº 4",Oeiras,38.697233,-9.30478
+B02,9620,Olaias,loja,"Rua Aquiles Machado, nº 8",Lisboa,38.738227,-9.124525
+A94,100,Oldrões,loja,Rua Real de Cima; S/N,Oldrões,41.14993,-8.29847
+H09,7024,Oleiros,loja,"Rua sa Devesa, Lote B/C, R/C",Oleiros,39.9194162,-7.9151042
+B79,9834,Olhão,loja,"Avenida Dos Operários Conserveiros, S/N, Zona Industrial",Olhão,37.02900278,-7.829591667
+53,,Olhão,loja,Centro Comercial Ria Shopping - Estrada Nacional 125,Olhão,37.034402,-7.840272
+B26,9692,Olivais,loja,"Praça Cidade Salazar, lote 173/174",Lisboa,38.763668,-9.118224
+A73,2264,Oliveira Azemeis,loja,"Avenida Dr.Albino Reis, nº 56",Oliveira de Azeméis,40.838597222,-8.478830556
+D15,8803,Oliveira de Frades,loja,"Rua da Liberdade, nº 5",Oliveira de Frades,40.7345059,-8.1748464
+B100,,Ovos CAC,fornecedor,"Rua da Cooperativa nº99, Bidoeira de Cima - Leiria -",Beira Litoral,39.729725,-8.792518
+I402,,Ovos do Caramulo,fornecedor,"Rua da Ferradura, 200, Caramulo -",Beira Alta,40.565199,-8.168803
+E90,7737,Paço D´Arcos,loja,"R. Marquês da Fronteira, Nº2 A a E",Paço D´Arcos,38.693469444,-9.297486111
+18,,Paço de Arcos,loja,Estrada de Paço de Arcos nº 48,Paço de Arcos,38.70564,-9.295018
+A80,2381,Paços de Ferreira,loja,"Avenida Dr.José Lencastre, 63",Paços de Ferreira,41.277072222,-8.379577778
+E68,7892,Paio Pires,loja,"Avenida General Humberto Delgado, 24 A/B",Seixal,38.624843,-9.085148
+H72,8138,Pampilhosa da Serra,loja,"Quinta de São Martinho, Lote 7-E",Pampilhosa da Serra,40.23901,-7.57182
+D95,8842,Paredes,loja,"Rua 1º de Dezembro, 13 - Traseiras",Paredes,41.207682,-8.332389
+H45,8024,Paredes de Coura,loja,"Lugar das Felgueiras, S/N",Paredes de Coura,41.9082,-8.56223
+E17,7702,Pataias,loja,"Avenida da Lagoa, 10",Pataias,39.6710844,-8.9950335
+366,,PB Fradelos,fornecedor,Rua de santa leocadia 10,Fradelos,41.3753627,-8.6006185
+365,,PB Gueifães,fornecedor,"Rua Ponte da Pedra, 918 Arma",Maia,41.2162927,-8.6397068
+354,,PB Póvoa de Varzim,fornecedor,"Rua Almirante Reis nº56, Póvoa de Varzim (N13)",Póvoa de Varzim,41.3780364,-8.7590951
+356,,PB Santo Tirso,fornecedor,"Praça Conde São Bento, Nº 42",Santo Tirso,41.3403718,-8.4762168
+H39,7643,Pé da Pedreira,loja,Rua Serra do Alecrim,Alcanede,39.4513,-8.830107
+E11,7052,Pedrogão Grande,loja,"Avenida 25 de Abril, s/n",Pedrogão Grande,39.9194,-8.14834
+D26,8905,Penafiel,loja,"Rua Tenente Valadim, S/N",Penafiel,41.19513,-8.29719
+H68,8126,Penedono,loja,"Rua do Cabo, S/N - Loteamento de Chão de Alvanares, Lote 17",Penedono,40.99097,-7.39124
+H79,8632,Penedos Altos,loja,Rua da Igreja nº 78/ 79,Covilhã,40.2878,-7.50227
+F20,8078/H53,Penela,loja,"Zona Industrial, Lote 1",Penela,40.0185167,-8.3726287
+B68,9813,Peniche,loja,Av. Porto de Pesca - Prageira,Peniche,39.35832222,-9.375027778
+D75,7807,Peniche,loja,"Rua António Conceição Bento, 20 A/B",Peniche,39.3593618,-9.3801971
+D29,8954,Perafita,loja,"Rua Armando Vaz, S/N",Perafita,41.223408333,-8.696419444
+H47,8033,Pinhel,loja,"Largo Escultor José Dias Coelho, S/N",Pinhel,40.77459,-7.06708
+H17,7073,Pombal,loja,"R. Manuel da Mota, s/nº - Zona Industrial da Formiga - Edifício Autojúlio",Pombal,39.917,-8.6346
+E07,8871,Ponte da Barca,loja,Rua Francisco Sá Carneiro,Ponte da Barca,41.804454,-8.414705
+H57,8091,Ponte Vagos,loja,Rua Principal nº 229,Ponte de Vagos,40.46672,-8.67446
+D67,7777,Pontinha,loja,"Rua Cidade da Horta, Lote Q6",Pontinha,38.76509444,-9.200555556
+H22,7111,Portalegre,loja,"Rua Dom Nuno Alvares Pereira, nº 12 e 14",Portalegre,39.2955878,-7.4311494
+B80,9838,Portalegre,loja,"Gaveto da Rotunda dos Dadores de Sangue / E.N. 246, S/N",Portalegre,39.27875278,-7.430619444
+B84,9860,Portela de Sintra,loja,"Avenida Movimento das Forças Armadas, nº 40",Sintra,38.800355556,-9.379333333
+23,,Portimão,loja,"Centro Comercial Aqua Shopping, EN 125 - Qta. de S.Pedro",Portimão,37.146539575829,-8.542423635264683
+E96,7727,Portimão,loja,Av. 25 de Abril Edíficio Marina Rocha,Portimão,37.12964444,-8.54025833
+A81,2387,Porto,loja,"Rua 5 de Outubro, nº 433 e 439",Porto,41.162146,-8.632845
+D21,8867,Porto Boavista,loja,Rua da Boavista nº 714,Porto,41.156841667,-8.621719444
+F06,7902,Porto de Mós,loja,Rua de Rio Alcaide,Porto de Mós,39.59574444,-8.815505556
+353,,"Positivo & Genuíno, Lda",fornecedor,"Avenida Padre Firmino Augusto Martins, S/N",Vinhais,41.830898,-7.009258
+A70,2202,Poveiros,loja,"Largo dos Poveiros, nº 50",Porto,41.1459851,-8.6046334
+D98,8873,Póvoa de Varzim,loja,"Praça da República, 4 e 5",Póvoa do Varzim,41.378755,-8.762026
+D47,8941,Póvoa do Varzim,loja,"Rua da Estrada Nova, n.º 138",Amorim,41.400983333,-8.746747222
+E55,7826,Póvoa Sto. Adrião,loja,Rua Alves Redol 15,Póvoa de Santo Adrião,38.79689,-9.16398
+E52,7732,Pr. Flores,loja,Praça das Flores nº 1,Lisboa,38.71506111,-9.15122222
+169,,Preço Baixo Angeiras,fornecedor,R. Angeiras 251,Lavra,41.266616,-8.721942
+327,,Preço Baixo Balazar,fornecedor,N206 563,Balazar,41.40107,-8.620707
+166,,Preço Baixo Leça Palmeira,fornecedor,Av. Dr. Fernando Aroso 489,Leça da Palmeira,41.196303,-8.69679
+168,,Preço Baixo Leça Palmeira II,fornecedor,R. dos Dois Amigos 246,Matosinhos,41.191168,-8.701783
+133,,Preço Baixo Porto,fornecedor,Rua Costa Cabral N2742,Porto,41.170172,-8.590584
+171,,Preço Baixo Póvoa Varzim,fornecedor,Av. Vasco da Gama 20,Póvoa Varzim,41.38689,-8.76995
+350,,Preço Baixo Viatodos,fornecedor,ESTRADA NACIONAL Nº204,Barcelos,41.45145,-8.56346
+B13,9655,Prior Velho,loja,"Rua de Cabo Verde, lote 136",Prior Velho,38.7899507,-9.1213402
+M065,,Propet,fornecedor,Rua da Argila 553-573 -,Douro Litoral,41.0539987,-8.5694271
+D92,7778,Quarteira,loja,"Av. Infante Sagres, nº1",Quarteira,37.069,-8.107
+A42,2050,Queluz,loja,"Avenida Elias Garcia, 120/A",Queluz,38.75640833,-9.254586111
+B15,9661,Queluz II,loja,"Avenida Miguel Bombarda, nº 108",Queluz,38.763,-9.256527778
+B81,9843,Quinta da Cavaleira,loja,"Avenida Dr.Henrique de Barros, S/N",Sintra,38.80364167,-9.354488889
+A65,2159,Quinta da Lomba,loja,"Rua Negar Aveli, 30 A/B - Quinta da Lomba",Barreiro,38.644826,-9.058878
+E76,7885,Quinta da Piedade,loja,"Urbanização Casal da Serra - Torre 8, loja 64/68",Póvoa de Santa Iria,38.863868,-9.072696
+F12,7913,Quinta do Anjo,loja,Avenida Visconde Tojal,Quinta do Anjo,38.56663889,-8.94365
+D81,7738,Quinta do Conde,loja,"Avenida Principal, Lote 25/C",Quinta do Conde,38.57106389,-9.039705556
+E20,7833,Ramada,loja,"Av. 25 de Abril, Nº3",Ramada,38.807,-9.18534
+7012,,Rangel,loja,,,38.9886614,-8.9589418
+B17,9663,Reboleira,loja,"Avenida Manuel Alpedrinha, 22 - Damaia",Amadora,38.7489936,-9.2274165
+H74,8605,Rebordelo,loja,"Av. Brasil, 17, Rebordelo",Vinhais,41.410203,-8.515568
+D38,8947,Rebordosa,loja,"Avenida Francisco Sá Carneiro, S/N",Rebordosa,41.207975,-8.421627778
+H75,8607,Refoios do Lima,loja,"Rua Afonso Ansemondes, nº 3722",Refoios do Lima,41.79672,-8.5499
+C015,,Renova,fornecedor,"Fábrica 2, R. Marginal 33",,39.5027349160358,-8.61255974102602
+H65,8119,Repeses,loja,"Bairro de Santa Eulália, Nº 80",Viseu,40.64246,-7.92459
+Repoli,,Repoli-caixas frigoríficas,oficina,Cartaxo N3 ,Cartaxo,39.1238852565628,-8.818115318307457
+B90,9723,Restelo,loja,"Rua das Pedreiras, nº 20, Loja 1, Bloco 2 - Restelo",Lisboa,38.70227778,-9.206055556
+H81,8637,Ribafeita,loja,"Rua Principal, Bomba Combustível",Ribafeita,40.753898,-7.985394
+A554,,Riberalves,fornecedor,EN8 Carvalhal - Turcifal -,Estremadura,39.050285,-9.268234
+B46,9756,Rinchoa,loja,"Calçada da Rinchoa, nº 16",Rio de Mouro,38.786111111,-9.322222222
+B10,9650,Rio de Mouro,loja,"Rua Mário Graça, 13, 15,  17, 19",Rio de Mouro,38.783986,-9.323136
+A31,467,Rio Tinto,loja,"Rua D. Afonso Henriques, nº. 742",Rio Tinto,41.187168,-8.580398
+A64,2142,Rua da Palma,loja,"Rua da Palma, nº 274 / 276",Lisboa,38.71926667,-9.135488889
+244,,Rui Dinorá Vila Nova Poiares,fornecedor,Entrocamento de Poiares,Vila Nova Poiares,40.21121,-8.259193
+245,,Rui Dinorá Vila Nova Poiares II,fornecedor,Entrocamento de Poiares,Vila Nova Poiares,40.201526,-8.237503
+D77,7748,S. João do Estoril,loja,Rua Diogo Cão,S. João do Estoril,38.702097,-9.386503
+B08,9639,S. João Estoril,loja,"Avenida Gago Coutinho, Lote1A",Estoril,38.704818,-9.386989
+A45,2063,S. Pedro do Estoril,loja,"Rua Sacadura Cabral, nº 347 - S.Pedro do Estoril",Estoril,38.69458,-9.37037
+D87,7839,S.Brás de Alportel,loja,"Avenida da Liberdade, nº 62",S.Brás de Alportel,37.153832,-7.888751
+A136,,S.I.A.,fornecedor,"Além do Mourão, Tentúgal - Portugal -",Beira Litoral,40.220576,-8.599602
+E70,7889,S.João da Talha,loja,"Urb. dos Areeiros, Lote B",S.João da Talha,38.824366667,-9.096769444
+A75,2305,Sá da Bandeira,loja,"Rua Sá da Bandeira, nº 355",Porto,41.149377778,-8.607683333
+E33,8057,Sabrosa,loja,"Zona Industrial de Paços, Lote 16",Paços,41.26592,-7.59044
+D20,8860,Sabugal,loja,"Rua Cidade da Guarda, nº 41",Aldeia de Santo António,40.355294444,-7.094713889
+B29,9704,Sacadura Cabral,loja,"Avenida Sacadura Cabral, nº 22B",Lisboa,38.74462,-9.141478
+E82,7836,Sacavém,loja,"R. Padre Filinto Ramalho, Nº12",Sacavém,38.79306,-9.10896
+7003,,Salvesen,centro_distribuicao,"Estrada Nacional 3, Km 5.7",Azambuja,39.04501164811535,-8.92263653518813
+E66,7802,Samora Correia,loja,"Largo João Fernandes, nº 10/10A",Samora Correira,38.938105556,-8.869844444
+H92,,SAMOUCO,loja,"Praça da República 32, 2890-210 Samouco",SAMOUCO,38.7208637515727,-9.00452852904577
+I301,,Sanguinhal,fornecedor,"Companhia Agrícola do Sanguinhal,Lda - Quinta das Cerejeiras",Bombarral,39.2671947,-9.156457
+B52,9770,Santa Cruz,loja,"Rua Rui Costa Lopes - Edifício Sta Helena, Cv D",Silveira,39.13125278,-9.381738889
+A28,450,Santa Maria de Lamas,loja,"Rua da Ribeirinha, S/N",Santa Maria de Lamas,40.9761,-8.57395
+E88,7758,Santa Maria dos Olivais,loja,"R. Alferes Barrilaro Ruas, Nº 7/7A e B",Olivais,38.77538056,-9.112838889
+E83,7880,Santa Marta do Pinhal,loja,"Av. Vieira da Silva, Lt 144",Santa Marta do Pinhal,38.62986,-9.15433
+E60,7740,Santana à Lapa,loja,"Rua de Santana à Lapa, nº 150 A/B",Lisboa,38.71129722,-9.163625
+D66,7804,Santarém,loja,"Rua Pedro Canavarro, nº 31/39",Santarém,39.2357741,-8.6856359
+B74,9822,Santarém,loja,Estrada de S. Domingos,Santarém,39.23770556,-8.6974
+B36,9716,Santiago do Cacém,loja,"Rua Dr.João Silva, 4 A",Santiago do Cacém,38.01935278,-8.695219444
+F07,7917,Santo António da Charneca,loja,"Rua Henrique Andrade Evans, S/N",Barreiro,38.62759722,-9.034577778
+30,,Santo Tirso,loja,Rua das Rãs - Santa Cristina Couto,Santo Tirso,41.330678,-8.477016
+A35,2001,São Bento,loja,"Rua de S. Bento, nº 11",Lisboa,38.71036389,-9.15263056
+H59,8095,São Bernardo,loja,"Rua Cónego Maio, nº183 A-B",S. Bernardo,40.6152761,-8.6221692
+H73,8139,São João da Pesqueira,loja,Avenida Dessarges S/N,São João da Pesqueira,41.0,7.0
+H60,8096,São Julião do Freixo,loja,"Largo Domingos Pereira de Araújo, nº10",São Julião do Freixo,41.65445,-8.58448
+A76,2309,São Mamede Infesta,loja,"Avenida do Conde, nº 6269",S. Mamede de Infesta,41.193578,-8.609509
+H29,7609,São Martinho do Porto,loja,"R. Marquês de Pombal, Nº1",São Martinho do Porto,39.5144,-9.13354
+A49,2083,São Paulo,loja,"Rua de S.Paulo, 80",Lisboa,38.70779166,-9.144320277
+D35,8923,São Pedro de Avioso,loja,"Avenida Carlos de Oliveira, nº 90",Maia,41.267355,-8.612369
+D17,8804,São Pedro do Sul,loja,"Praça Heróis do Concelho, S/N",S. Pedro do Sul,40.76327,-8.06495
+B22,9681,Sapadores,loja,"Rua da Penha de França, 19",Lisboa,38.7218,-9.129505556
+E21,7835,Seixal,loja,"Av. Dos Metalúrgicos, 7 A e B",Seixal,38.63855,-9.09697
+H61,8109,Semide,loja,"Edifício Multiserviços, Loja L",Semide,40.15801,-8.33433
+H49,8052,Sernancelhe,loja,Lugar da Veiga de Cima,Sernancelhe,40.8987276,-7.4863255
+H04,7009,Sertã,loja,"Rua Proença-a-Nova, 83",Sertã,39.80047,-8.09494
+Serviroda,,Serviroda,oficina,"Centro Empresarial da Rainha, Lote 5",Vila Nova da Rainha,39.055874134658005,-8.905096205627695
+D65,7755,Sesimbra,loja,"Avenida da Liberdade, nº 55",Sesimbra,38.44549444,-9.100169444
+27,,Setúbal,loja,Avenida Coração de Maria,Setubal,38.537693,-8.875801
+D63,7776,Setúbal,loja,"Avenida 5 de Outubro, nº 72",Setúbal,38.52550833,-8.890261111
+E92,7717,Setúbal Aljubarrota,loja,"Avenida Nuno Álvares, nº 7 e 9, cave",Setúbal,38.5331809,-8.8688622
+D71,7741,Setúbal I,loja,"Rua Eng. Henri Perron, lote 12",Setúbal,38.53818333,-8.896680556
+D82,7716,Setúbal II,loja,"Avenida Bento Jesus Caraça, Bloco A-Loja 1",Setúbal,38.52564167,-8.872033333
+B06,9631,Setúbal II,loja,"Avenida Bento de Jesus Caraça, nº70 A",Setúbal,38.52516111,-8.865852778
+E64,7712,Setúbal III,loja,"Estrada do Alentejo, lote 3",Setúbal,38.53203056,-8.876347222
+D83,7731,Setúbal III,loja,"Avenida Republica Guiné Bissau, nº 20",Setúbal,38.53066389,-8.887897222
+E65,7820,Setúbal IV,loja,"Avenida General Gomes Freire, nº 83 A/B",Setúbal (São Sebastião),38.5272656,-8.8814679
+H64,8118,Silva,loja,"Rua da Estrada, S/N",Silva,41.57213,-8.63098
+E18,7821,Silveira,loja,"Estrada Nacional, 247 Cerca",Silveira,39.11092,-9.35993
+283,,Sinal Mágico Supermercados Braga,fornecedor,"Rua António Antunes Cabral, Centro Empresarial,",Braga,41.546805,-8.418419
+H96-B37,9718,Sines,loja,"Avenida Domingos Rodrigues Pablo, nº 7 e 7 B",Sines,37.957765,-8.864346
+B18,9664,Sintra,loja,"Rua Ulisses Alves, nº 9",Sintra,38.80288056,-9.380466667
+38,,Sintra,loja,Rua Francisco Lyon de Castro,Mem Martins,38.778947,-9.346779
+A86,9783,Sobral de Monte Agraço II,loja,"Av. Marquês de Pombal, nº 86",Sobral de Monte Agraço,39.02059,-9.15313
+A88,9747,Sobreda,loja,"R.Agostinho Neto, nº6 A/B",Sobreda,38.64699444,-9.184391667
+M036,,Sogevinus,fornecedor,"Av. Diogo Leite, n.º 344 -",V. N. de Gaia - Portugal,41.1316626931247,-8.61811662342474
+E27,7878,Sousel,loja,"Rua de São Sebastião, n.º11",Sousel,38.9528556,-7.6725259
+F13,7911,Souto da Carpalhosa,loja,"R. De Leiria, S/N Várzeas",Souto da Carpalhosa,39.8507624,-8.8443124
+C671B,,Sovena Barreiro,fornecedor,"Quimiparque - Parque Empresarial, R. do Industrial Alfredo da Silva (Parque Empresarial da Quimiparque)",Barreiro - 2831-904 Estremadura,38.67763108,-9.0717389
+7002,,STEF Portugal - Povoa Stª Iria,loja,Quinta do Anabique,Póvoa de Santa Iria,38.848239,-9.07063
+E75,7751,Stº Antº dos Cavaleiros,loja,"Rua José Régio, Nº 5",Santo António dos Cavaleiros,38.81042222,-9.161255556
+B86,,SU Ág Livres_Camões,loja,"Rua Luís de Camões, nº 27, Quinta de Santa Teresa, ou Casalinho do Outeiro",Águas Livres,38.7408968,-9.212557
+B85,,SU Av Novas_MercadoS,loja,"Mercado do Bairro de Santos, Rua Cardeal Mercier",Avenidas Novas,38.76641,-9.18028
+A20,,SU Bougado,loja,Rua D. Pedro Quinto,Bougado,41.3388585,-8.5642042
+B67,,SU Cascais_CasalQuei,loja,Rua do Casal Queimado,Cascais,38.71911548824631,-9.440885282916788
+A11,,SU Ermesinde_AntMeir,loja,"Rua D. António Castro Meireles, nº 103",Ermesinde,41.2185038,-8.5547629
+A21,,SU Ermesinde_JRégio,loja,Rua José Régio,Ermesinde,41.20885,-8.54214
+A24,,SU Esgueira,loja,"Retail Park de Aveiro - Zona Industrial de Taboeira, Loja L",Esgueira,40.6506542,-8.6026287
+A23,,SU Feitosa,loja,Estrada Nacional 201 - Lugar de Sernados - Feitosa,Feitosa,41.7495229,-8.583605
+B82,9848,SU Rio Mouro_MáximoS (Paiões),loja,"Rua Máximo da Silva, S/N",Rio Mouro,38.7670884614828,-9.319492484601541
+A25,,SU Sto Tirso_Comenda,loja,"Rua Comendador António Maria Lopes, S/N",Sto Tirso,41.35087,-8.47326
+I163A,,Sumol A,fornecedor,Almeirim -,Ribatejo,39.217559,-8.618155
+I163P,,Sumol P,fornecedor,Rua Manuel da Mota 35 - Zona Industrial da Formiga -,Beira Litoral,39.917817,-8.634549
+253,,Sup Flaviamar Constância,fornecedor,"Estrada Nacional nro3 , lote 9",Constância,39.479465,-8.337704
+238,,Sup. Laranjeiro - Poceirão,fornecedor,RUA CALOUST GLUBENKIAN LT 70,Águas Moura,38.633578,-8.742042
+E50,7750,T. Marinha,loja,"Avenida Mov. Forças Armadas, 70",Seixal,38.61699722,-9.103002778
+E28,8008,Tábua,loja,"Rua da Cerâmica, Bairro Milagres",Tábua,40.362683333,-8.03173
+7004,,Talho P4F,loja,Zona Industrial - Sitio das Ferrarias,Torres Novas,41.249225,-8.621099
+B33,9711,Tapada das Mercês,loja,"Rua 6, lote 22, R/C A - Algueirão",Mem-Martins,38.79504167,-9.329947222
+H82,8639,Tarouca,loja,"Av. Ananias do Carmo Santos, Lote 74, Expansão Oeste",Tarouca,41.019114,-7.776108
+D84,7775,Tavira,loja,"Rua D.Marcelino Franco, nº 40/42",Tavira,37.12450556,-7.647922222
+F08,7919,Tavira,loja,"Estrada Nacional 125, Vale Caranguejo",Tavira,37.134875,-7.634230556
+MAN01,,TBOM,oficina,,,38.836545,-9.0831733
+TBOM,,TBOM - CENTRO DE INSPEÇÃO,oficina,,,38.836545,-9.0831733
+Tecnisalsa,,"Tecnisalsa - Reparações Eléctricas, Lda",oficina,"Estrada Nacional 1, 30.5 Ponte Da Couraça Lisboa, 2580-491 - CARREGADOO",,39.01612526229402,-8.972811313496116
+E99,7774,Telheiras,loja,"Rua Professor Francisco Gentil, 21; 21A e 21B",Lisboa,38.76039444,-9.167513889
+E85,7894,Telheiras,loja,"R. Aristides de Sousa Mendes, N.º 3 B a 4 F",Lisboa,38.761366,-9.178891
+B69,9815,Tires,loja,"Torre da Aguilha, Serrado do forno, Lugar dos Gafanhotos",S. Domingos de Rana,38.71112778,-9.337477778
+460,,"Tires, São D. Rana",loja,"Torre da Aguilha, Serrado do Forno, Lugar dos Gafanhotos",São Domingos de Rana,38.7158188,-9.3477828
+D85,7724,Tomar,loja,"Rua Voluntários da República, nº 123",Tomar,39.60522594397107,-8.408982069853392
+D18,8805,Tondela,loja,"Rua Tenente Valadim, nº169",Tondela,40.5177783,-8.0816394
+13,,Torres Vedras,loja,"Centro Comercial Arena - Quinta dos Amiais, Lote 81",Torres Vedras,39.101525,-9.25326
+D72,7742/2101,Torres Vedras,loja,"Avenida General Humberto Delgado, 13 C/D",Torres Vedras,39.08825,-9.254411111
+B63,9804,Torres Vedras P,loja,Rua Dias Neiva,Torres Vedras,39.09564722,-9.259941667
+H67,8123,Trancoso,loja,"Zona Industrial, S/N",Trancoso,40.77025,-7.35516
+D93,8828,Trindade,loja,"Rua Dr. Ricardo Jorge, 13/17 (Trindade)",Porto,41.15042,-8.61166
+96,,UPA Venda Pinheiro,loja,,,38.9275535347715,-9.22426464993854
+D37,8912,Vale de Cambra,loja,"Lugar de Vila Chã - Estrada Nacional 547, /N",Vale de Cambra,40.85583,-8.39833
+H18,7096,Vale de Milhaços,loja,"Av. Vale de Milhaços, Nº 183 B",Vale de Milhaços,38.63197,-9.16074
+D32,8951,Valpaços,loja,"Avenida Dr.Francisco Sá Carneiro, S/N",Valpaços,41.610691667,-7.313436111
+D23,8859,Varziela,loja,"Rua 1, nº 165, Areia",Árvore,41.328367,-8.717544
+E56,7834,Venda Nova,loja,Rua Elias Garcia nº 8/8-A/8-B,Amadora,38.75364,-9.21021
+B38,9720,Vialonga,loja,"Avenida 24 de Setembro nº28, 28A, 28B e 28C",Vialonga,38.87605833,-9.081811111
+H42,7656,Viana do Alentejo,loja,"Rua Dr. António José de Almeida, 34",Viana do Alentejo,38.334514,-8.002555
+D94,8868,Vila Conde,loja,"Avenida José Régio, 71",Vila do Conde,41.353036111,-8.740494444
+H87,7116,Vila de Rei,loja,"Rua D. Diniz, Lote 8-12, Vila de Rei",Vila de Rei,39.6773,-8.1405
+39,,Vila do Conde,loja,"Rua 5 de Outubro, 1024",Vila do Conde,41.3608024,-8.7449984
+E53,7809,Vila Franca,loja,"Largo Carlos Pato, nº3",Vila Franca de Xira,38.95451,-8.99146
+D61,7739,Vila Franca de Xira,loja,"Rua Serpa Pinto, nº53/57",Vila Franca de Xira,38.95390556,-8.987533333
+D11,8838,Vila Nova de Cerveira,loja,"Urbanização Cerveira, Loja 13",Vila Nova de Cerveira,41.939806,-8.7419
+D96,8865,Vila Nova de Gaia,loja,"Rua Marquês Sá da Bandeira, 504",Vila Nova de Gaia,41.124477778,-8.612211111
+H44,8021,Vila Nova de Paiva,loja,"Avenida Capitão Correia Campos, s/nº",Vila Nova de Paiva,40.85665,-7.7367
+E47,8918,Vila Nova de Poiares,loja,"Av. Manuel Carvalho Coelho, S/nº",Vila Nova de Poiares,40.20432,-8.24546
+36,,Vila Real,loja,Centro Comercial Dolce Vita - Alameda de Grasse,Vila Real,41.296453,-7.734366
+D45,8949,Vila Real,loja,"Avenida Cidade de Orense, nº 16",Vila Real,41.301863889,-7.749308333
+D89,7770,Vila Real Stº António,loja,Avenida dos Bombeiros Portugueses,Vila Real de Santo António,37.19387222,-7.420738889
+A30,466,Vilar do Andorinho,loja,"Av. Vasco da Gama, nº 3782",Vilar do Andorinho,41.104766667,-8.569705556
+H55,8087,Vimioso,loja,"Av de Alcanices, S/N",Vimioso,41.58977,-6.52791
+E38,8818,Vinhais,loja,"Portela da Vila, Edifício Apolónia, Fracção A e E",Vinhais,41.8364,-7.01029
+E03,8866,Visconde Setubal,loja,"Rua Visconde de Setubal, nº 26",Porto,41.162297222,-8.605161111
+D99,8851,Viseu,loja,"Avenida Dr.António José de Almeida, nº 234/240",Viseu,40.6617351,-7.9154339
+10,,Viseu - Pálacio do Gelo,loja,Av. da Quinta da Alagoa 223 - Viseu,Viseu,40.643343344759025,-7.912843293384299
+E02,8854,Viseu II,loja,"Rua Capitão Silva Pereira, nº 137",Viseu,40.6582146,-7.9091781
+E19,7828,Viso,loja,"Av. São Francisco Xavier, Lt 8, Sc 3B",Setúbal,38.52437,-8.90502
+H71,8137,Viso,loja,"Quinta da Tapada ou Viso, E.N.116 cruzamento com Rua Amor de Perdição",Viseu,40.650914,-7.886396
+M028,,Viticale,fornecedor,Vidigueira,,38.211502,-7.800801
+D14,8806,Vizela,loja,"Fórum Vizela, Praça do Municipio",Vizela,41.378198,-8.30938
+D16,8802,Vouzela,loja,"Largo do Convento, nº 2",Vouzela,40.72416,-8.11222
+M071,,Wine Concept,fornecedor,Amadora,,38.7554649,-9.2226825
+I534,,Zeltica,fornecedor,"Centro Empresarial Penedo Park, Estrada Octávio Pato, armazém F2, bloco A -",Estremadura,38.711985,-9.339556
+M904,,Zoopan,fornecedor,"Rua da Liberdade, 77 -",Estremadura,39.1145687,-8.8654001
