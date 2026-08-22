@@ -42,7 +42,11 @@ jobs:
             fi
 
             echo "iteration $i: POST $URL"
-            HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" -X POST "$URL" \
+            # --http1.1: works around a known HTTP/2 negotiation bug on Ubuntu
+            # runners that surfaces as curl: (43). -v is TEMPORARY for this
+            # attempt only — confirms the fix, or gives more detail if it
+            # still fails. Remove once confirmed.
+            HTTP_CODE=$(curl -sS --http1.1 -v -o response.json -w "%{http_code}" -X POST "$URL" \
               -H "Authorization: Bearer $SYNC_SECRET" \
               -H "Content-Type: application/json" \
               -d "$BODY")
