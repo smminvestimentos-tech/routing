@@ -8,26 +8,27 @@ import {
   type TrackitTravel,
 } from "@/lib/trackit/client";
 
-// Vercel Hobby plan hard cap. Note this has NO effect on Hobby itself — Hobby
-// invocations are fixed at 10s regardless of maxDuration — but keeping it set
-// means this starts working correctly the moment the project upgrades to Pro.
-export const maxDuration = 60;
+// 300s is the max Hobby accepts with Fluid Compute (confirmed: values up to
+// 60 are honored exactly — Vercel killed the function at "60 seconds" when
+// this was set to 60).
+export const maxDuration = 300;
 
 // Only one TRACKiT account/credential pair is wired up today (TRACKIT_USER/TRACKIT_PASS).
 // When a second account is added, this becomes one iteration of a loop over
 // {account, user, pass} entries, each with its own sync_runs row.
 const TRACKIT_ACCOUNT = "default";
 
-// TRACKiT enforces a global ~1 req/sec rate limit per account (see
-// src/lib/trackit/client.ts), so vehicles are processed sequentially within
-// a batch — that limit rules out real parallelism against this API anyway.
-// 6 vehicles * ~1.1s pacing =~ 6.6s, leaving headroom under Hobby's fixed 10s
-// per-invocation limit for network/Supabase overhead.
-const DEFAULT_BATCH_SIZE = 6;
+// Each vehicleTravels call takes ~15s on TRACKiT's own end regardless of
+// caller (confirmed via raw curl timing: DNS/TCP/TLS are all sub-40ms, the
+// full ~15s is server-side TTFB) — the ~1.1s pacer floor in
+// src/lib/trackit/client.ts is essentially irrelevant next to that. 18
+// vehicles * ~15s =~ 270s, leaving ~30s headroom under the 300s maxDuration
+// above for network/Supabase overhead.
+const DEFAULT_BATCH_SIZE = 18;
 
 // Refresh trackit_pois at most once a day — it's a slow call (thousands of
-// POIs) and every second matters against the 10s Hobby limit, so most of the
-// 15-minute cron ticks should skip it entirely.
+// POIs) and every second still matters against the batch's time budget, so
+// most of the 15-minute cron ticks should skip it entirely.
 const POIS_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 type VehicleError = { vehicleId: number; error: string };
