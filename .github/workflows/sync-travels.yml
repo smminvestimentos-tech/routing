@@ -16,7 +16,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Call /api/sync/travels until done
         env:
@@ -31,8 +31,11 @@ jobs:
           fi
 
           URL="${SYNC_BASE_URL%/}/api/sync/travels"
-          MAX_ITERATIONS=30
-          BATCH_SIZE=30
+          # Hobby's fixed 10s-per-invocation limit forces small batches
+          # (BATCH_SIZE=6, ~6.6s of pacing) — worst case (500 vehicles) needs
+          # ~84 iterations, so MAX_ITERATIONS leaves comfortable headroom.
+          MAX_ITERATIONS=120
+          BATCH_SIZE=6
           RUN_ID=""
 
           for i in $(seq 1 "$MAX_ITERATIONS"); do

@@ -8,8 +8,9 @@ import {
   type TrackitTravel,
 } from "@/lib/trackit/client";
 
-// Vercel Hobby plan hard cap — without this the default function timeout is
-// much shorter than what a full batch needs.
+// Vercel Hobby plan hard cap. Note this has NO effect on Hobby itself — Hobby
+// invocations are fixed at 10s regardless of maxDuration — but keeping it set
+// means this starts working correctly the moment the project upgrades to Pro.
 export const maxDuration = 60;
 
 // Only one TRACKiT account/credential pair is wired up today (TRACKIT_USER/TRACKIT_PASS).
@@ -20,9 +21,14 @@ const TRACKIT_ACCOUNT = "default";
 // TRACKiT enforces a global ~1 req/sec rate limit per account (see
 // src/lib/trackit/client.ts), so vehicles are processed sequentially within
 // a batch — that limit rules out real parallelism against this API anyway.
-// 30 vehicles * ~1.1s pacing =~ 33s, leaving headroom under the 60s
-// maxDuration above for network/Supabase overhead.
-const DEFAULT_BATCH_SIZE = 30;
+// 6 vehicles * ~1.1s pacing =~ 6.6s, leaving headroom under Hobby's fixed 10s
+// per-invocation limit for network/Supabase overhead.
+const DEFAULT_BATCH_SIZE = 6;
+
+// Refresh trackit_pois at most once a day — it's a slow call (thousands of
+// POIs) and every second matters against the 10s Hobby limit, so most of the
+// 15-minute cron ticks should skip it entirely.
+const POIS_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 type VehicleError = { vehicleId: number; error: string };
 
@@ -123,26 +129,59 @@ export async function POST(request: NextRequest) {
     if (openRun) {
       run = openRun as SyncRun;
     } else {
-      // New run: sync POIs (reference only) and snapshot the vehicle list.
-      const pois = await getPois();
-      trackitPoisUpserted = pois.length;
+      // New run: refresh trackit_pois (reference only) if stale, then
+      // snapshot the vehicle list.
+      const { data: metadata, error: metadataFetchError } = await supabase
+        .from("sync_metadata")
+        .select("pois_synced_at")
+        .eq("trackit_account", TRACKIT_ACCOUNT)
+        .maybeSingle();
 
-      if (pois.length > 0) {
-        const { error } = await supabase.from("trackit_pois").upsert(
-          pois.map((poi) => ({
-            trackit_account: TRACKIT_ACCOUNT,
-            id_poi_trackit: poi.id,
-            name: poi.description ?? null,
-            type: poi.type ?? null,
-            latitude: poi.latitude ?? null,
-            longitude: poi.longitude ?? null,
-            updated_at: new Date().toISOString(),
-          })),
-          { onConflict: "trackit_account,id_poi_trackit" },
+      if (metadataFetchError) {
+        return NextResponse.json(
+          { error: `sync_metadata fetch failed: ${metadataFetchError.message}` },
+          { status: 500 },
         );
-        if (error) {
+      }
+
+      const poisStale =
+        !metadata?.pois_synced_at ||
+        Date.now() - new Date(metadata.pois_synced_at).getTime() > POIS_STALE_AFTER_MS;
+
+      if (poisStale) {
+        const pois = await getPois();
+        trackitPoisUpserted = pois.length;
+
+        if (pois.length > 0) {
+          const { error } = await supabase.from("trackit_pois").upsert(
+            pois.map((poi) => ({
+              trackit_account: TRACKIT_ACCOUNT,
+              id_poi_trackit: poi.id,
+              name: poi.description ?? null,
+              type: poi.type ?? null,
+              latitude: poi.latitude ?? null,
+              longitude: poi.longitude ?? null,
+              updated_at: new Date().toISOString(),
+            })),
+            { onConflict: "trackit_account,id_poi_trackit" },
+          );
+          if (error) {
+            return NextResponse.json(
+              { error: `trackit_pois upsert failed: ${error.message}` },
+              { status: 500 },
+            );
+          }
+        }
+
+        const { error: metadataUpsertError } = await supabase
+          .from("sync_metadata")
+          .upsert(
+            { trackit_account: TRACKIT_ACCOUNT, pois_synced_at: new Date().toISOString() },
+            { onConflict: "trackit_account" },
+          );
+        if (metadataUpsertError) {
           return NextResponse.json(
-            { error: `trackit_pois upsert failed: ${error.message}` },
+            { error: `sync_metadata upsert failed: ${metadataUpsertError.message}` },
             { status: 500 },
           );
         }
