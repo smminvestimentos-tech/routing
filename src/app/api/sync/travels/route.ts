@@ -62,6 +62,14 @@ function isAuthorized(request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  // TEMPORARY: timing instrumentation to find where the Hobby 10s budget is
+  // going. Remove once the bottleneck is identified. fnStart must be local
+  // to this invocation — a warm serverless instance reuses module scope
+  // across requests, so a module-level timestamp would go stale.
+  const fnStart = Date.now();
+  const mark = (label: string) => console.log(`[timing] ${label} +${Date.now() - fnStart}ms`);
+  mark("function start");
+
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -106,6 +114,7 @@ export async function POST(request: NextRequest) {
       );
     }
     run = data as SyncRun;
+    mark("sync_runs lookup by runId done");
   } else {
     // Resume the account's already-open run if there is one, instead of
     // starting a second one — makes it safe to just call this endpoint
@@ -118,6 +127,7 @@ export async function POST(request: NextRequest) {
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    mark("open run lookup done");
 
     if (openRunError) {
       return NextResponse.json(
@@ -136,6 +146,7 @@ export async function POST(request: NextRequest) {
         .select("pois_synced_at")
         .eq("trackit_account", TRACKIT_ACCOUNT)
         .maybeSingle();
+      mark("sync_metadata read done");
 
       if (metadataFetchError) {
         return NextResponse.json(
@@ -150,6 +161,7 @@ export async function POST(request: NextRequest) {
 
       if (poisStale) {
         const pois = await getPois();
+        mark("getPois() done");
         trackitPoisUpserted = pois.length;
 
         if (pois.length > 0) {
@@ -188,6 +200,7 @@ export async function POST(request: NextRequest) {
       }
 
       const vehicles = await getVehiclesForUser();
+      mark("getVehiclesForUser() done");
       const vehicleIds = Array.from(new Set(vehicles.map((v) => v.mid)));
 
       const dateEnd = body.dateEnd ?? formatTrackitDate(new Date());
@@ -215,6 +228,7 @@ export async function POST(request: NextRequest) {
         );
       }
       run = created as SyncRun;
+      mark("sync_runs insert done");
     }
   }
 
@@ -225,6 +239,7 @@ export async function POST(request: NextRequest) {
     .select("id, latitude, longitude")
     .not("latitude", "is", null)
     .not("longitude", "is", null);
+  mark("locations fetch done");
 
   if (locationsError) {
     return NextResponse.json(
@@ -235,15 +250,22 @@ export async function POST(request: NextRequest) {
   const geoLocations: GeoPoint[] = (locationRows ?? []) as GeoPoint[];
 
   const batchVehicleIds = run.vehicle_ids.slice(run.cursor, run.cursor + batchSize);
+  mark(`vehicle loop start (${batchVehicleIds.length} vehicles)`);
 
   const batchErrors: VehicleError[] = [];
   const legs: Array<Record<string, unknown>> = [];
 
   for (const vehicleId of batchVehicleIds) {
     let travels: TrackitTravel[];
+    const label = `[timing] getVehicleTravels(${vehicleId})`;
+    console.time(label);
     try {
       travels = await getVehicleTravels(vehicleId, run.date_begin, run.date_end);
+      console.timeEnd(label);
+      mark(`getVehicleTravels(${vehicleId}) done`);
     } catch (err) {
+      console.timeEnd(label);
+      mark(`getVehicleTravels(${vehicleId}) failed`);
       batchErrors.push({
         vehicleId,
         error: err instanceof Error ? err.message : String(err),
@@ -271,6 +293,7 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+  mark("vehicle loop done");
 
   // A travel with no start time can't be placed by the (vehicle_id, started_at)
   // key — drop it rather than risk piling up unmatched null-keyed rows.
@@ -300,6 +323,7 @@ export async function POST(request: NextRequest) {
     }
     batchTravelsUpserted = data?.length ?? 0;
   }
+  mark("route_legs upsert done");
 
   const newCursor = run.cursor + batchVehicleIds.length;
   const newVehiclesProcessed = run.vehicles_processed + batchVehicleIds.length;
@@ -321,6 +345,7 @@ export async function POST(request: NextRequest) {
     .eq("id", run.id)
     .select("*")
     .single();
+  mark("sync_runs final update done");
 
   if (updateError || !updated) {
     return NextResponse.json(
@@ -329,6 +354,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  mark("function end");
   return NextResponse.json({
     runId: run.id,
     status: updated.status,
