@@ -142,13 +142,36 @@ async function callTrackit<T>(path: string, init?: RequestInit): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const attemptStart = Date.now();
     try {
-      return await callTrackitOnce<T>(path, init);
+      const result = await callTrackitOnce<T>(path, init);
+      // TEMPORARY: retry diagnostics — remove once the 15s/request
+      // bottleneck is understood.
+      console.log(
+        `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} SUCCEEDED after ${Date.now() - attemptStart}ms`,
+      );
+      return result;
     } catch (err) {
+      const attemptMs = Date.now() - attemptStart;
       lastError = err;
       const transient = err instanceof TrackitError ? err.transient : true;
-      if (!transient || attempt === MAX_ATTEMPTS) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (!transient || attempt === MAX_ATTEMPTS) {
+        // TEMPORARY: retry diagnostics — remove once the 15s/request
+        // bottleneck is understood.
+        console.log(
+          `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} FINAL FAILURE after ${attemptMs}ms: transient=${transient} error="${message}"`,
+        );
+        throw err;
+      }
+
       const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 200;
+      // TEMPORARY: retry diagnostics — remove once the 15s/request
+      // bottleneck is understood.
+      console.log(
+        `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} failed after ${attemptMs}ms: transient=${transient} error="${message}" — backing off ${Math.round(delay)}ms`,
+      );
       await sleep(delay);
     }
   }
