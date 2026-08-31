@@ -1,10 +1,9 @@
 name: Sync TRACKiT travels
 
 on:
-  schedule:
-    # Every 15 minutes — balances data freshness against load on TRACKiT's API
-    # (which itself only allows ~1 request/second per account).
-    - cron: "*/15 * * * *"
+  # Manual only. The scheduled trigger was removed when the ping-based
+  # positions/stops pipeline took over as the source for stop data; this
+  # workflow is kept for one-off backfills of the historical route_legs table.
   workflow_dispatch: {}
 
 # Avoid two invocations racing on the same sync run (e.g. a manual dispatch
@@ -51,10 +50,8 @@ jobs:
 
             echo "iteration $i: POST $URL"
             # --http1.1: works around a known HTTP/2 negotiation bug on Ubuntu
-            # runners that surfaces as curl: (43). -v is TEMPORARY for this
-            # attempt only — confirms the fix, or gives more detail if it
-            # still fails. Remove once confirmed.
-            HTTP_CODE=$(curl -sS --http1.1 -v -o response.json -w "%{http_code}" -X POST "$URL" \
+            # runners that surfaces as curl: (43).
+            HTTP_CODE=$(curl -sS --http1.1 -o response.json -w "%{http_code}" -X POST "$URL" \
               -H "Authorization: Bearer $SYNC_SECRET" \
               -H "Content-Type: application/json" \
               -d "$BODY")

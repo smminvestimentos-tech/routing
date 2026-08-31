@@ -1,0 +1,49 @@
+name: Sync TRACKiT positions
+
+on:
+  # Every 5 minutes. Left disabled for now — enable by uncommenting the cron
+  # once the ping pipeline is meant to run live.
+  # schedule:
+  #   - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+# One invocation at a time — a manual dispatch must not overlap a scheduled run.
+concurrency:
+  group: sync-positions
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # One fleet-wide vehiclesForUser poll + one bulk upsert + a retention
+    # sweep. The route caps itself at maxDuration=60; this is generous margin.
+    timeout-minutes: 5
+    steps:
+      - name: POST /api/sync/positions
+        env:
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET }}
+          SYNC_BASE_URL: ${{ vars.SYNC_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SYNC_BASE_URL:-}" ]; then
+            echo "SYNC_BASE_URL repository variable is not set (Settings > Secrets and variables > Actions > Variables)." >&2
+            exit 1
+          fi
+
+          URL="${SYNC_BASE_URL%/}/api/sync/positions"
+          echo "POST $URL"
+          # --http1.1: works around a known HTTP/2 negotiation bug on Ubuntu
+          # runners that surfaces as curl: (43).
+          HTTP_CODE=$(curl -sS --http1.1 -o response.json -w "%{http_code}" -X POST "$URL" \
+            -H "Authorization: Bearer $SYNC_SECRET" \
+            -H "Content-Type: application/json")
+
+          cat response.json && echo
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "positions sync failed with HTTP $HTTP_CODE" >&2
+            exit 1
+          fi
+
+          echo "positions sync ok (HTTP $HTTP_CODE)"
