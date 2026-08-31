@@ -16,6 +16,52 @@ export type TrackitVehicle = {
   [key: string]: unknown;
 };
 
+// Parsed from a `vehiclesForUser` element. TRACKiT's raw JSON is deeply
+// nested and inconsistent across vehicles (confirmed via real payload
+// inspection: e.g. `data.pos.loc.lat/lon`, `data.pos.gsp`, `data.pos.gkm`).
+export type TrackitVehiclePosition = {
+  vehicleId: number;
+  plate: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  speedKmh: number | null;
+  odometerKm: number | null;
+  recordedAt: string | null; // ISO 8601, confirmed via real payload (data.pos.tmx)
+  // TRACKiT already matches the position against its own POI dataset
+  // (trackit_pois) when close enough — free signal, captured for later
+  // cross-validation against our own locations-based stop matching.
+  trackitPoiId: number | null;
+  trackitPoiDistanceM: number | null;
+};
+
+function normalizeTrackitTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+export function parseVehiclePosition(v: TrackitVehicle): TrackitVehiclePosition {
+  const info = (v.info ?? {}) as Record<string, unknown>;
+  const data = (v.data ?? {}) as Record<string, unknown>;
+  const pos = (data.pos ?? {}) as Record<string, unknown>;
+  const drs = (data.drs ?? {}) as Record<string, unknown>;
+  const loc = (pos.loc ?? {}) as Record<string, unknown>;
+  const poi = (pos.poi ?? null) as { info?: { id?: number }; dist?: number } | null;
+
+  return {
+    vehicleId: v.mid,
+    plate: typeof info.plate === "string" ? info.plate : null,
+    latitude: typeof loc.lat === "number" ? loc.lat : null,
+    longitude: typeof loc.lon === "number" ? loc.lon : null,
+    speedKmh: typeof pos.gsp === "number" ? pos.gsp : null,
+    odometerKm:
+      typeof pos.gkm === "number" ? pos.gkm : typeof drs.ckm === "number" ? drs.ckm : null,
+    recordedAt: normalizeTrackitTimestamp(pos.tmx),
+    trackitPoiId: typeof poi?.info?.id === "number" ? poi.info.id : null,
+    trackitPoiDistanceM: typeof poi?.dist === "number" ? poi.dist : null,
+  };
+}
+
 export type TrackitTravelPoint = {
   timestamp?: string | null;
   km?: number | null;
@@ -142,36 +188,13 @@ async function callTrackit<T>(path: string, init?: RequestInit): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const attemptStart = Date.now();
     try {
-      const result = await callTrackitOnce<T>(path, init);
-      // TEMPORARY: retry diagnostics — remove once the 15s/request
-      // bottleneck is understood.
-      console.log(
-        `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} SUCCEEDED after ${Date.now() - attemptStart}ms`,
-      );
-      return result;
+      return await callTrackitOnce<T>(path, init);
     } catch (err) {
-      const attemptMs = Date.now() - attemptStart;
       lastError = err;
       const transient = err instanceof TrackitError ? err.transient : true;
-      const message = err instanceof Error ? err.message : String(err);
-
-      if (!transient || attempt === MAX_ATTEMPTS) {
-        // TEMPORARY: retry diagnostics — remove once the 15s/request
-        // bottleneck is understood.
-        console.log(
-          `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} FINAL FAILURE after ${attemptMs}ms: transient=${transient} error="${message}"`,
-        );
-        throw err;
-      }
-
+      if (!transient || attempt === MAX_ATTEMPTS) throw err;
       const delay = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 200;
-      // TEMPORARY: retry diagnostics — remove once the 15s/request
-      // bottleneck is understood.
-      console.log(
-        `[retry] ${path} attempt ${attempt}/${MAX_ATTEMPTS} failed after ${attemptMs}ms: transient=${transient} error="${message}" — backing off ${Math.round(delay)}ms`,
-      );
       await sleep(delay);
     }
   }
