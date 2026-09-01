@@ -400,8 +400,8 @@ function intervalLabel(from: string, to: string, today: string): string {
   return from === to ? from : `${from} – ${to}`;
 }
 
-// Free-text match: store name / code (either end), plate, or numeric id.
-// Partial, case-insensitive.
+// Free-text match, partial and case-insensitive.
+// Trips: store name / code (either end), plate, or numeric id.
 function tripMatchesSearch(t: Trip, needle: string): boolean {
   if (!needle) return true;
   return [
@@ -412,6 +412,28 @@ function tripMatchesSearch(t: Trip, needle: string): boolean {
     t.vehicle_plate,
     String(t.vehicle_id),
   ].some((v) => v != null && String(v).toLowerCase().includes(needle));
+}
+
+// Matrix: store name / code (either end) — no vehicle, it's aggregated.
+function matrixMatchesSearch(m: MatrixRow, needle: string): boolean {
+  if (!needle) return true;
+  return [
+    m.origin_name,
+    m.destination_name,
+    m.origin_code,
+    m.destination_code,
+  ].some((v) => v != null && String(v).toLowerCase().includes(needle));
+}
+
+// Text box + its debounced (~200ms), trimmed, lower-cased value.
+function useDebouncedSearch() {
+  const [input, setInput] = useState("");
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setValue(input.trim().toLowerCase()), 200);
+    return () => clearTimeout(id);
+  }, [input]);
+  return { input, setInput, value };
 }
 
 const chipClass =
@@ -444,21 +466,27 @@ export function DashboardClient({
 }) {
   const anyError = tripsError ?? matrixError;
 
-  // Free-text search over the already-loaded (date-filtered) trips. Debounced
-  // so it doesn't recompute on every keystroke; no server round-trip.
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  useEffect(() => {
-    const id = setTimeout(() => setSearch(searchInput.trim().toLowerCase()), 200);
-    return () => clearTimeout(id);
-  }, [searchInput]);
+  // Client-side free-text search over the already-loaded rows (trips are also
+  // date-filtered server-side). Debounced; no server round-trip.
+  const tripSearch = useDebouncedSearch();
+  const matrixSearch = useDebouncedSearch();
 
   const filteredTrips = useMemo(
-    () => (search ? trips.filter((t) => tripMatchesSearch(t, search)) : trips),
-    [trips, search],
+    () =>
+      tripSearch.value
+        ? trips.filter((t) => tripMatchesSearch(t, tripSearch.value))
+        : trips,
+    [trips, tripSearch.value],
+  );
+  const filteredMatrix = useMemo(
+    () =>
+      matrixSearch.value
+        ? matrix.filter((m) => matrixMatchesSearch(m, matrixSearch.value))
+        : matrix,
+    [matrix, matrixSearch.value],
   );
 
-  // Exports reflect what the section shows: date filter (server) + text filter.
+  // Exports reflect what each section shows (date + text filters).
   const exportTrips = () =>
     exportToXlsx(
       tripsToExportRows(filteredTrips),
@@ -468,7 +496,7 @@ export function DashboardClient({
     );
   const exportMatrix = () =>
     exportToXlsx(
-      matrixToExportRows(matrix),
+      matrixToExportRows(filteredMatrix),
       `matriz-tempo-km-${todayStamp()}.xlsx`,
       "Matriz",
       MATRIX_HEADERS,
@@ -483,7 +511,7 @@ export function DashboardClient({
         },
         {
           name: "Matriz",
-          rows: matrixToExportRows(matrix),
+          rows: matrixToExportRows(filteredMatrix),
           headers: MATRIX_HEADERS,
         },
       ],
@@ -522,7 +550,7 @@ export function DashboardClient({
             <span className="text-sm font-normal text-black/40 dark:text-white/40">
               ({filteredTrips.length},{" "}
               {intervalLabel(filterFrom, filterTo, today)}
-              {search ? ` · “${search}”` : ""})
+              {tripSearch.value ? ` · “${tripSearch.value}”` : ""})
             </span>
           </h2>
           <ExportButton onClick={() => void exportTrips()}>
@@ -581,8 +609,8 @@ export function DashboardClient({
             <span className="text-black/50 dark:text-white/50">Pesquisar</span>
             <input
               type="search"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
+              value={tripSearch.input}
+              onChange={(e) => tripSearch.setInput(e.target.value)}
               placeholder="loja, código, matrícula, ID…"
               className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
             />
@@ -603,16 +631,31 @@ export function DashboardClient({
           <h2 className="text-lg font-medium">
             Matriz tempo / km por par de locais{" "}
             <span className="text-sm font-normal text-black/40 dark:text-white/40">
-              ({matrix.length} pares · stops + route_legs)
+              ({filteredMatrix.length} pares · stops + route_legs
+              {matrixSearch.value ? ` · “${matrixSearch.value}”` : ""})
             </span>
           </h2>
           <ExportButton onClick={() => void exportMatrix()}>
             Exportar .xlsx
           </ExportButton>
         </div>
+
+        <div className="mb-3 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="text-black/50 dark:text-white/50">Pesquisar</span>
+            <input
+              type="search"
+              value={matrixSearch.input}
+              onChange={(e) => matrixSearch.setInput(e.target.value)}
+              placeholder="loja ou código…"
+              className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+            />
+          </label>
+        </div>
+
         {!matrixError && (
           <SortableTable
-            rows={matrix}
+            rows={filteredMatrix}
             columns={matrixColumns}
             initialSort={{ key: "count", dir: "desc" }}
           />
