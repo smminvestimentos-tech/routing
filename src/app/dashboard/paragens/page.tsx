@@ -27,13 +27,13 @@ export default async function ParagensPage({
 
   const supabase = createAdminClient();
 
-  const [stopsRes, dwellRes] = await Promise.all([
+  const [stopsRes, dwellRes, platesRes] = await Promise.all([
     // Closed stops in the date window, with their matched location (null when
     // the stop didn't match a known location).
     supabase
       .from("stops")
       .select(
-        "id, arrived_at, departed_at, duration_minutes, ping_count, stop_kind, location:locations(code, name, type)",
+        "id, vehicle_id, arrived_at, departed_at, duration_minutes, ping_count, stop_kind, location:locations(code, name, type)",
       )
       .eq("status", "closed")
       .gte("arrived_at", lisbonDayStartISO(fromYmd))
@@ -49,11 +49,15 @@ export default async function ParagensPage({
       )
       .order("stop_count", { ascending: false })
       .limit(1000),
+    supabase.from("latest_vehicle_plate").select("vehicle_id, plate"),
   ]);
+
+  const plateByVehicle: Record<number, string | null> = {};
+  for (const p of platesRes.data ?? []) plateByVehicle[p.vehicle_id] = p.plate;
 
   return (
     <ParagensClient
-      stops={flattenStops(stopsRes.data)}
+      stops={flattenStops(stopsRes.data, plateByVehicle)}
       stopsError={stopsRes.error?.message ?? null}
       dwellStats={(dwellRes.data ?? []) as DwellStatRow[]}
       dwellStatsError={dwellRes.error?.message ?? null}

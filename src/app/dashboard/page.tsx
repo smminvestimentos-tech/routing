@@ -29,8 +29,16 @@ export default async function DashboardPage() {
   const fromISO = lisbonDayStartISO(today);
   const toISO = lisbonDayStartISO(addDaysYmd(today, 1));
 
-  const [tripsRes, matrixRes, stopsRes, dwellRes, routesRes, marginsRes, settingsRes] =
-    await Promise.all([
+  const [
+    tripsRes,
+    matrixRes,
+    stopsRes,
+    dwellRes,
+    routesRes,
+    marginsRes,
+    settingsRes,
+    platesRes,
+  ] = await Promise.all([
     supabase
       .from("v_recent_trips")
       .select(
@@ -52,7 +60,7 @@ export default async function DashboardPage() {
     supabase
       .from("stops")
       .select(
-        "id, arrived_at, departed_at, duration_minutes, ping_count, stop_kind, location:locations(code, name, type)",
+        "id, vehicle_id, arrived_at, departed_at, duration_minutes, ping_count, stop_kind, location:locations(code, name, type)",
       )
       .eq("status", "closed")
       .gte("arrived_at", fromISO)
@@ -81,7 +89,11 @@ export default async function DashboardPage() {
       .select("default_margin_percent")
       .eq("id", true)
       .maybeSingle(),
+    supabase.from("latest_vehicle_plate").select("vehicle_id, plate"),
   ]);
+
+  const plateByVehicle: Record<number, string | null> = {};
+  for (const p of platesRes.data ?? []) plateByVehicle[p.vehicle_id] = p.plate;
 
   const routeOverrides: Record<string, number> = {};
   for (const m of marginsRes.data ?? []) {
@@ -100,7 +112,7 @@ export default async function DashboardPage() {
     <DashboardHubClient
       trips={trips}
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
-      stops={flattenStops(stopsRes.data)}
+      stops={flattenStops(stopsRes.data, plateByVehicle)}
       dwellStats={(dwellRes.data ?? []) as DwellStatRow[]}
       routes={(routesRes.data ?? []) as RouteEstimateRow[]}
       routeOverrides={routeOverrides}

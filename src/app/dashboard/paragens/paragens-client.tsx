@@ -45,6 +45,7 @@ function fmtStopKind(k: string | null): string {
 }
 
 export const STOP_HEADERS = [
+  "Veículo",
   "Local",
   "Tipo",
   "Classificação",
@@ -54,8 +55,13 @@ export const STOP_HEADERS = [
   "Pings",
 ] as const;
 
+// Plate, falling back to the numeric id — same pattern as "Trajetos recentes".
+const vehicleLabel = (s: { vehicle_plate: string | null; vehicle_id: number }) =>
+  s.vehicle_plate ?? String(s.vehicle_id);
+
 export function stopsToExportRows(stops: StopRow[]): ExportRow[] {
   return stops.map((s) => ({
+    Veículo: vehicleLabel(s),
     Local: codeName(s.location_code, s.location_name),
     Tipo: fmtLocationType(s.location_type),
     Classificação: fmtStopKind(s.stop_kind),
@@ -67,6 +73,12 @@ export function stopsToExportRows(stops: StopRow[]): ExportRow[] {
 }
 
 const stopColumns: Col<StopRow>[] = [
+  {
+    key: "vehicle",
+    label: "Veículo",
+    value: (r) => vehicleLabel(r),
+    render: (r) => vehicleLabel(r),
+  },
   {
     key: "local",
     label: "Local",
@@ -112,10 +124,12 @@ const stopColumns: Col<StopRow>[] = [
   },
 ];
 
-// Free-text: location name / code / type / classification label.
+// Free-text: plate / id, location name / code / type, classification label.
 function stopMatchesSearch(s: StopRow, needle: string): boolean {
   if (!needle) return true;
   return [
+    s.vehicle_plate,
+    String(s.vehicle_id),
     s.location_name,
     s.location_code,
     s.location_type,
@@ -338,7 +352,7 @@ export function ParagensClient({
               type="search"
               value={search.input}
               onChange={(e) => search.setInput(e.target.value)}
-              placeholder="local, código, tipo…"
+              placeholder="matrícula, local, código, tipo…"
               className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
             />
           </label>

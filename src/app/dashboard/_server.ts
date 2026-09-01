@@ -70,6 +70,8 @@ export function resolveRange(
 // "Paragens" table/export. Used by both paragens/page.tsx and the hub.
 export type StopRow = {
   id: string;
+  vehicle_id: number;
+  vehicle_plate: string | null;
   arrived_at: string;
   departed_at: string | null;
   duration_minutes: number | null;
@@ -83,6 +85,7 @@ export type StopRow = {
 
 type StopEmbedRow = {
   id: string;
+  vehicle_id: number;
   arrived_at: string;
   departed_at: string | null;
   duration_minutes: number | null;
@@ -95,9 +98,14 @@ type StopEmbedRow = {
   } | null;
 };
 
-export function flattenStops(data: unknown): StopRow[] {
+export function flattenStops(
+  data: unknown,
+  plateByVehicle: Record<number, string | null> = {},
+): StopRow[] {
   return ((data ?? []) as StopEmbedRow[]).map((s) => ({
     id: s.id,
+    vehicle_id: s.vehicle_id,
+    vehicle_plate: plateByVehicle[s.vehicle_id] ?? null,
     arrived_at: s.arrived_at,
     departed_at: s.departed_at,
     duration_minutes: s.duration_minutes,
