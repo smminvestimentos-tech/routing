@@ -37,9 +37,11 @@ export type MatrixRow = {
 
 function fmtDuration(sec: number | null): string {
   if (sec == null) return "—";
-  const s = Math.max(0, Math.round(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.round((s % 3600) / 60);
+  // Round to whole minutes first, then split — otherwise a value like 53970s
+  // rounds the remainder minutes to 60 and prints "14h 60m" instead of "15h 00m".
+  const totalMin = Math.round(Math.max(0, sec) / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
   return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
 }
 
@@ -331,6 +333,8 @@ function matrixMatchesSearch(m: MatrixRow, needle: string): boolean {
 export function DashboardClient({
   trips,
   tripsError,
+  implausibleExcluded,
+  implausibleThresholdHours,
   matrix,
   matrixError,
   filterFrom,
@@ -339,6 +343,8 @@ export function DashboardClient({
 }: {
   trips: Trip[];
   tripsError: string | null;
+  implausibleExcluded: number;
+  implausibleThresholdHours: number;
   matrix: MatrixRow[];
   matrixError: string | null;
   filterFrom: string;
@@ -509,6 +515,16 @@ export function DashboardClient({
             columns={tripColumns}
             initialSort={{ key: "arrived", dir: "desc" }}
           />
+        )}
+
+        {implausibleExcluded > 0 && (
+          <p className="mt-2 text-xs text-black/40 dark:text-white/40">
+            {implausibleExcluded} trajeto
+            {implausibleExcluded === 1 ? "" : "s"} excluído
+            {implausibleExcluded === 1 ? "" : "s"} por duração implausível (&gt;{" "}
+            {implausibleThresholdHours}h) — provável lacuna na ingestão de
+            posições, não viagens reais.
+          </p>
         )}
       </section>
 

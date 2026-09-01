@@ -16,6 +16,14 @@ export const metadata: Metadata = {
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Sanity cap for section 1. A legitimate warehouse↔store delivery never takes
+// this long; anything above it is almost certainly an artefact of a gap in the
+// position feed (two real stops glued into one "trip" because the stop between
+// them had too few pings to be detected). Excluded from the list, but counted
+// and surfaced on the page so the data-quality issue isn't hidden.
+const MAX_PLAUSIBLE_TRAVEL_SECONDS = 6 * 3600;
+const MAX_PLAUSIBLE_TRAVEL_HOURS = MAX_PLAUSIBLE_TRAVEL_SECONDS / 3600;
+
 // "Recent trips" day boundaries are anchored to Portugal, not the server's UTC.
 function todayInLisbon(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon" }).format(
@@ -98,10 +106,22 @@ export default async function DashboardPage({
       .limit(500),
   ]);
 
+  // Drop implausibly long trips (see MAX_PLAUSIBLE_TRAVEL_SECONDS) but keep a
+  // count so the dashboard can note that it happened.
+  const allTrips = (tripsRes.data ?? []) as Trip[];
+  const trips = allTrips.filter(
+    (t) =>
+      t.travel_seconds == null ||
+      t.travel_seconds <= MAX_PLAUSIBLE_TRAVEL_SECONDS,
+  );
+  const implausibleExcluded = allTrips.length - trips.length;
+
   return (
     <DashboardClient
-      trips={(tripsRes.data ?? []) as Trip[]}
+      trips={trips}
       tripsError={tripsRes.error?.message ?? null}
+      implausibleExcluded={implausibleExcluded}
+      implausibleThresholdHours={MAX_PLAUSIBLE_TRAVEL_HOURS}
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
       matrixError={matrixRes.error?.message ?? null}
       filterFrom={fromYmd}
