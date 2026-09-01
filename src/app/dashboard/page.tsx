@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DashboardHubClient } from "./dashboard-hub-client";
 import type { Trip } from "./trajetos/trajetos-client";
 import type { MatrixRow } from "./matriz/matriz-client";
+import type { DwellStatRow } from "./paragens/paragens-client";
 import {
   todayInLisbon,
   addDaysYmd,
@@ -26,7 +27,7 @@ export default async function DashboardPage() {
   const fromISO = lisbonDayStartISO(today);
   const toISO = lisbonDayStartISO(addDaysYmd(today, 1));
 
-  const [tripsRes, matrixRes, stopsRes] = await Promise.all([
+  const [tripsRes, matrixRes, stopsRes, dwellRes] = await Promise.all([
     supabase
       .from("v_recent_trips")
       .select(
@@ -48,13 +49,20 @@ export default async function DashboardPage() {
     supabase
       .from("stops")
       .select(
-        "id, arrived_at, departed_at, duration_minutes, ping_count, location:locations(code, name, type)",
+        "id, arrived_at, departed_at, duration_minutes, ping_count, stop_kind, location:locations(code, name, type)",
       )
       .eq("status", "closed")
       .gte("arrived_at", fromISO)
       .lt("arrived_at", toISO)
       .order("arrived_at", { ascending: false })
       .limit(3000),
+    supabase
+      .from("v_location_dwell_stats")
+      .select(
+        "location_id, location_code, location_name, location_type, stop_kind, stop_count, avg_duration_minutes, median_duration_minutes, min_duration_minutes, max_duration_minutes",
+      )
+      .order("stop_count", { ascending: false })
+      .limit(1000),
   ]);
 
   // Same sanity cut as /dashboard/trajetos so the export matches the page.
@@ -69,10 +77,12 @@ export default async function DashboardPage() {
       trips={trips}
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
       stops={flattenStops(stopsRes.data)}
+      dwellStats={(dwellRes.data ?? []) as DwellStatRow[]}
       anyError={
         tripsRes.error?.message ??
         matrixRes.error?.message ??
         stopsRes.error?.message ??
+        dwellRes.error?.message ??
         null
       }
     />

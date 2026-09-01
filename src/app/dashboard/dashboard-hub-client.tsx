@@ -19,7 +19,13 @@ import {
   MATRIX_HEADERS,
   type MatrixRow,
 } from "./matriz/matriz-client";
-import { stopsToExportRows, STOP_HEADERS } from "./paragens/paragens-client";
+import {
+  stopsToExportRows,
+  STOP_HEADERS,
+  dwellStatsToExportRows,
+  DWELL_STAT_HEADERS,
+  type DwellStatRow,
+} from "./paragens/paragens-client";
 
 const CARDS = [
   {
@@ -35,7 +41,7 @@ const CARDS = [
   {
     href: "/dashboard/paragens",
     title: "Paragens",
-    desc: "Paragens detetadas — local, tipo, chegada/partida, tempo parado e nº de pings. Com filtro de datas e pesquisa.",
+    desc: "Paragens detetadas (local, chegada/partida, tempo parado, pings) e o tempo médio parado por local.",
   },
 ] as const;
 
@@ -43,11 +49,13 @@ export function DashboardHubClient({
   trips,
   matrix,
   stops,
+  dwellStats,
   anyError,
 }: {
   trips: Trip[];
   matrix: MatrixRow[];
   stops: StopRow[];
+  dwellStats: DwellStatRow[];
   anyError: string | null;
 }) {
   // "Exportar tudo" — one workbook, one sheet per section, at today's range.
@@ -68,6 +76,11 @@ export function DashboardHubClient({
           name: "Paragens",
           rows: stopsToExportRows(stops),
           headers: STOP_HEADERS,
+        },
+        {
+          name: "Tempo por local",
+          rows: dwellStatsToExportRows(dwellStats),
+          headers: DWELL_STAT_HEADERS,
         },
       ],
       `dashboard-completo-${todayStamp()}.xlsx`,

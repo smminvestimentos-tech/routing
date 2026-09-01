@@ -74,6 +74,8 @@ export type StopRow = {
   departed_at: string | null;
   duration_minutes: number | null;
   ping_count: number;
+  // "carga" | "estacionamento" — see stop_kind_of() (migration 0017).
+  stop_kind: string | null;
   location_code: string | null;
   location_name: string | null;
   location_type: string | null;
@@ -85,6 +87,7 @@ type StopEmbedRow = {
   departed_at: string | null;
   duration_minutes: number | null;
   ping_count: number;
+  stop_kind: string | null;
   location: {
     code: string | null;
     name: string | null;
@@ -99,6 +102,7 @@ export function flattenStops(data: unknown): StopRow[] {
     departed_at: s.departed_at,
     duration_minutes: s.duration_minutes,
     ping_count: s.ping_count,
+    stop_kind: s.stop_kind ?? null,
     location_code: s.location?.code ?? null,
     location_name: s.location?.name ?? null,
     location_type: s.location?.type ?? null,
