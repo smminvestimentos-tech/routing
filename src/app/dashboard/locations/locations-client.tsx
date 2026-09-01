@@ -37,6 +37,7 @@ export type Location = {
   latitude: number | null;
   longitude: number | null;
   radius_meters: number;
+  active: boolean;
   updated_at: string;
 };
 
@@ -117,6 +118,19 @@ const columns: Col<Location>[] = [
     label: "Raio (m)",
     align: "right",
     value: (r) => r.radius_meters,
+  },
+  {
+    key: "active",
+    label: "Estado",
+    value: (r) => (r.active ? "1" : "0"),
+    render: (r) =>
+      r.active ? (
+        <span className="text-black/40 dark:text-white/40">Ativa</span>
+      ) : (
+        <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+          Inativa
+        </span>
+      ),
   },
 ];
 
