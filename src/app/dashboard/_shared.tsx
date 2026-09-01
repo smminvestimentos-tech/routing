@@ -246,7 +246,9 @@ export function DateRangeForm({
       <button type="submit" className={chipClass}>
         Aplicar
       </button>
-      <span className="mx-1 self-center text-black/20 dark:text-white/20">|</span>
+      <span className="mx-1 hidden self-center text-black/20 sm:inline dark:text-white/20">
+        |
+      </span>
       <Link href={action} className={chipClass}>
         Hoje
       </Link>

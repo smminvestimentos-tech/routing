@@ -74,7 +74,7 @@ export function DashboardHubClient({
     );
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-8">
+    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
@@ -82,7 +82,7 @@ export function DashboardHubClient({
             Uso interno · sem autenticação
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link href="/dashboard/locations" className={chipClass}>
             Gerir locations
           </Link>
