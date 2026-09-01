@@ -21,6 +21,19 @@ export type Trip = {
   arrived_at: string;
   travel_seconds: number | null;
   leg_km: number | null;
+  // Minutes the vehicle stayed at the destination stop (load/unload time).
+  destination_duration_minutes: number | null;
+};
+
+export type StopRow = {
+  id: string;
+  arrived_at: string;
+  departed_at: string | null;
+  duration_minutes: number | null;
+  ping_count: number;
+  location_code: string | null;
+  location_name: string | null;
+  location_type: string | null;
 };
 
 export type MatrixRow = {
@@ -43,6 +56,25 @@ function fmtDuration(sec: number | null): string {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+}
+
+// stops.duration_minutes / v_trips.destination_duration_minutes are in minutes;
+// reuse the h/m formatter.
+function fmtMinutes(min: number | null): string {
+  return fmtDuration(min == null ? null : min * 60);
+}
+
+const LOCATION_TYPE_LABELS: Record<string, string> = {
+  loja: "Loja",
+  armazem: "Armazém",
+  centro_distribuicao: "Centro distribuição",
+  fornecedor: "Fornecedor",
+  oficina: "Oficina",
+};
+
+function fmtLocationType(t: string | null): string {
+  if (!t) return "—";
+  return LOCATION_TYPE_LABELS[t] ?? t;
 }
 
 function fmtDateTime(iso: string | null): string {
@@ -95,6 +127,7 @@ const TRIP_HEADERS = [
   "Chegada",
   "Duração",
   "Km",
+  "Tempo parado",
 ] as const;
 
 const MATRIX_HEADERS = [
@@ -105,6 +138,15 @@ const MATRIX_HEADERS = [
   "Tempo médio",
   "Tempo mediano",
   "Km médio",
+] as const;
+
+const STOP_HEADERS = [
+  "Local",
+  "Tipo",
+  "Chegada",
+  "Partida",
+  "Tempo parado",
+  "Pings",
 ] as const;
 
 // Human-readable rows — same formatting as the on-screen tables (durations as
@@ -118,6 +160,18 @@ function tripsToExportRows(trips: Trip[]): ExportRow[] {
     Chegada: fmtDateTime(t.arrived_at),
     Duração: fmtDuration(t.travel_seconds),
     Km: fmtKm2(t.leg_km),
+    "Tempo parado": fmtMinutes(t.destination_duration_minutes),
+  }));
+}
+
+function stopsToExportRows(stops: StopRow[]): ExportRow[] {
+  return stops.map((s) => ({
+    Local: codeName(s.location_code, s.location_name),
+    Tipo: fmtLocationType(s.location_type),
+    Chegada: fmtDateTime(s.arrived_at),
+    Partida: fmtDateTime(s.departed_at),
+    "Tempo parado": fmtMinutes(s.duration_minutes),
+    Pings: s.ping_count,
   }));
 }
 
@@ -252,6 +306,13 @@ const tripColumns: Col<Trip>[] = [
     value: (r) => r.leg_km,
     render: (r) => fmtKm(r.leg_km),
   },
+  {
+    key: "dwell",
+    label: "Tempo parado",
+    align: "right",
+    value: (r) => r.destination_duration_minutes,
+    render: (r) => fmtMinutes(r.destination_duration_minutes),
+  },
 ];
 
 const matrixColumns: Col<MatrixRow>[] = [
@@ -289,6 +350,46 @@ const matrixColumns: Col<MatrixRow>[] = [
     align: "right",
     value: (r) => r.avg_distance_km,
     render: (r) => fmtKm(r.avg_distance_km),
+  },
+];
+
+const stopColumns: Col<StopRow>[] = [
+  {
+    key: "local",
+    label: "Local",
+    value: (r) => r.location_name ?? "",
+    render: (r) => codeName(r.location_code, r.location_name),
+  },
+  {
+    key: "type",
+    label: "Tipo",
+    value: (r) => r.location_type ?? "",
+    render: (r) => fmtLocationType(r.location_type),
+  },
+  {
+    key: "arrived",
+    label: "Chegada",
+    value: (r) => new Date(r.arrived_at).getTime(),
+    render: (r) => fmtDateTime(r.arrived_at),
+  },
+  {
+    key: "departed",
+    label: "Partida",
+    value: (r) => (r.departed_at ? new Date(r.departed_at).getTime() : null),
+    render: (r) => fmtDateTime(r.departed_at),
+  },
+  {
+    key: "dwell",
+    label: "Tempo parado",
+    align: "right",
+    value: (r) => r.duration_minutes,
+    render: (r) => fmtMinutes(r.duration_minutes),
+  },
+  {
+    key: "pings",
+    label: "Pings",
+    align: "right",
+    value: (r) => r.ping_count,
   },
 ];
 
@@ -330,6 +431,71 @@ function matrixMatchesSearch(m: MatrixRow, needle: string): boolean {
   ].some((v) => v != null && String(v).toLowerCase().includes(needle));
 }
 
+// Stops: location name / code / type.
+function stopMatchesSearch(s: StopRow, needle: string): boolean {
+  if (!needle) return true;
+  return [s.location_name, s.location_code, s.location_type].some(
+    (v) => v != null && String(v).toLowerCase().includes(needle),
+  );
+}
+
+// Date-range filter — lives in the URL (?from=&to=) so it's shareable. Plain
+// GET form: no params -> today (see page.tsx). key= re-mounts the inputs so
+// their defaultValue tracks the range after nav. Rendered in every section
+// that's driven by the range.
+function DateRangeForm({
+  filterFrom,
+  filterTo,
+  today,
+}: {
+  filterFrom: string;
+  filterTo: string;
+  today: string;
+}) {
+  return (
+    <form
+      key={`${filterFrom}-${filterTo}`}
+      method="get"
+      action="/dashboard"
+      className="flex flex-wrap items-end gap-3"
+    >
+      <label className="flex flex-col gap-1">
+        <span className="text-black/50 dark:text-white/50">De</span>
+        <input
+          type="date"
+          name="from"
+          defaultValue={filterFrom}
+          max={today}
+          className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-black/50 dark:text-white/50">Até</span>
+        <input
+          type="date"
+          name="to"
+          defaultValue={filterTo}
+          max={today}
+          className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+        />
+      </label>
+      <button type="submit" className={chipClass}>
+        Aplicar
+      </button>
+      <span className="mx-1 self-center text-black/20 dark:text-white/20">|</span>
+      <Link href="/dashboard" className={chipClass}>
+        Hoje
+      </Link>
+      <Link
+        href={`/dashboard?from=${ymdMinus(today, 6)}&to=${today}`}
+        className={chipClass}
+      >
+        Últimos 7 dias
+      </Link>
+    </form>
+  );
+}
+
 export function DashboardClient({
   trips,
   tripsError,
@@ -337,6 +503,8 @@ export function DashboardClient({
   implausibleThresholdHours,
   matrix,
   matrixError,
+  stops,
+  stopsError,
   filterFrom,
   filterTo,
   today,
@@ -347,16 +515,19 @@ export function DashboardClient({
   implausibleThresholdHours: number;
   matrix: MatrixRow[];
   matrixError: string | null;
+  stops: StopRow[];
+  stopsError: string | null;
   filterFrom: string;
   filterTo: string;
   today: string;
 }) {
-  const anyError = tripsError ?? matrixError;
+  const anyError = tripsError ?? matrixError ?? stopsError;
 
-  // Client-side free-text search over the already-loaded rows (trips are also
+  // Client-side free-text search over the already-loaded rows (also
   // date-filtered server-side). Debounced; no server round-trip.
   const tripSearch = useDebouncedSearch();
   const matrixSearch = useDebouncedSearch();
+  const stopSearch = useDebouncedSearch();
 
   const filteredTrips = useMemo(
     () =>
@@ -371,6 +542,13 @@ export function DashboardClient({
         ? matrix.filter((m) => matrixMatchesSearch(m, matrixSearch.value))
         : matrix,
     [matrix, matrixSearch.value],
+  );
+  const filteredStops = useMemo(
+    () =>
+      stopSearch.value
+        ? stops.filter((s) => stopMatchesSearch(s, stopSearch.value))
+        : stops,
+    [stops, stopSearch.value],
   );
 
   // Exports reflect what each section shows (date + text filters).
@@ -388,6 +566,13 @@ export function DashboardClient({
       "Matriz",
       MATRIX_HEADERS,
     );
+  const exportStops = () =>
+    exportToXlsx(
+      stopsToExportRows(filteredStops),
+      `paragens-${todayStamp()}.xlsx`,
+      "Paragens",
+      STOP_HEADERS,
+    );
   const exportAll = () =>
     exportWorkbook(
       [
@@ -400,6 +585,11 @@ export function DashboardClient({
           name: "Matriz",
           rows: matrixToExportRows(filteredMatrix),
           headers: MATRIX_HEADERS,
+        },
+        {
+          name: "Paragens",
+          rows: stopsToExportRows(filteredStops),
+          headers: STOP_HEADERS,
         },
       ],
       `dashboard-completo-${todayStamp()}.xlsx`,
@@ -429,8 +619,8 @@ export function DashboardClient({
           <Notice>
             Erro a carregar dados: <code className="font-mono">{anyError}</code>
             <br />
-            Se as views não existem, aplica a migração{" "}
-            <code className="font-mono">0010_dashboard_views.sql</code>.
+            Se as views não existem ou estão desatualizadas, aplica as migrações{" "}
+            <code className="font-mono">0010</code>–<code className="font-mono">0015</code>.
           </Notice>
         </div>
       )}
@@ -451,51 +641,11 @@ export function DashboardClient({
         </div>
 
         <div className="mb-3 flex flex-wrap items-end gap-x-6 gap-y-3 text-sm">
-          {/* Date-range filter — lives in the URL (?from=&to=) so it's shareable.
-              Plain GET form: no params -> today (see page.tsx). key= re-mounts
-              the inputs so their defaultValue tracks the range after nav. */}
-          <form
-            key={`${filterFrom}-${filterTo}`}
-            method="get"
-            action="/dashboard"
-            className="flex flex-wrap items-end gap-3"
-          >
-          <label className="flex flex-col gap-1">
-            <span className="text-black/50 dark:text-white/50">De</span>
-            <input
-              type="date"
-              name="from"
-              defaultValue={filterFrom}
-              max={today}
-              className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-black/50 dark:text-white/50">Até</span>
-            <input
-              type="date"
-              name="to"
-              defaultValue={filterTo}
-              max={today}
-              className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
-            />
-          </label>
-          <button type="submit" className={chipClass}>
-            Aplicar
-          </button>
-          <span className="mx-1 self-center text-black/20 dark:text-white/20">
-            |
-          </span>
-          <Link href="/dashboard" className={chipClass}>
-            Hoje
-          </Link>
-          <Link
-            href={`/dashboard?from=${ymdMinus(today, 6)}&to=${today}`}
-            className={chipClass}
-          >
-            Últimos 7 dias
-          </Link>
-          </form>
+          <DateRangeForm
+            filterFrom={filterFrom}
+            filterTo={filterTo}
+            today={today}
+          />
 
           <label className="flex flex-col gap-1">
             <span className="text-black/50 dark:text-white/50">Pesquisar</span>
@@ -528,7 +678,7 @@ export function DashboardClient({
         )}
       </section>
 
-      <section>
+      <section className="mb-12">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-medium">
             Matriz tempo / km por par de locais{" "}
@@ -560,6 +710,49 @@ export function DashboardClient({
             rows={filteredMatrix}
             columns={matrixColumns}
             initialSort={{ key: "count", dir: "desc" }}
+          />
+        )}
+      </section>
+
+      <section>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-medium">
+            Paragens{" "}
+            <span className="text-sm font-normal text-black/40 dark:text-white/40">
+              ({filteredStops.length},{" "}
+              {intervalLabel(filterFrom, filterTo, today)}
+              {stopSearch.value ? ` · “${stopSearch.value}”` : ""})
+            </span>
+          </h2>
+          <ExportButton onClick={() => void exportStops()}>
+            Exportar .xlsx
+          </ExportButton>
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-end gap-x-6 gap-y-3 text-sm">
+          <DateRangeForm
+            filterFrom={filterFrom}
+            filterTo={filterTo}
+            today={today}
+          />
+
+          <label className="flex flex-col gap-1">
+            <span className="text-black/50 dark:text-white/50">Pesquisar</span>
+            <input
+              type="search"
+              value={stopSearch.input}
+              onChange={(e) => stopSearch.setInput(e.target.value)}
+              placeholder="local, código, tipo…"
+              className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+            />
+          </label>
+        </div>
+
+        {!stopsError && (
+          <SortableTable
+            rows={filteredStops}
+            columns={stopColumns}
+            initialSort={{ key: "arrived", dir: "desc" }}
           />
         )}
       </section>

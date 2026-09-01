@@ -4,6 +4,7 @@ import {
   DashboardClient,
   type Trip,
   type MatrixRow,
+  type StopRow,
 } from "./dashboard-client";
 
 // Internal tool, no auth yet (see the request). Operational data — always
@@ -82,18 +83,21 @@ export default async function DashboardPage({
 
   const supabase = createAdminClient();
 
-  const [tripsRes, matrixRes] = await Promise.all([
+  const fromISO = lisbonDayStartISO(fromYmd);
+  const toISO = lisbonDayStartISO(addDaysYmd(toYmd, 1));
+
+  const [tripsRes, matrixRes, stopsRes] = await Promise.all([
     supabase
       .from("v_recent_trips")
       .select(
-        "vehicle_id, vehicle_plate, origin_name, destination_name, origin_code, destination_code, departed_at, arrived_at, travel_seconds, leg_km",
+        "vehicle_id, vehicle_plate, origin_name, destination_name, origin_code, destination_code, departed_at, arrived_at, travel_seconds, leg_km, destination_duration_minutes",
       )
       // Section 1 is store↔store↔warehouse trips — both ends must be a known location.
       .not("origin_location_id", "is", null)
       .not("destination_location_id", "is", null)
       // Date range on arrived_at: [start of `from` day, start of the day after `to`).
-      .gte("arrived_at", lisbonDayStartISO(fromYmd))
-      .lt("arrived_at", lisbonDayStartISO(addDaysYmd(toYmd, 1)))
+      .gte("arrived_at", fromISO)
+      .lt("arrived_at", toISO)
       .order("arrived_at", { ascending: false })
       // A day / week of trips is bounded; cap high just as a guard.
       .limit(2000),
@@ -104,6 +108,18 @@ export default async function DashboardPage({
       )
       .order("trip_count", { ascending: false })
       .limit(500),
+    // "Paragens" section: closed stops in the same date window, with their
+    // matched location (null when the stop didn't match a known location).
+    supabase
+      .from("stops")
+      .select(
+        "id, arrived_at, departed_at, duration_minutes, ping_count, location:locations(code, name, type)",
+      )
+      .eq("status", "closed")
+      .gte("arrived_at", fromISO)
+      .lt("arrived_at", toISO)
+      .order("arrived_at", { ascending: false })
+      .limit(3000),
   ]);
 
   // Drop implausibly long trips (see MAX_PLAUSIBLE_TRAVEL_SECONDS) but keep a
@@ -116,6 +132,26 @@ export default async function DashboardPage({
   );
   const implausibleExcluded = allTrips.length - trips.length;
 
+  // Flatten the embedded location onto each stop row for the table/export.
+  type StopQueryRow = {
+    id: string;
+    arrived_at: string;
+    departed_at: string | null;
+    duration_minutes: number | null;
+    ping_count: number;
+    location: { code: string | null; name: string | null; type: string | null } | null;
+  };
+  const stops = ((stopsRes.data ?? []) as unknown as StopQueryRow[]).map((s) => ({
+    id: s.id,
+    arrived_at: s.arrived_at,
+    departed_at: s.departed_at,
+    duration_minutes: s.duration_minutes,
+    ping_count: s.ping_count,
+    location_code: s.location?.code ?? null,
+    location_name: s.location?.name ?? null,
+    location_type: s.location?.type ?? null,
+  })) satisfies StopRow[];
+
   return (
     <DashboardClient
       trips={trips}
@@ -124,6 +160,8 @@ export default async function DashboardPage({
       implausibleThresholdHours={MAX_PLAUSIBLE_TRAVEL_HOURS}
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
       matrixError={matrixRes.error?.message ?? null}
+      stops={stops}
+      stopsError={stopsRes.error?.message ?? null}
       filterFrom={fromYmd}
       filterTo={toYmd}
       today={today}
