@@ -1,10 +1,12 @@
 name: Sync TRACKiT stops
 
 on:
-  schedule:
-    # Every 10 minutes, offset by 3 (:03, :13, :23, …) so it lands a few
-    # minutes after a sync-positions run rather than racing it at :00/:10.
-    - cron: "3-59/10 * * * *"
+  # Scheduling is handled by the external scheduler (cron-job.org) hitting
+  # /api/sync/stops directly. Re-enable the cron here only if that changes.
+  # A 3-min offset (3-59/10) is the sensible cadence if it comes back, so it
+  # trails a sync-positions run rather than racing it at :00/:10.
+  # schedule:
+  #   - cron: "3-59/10 * * * *"
   workflow_dispatch: {}
 
 # One invocation at a time — a manual dispatch must not overlap a scheduled run.
