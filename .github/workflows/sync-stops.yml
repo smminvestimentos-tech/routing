@@ -1,11 +1,10 @@
 name: Sync TRACKiT stops
 
 on:
-  # Every 10 minutes. Left disabled for now — enable by uncommenting the cron
-  # once the ping pipeline is meant to run live. Consider a phase offset (e.g.
-  # "3-59/10 * * * *") so it lands a few minutes after a positions run.
-  # schedule:
-  #   - cron: "*/10 * * * *"
+  schedule:
+    # Every 10 minutes. A phase offset (e.g. "3-59/10 * * * *") would make it
+    # land a few minutes after a positions run instead of racing it at :00/:10.
+    - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
 # One invocation at a time — a manual dispatch must not overlap a scheduled run.
