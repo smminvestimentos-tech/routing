@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isSyncAuthorized } from "@/lib/sync/auth";
 import { getVehiclesForUser, parseVehiclePosition } from "@/lib/trackit/client";
 
 // One GET /api/vehiclesForUser call for the whole fleet plus one bulk upsert —
@@ -23,14 +24,8 @@ const ODOMETER_REGRESSION_FLOOR = 0.95;
 // pruned on each ingest to keep the table bounded.
 const PING_RETENTION_DAYS = 30;
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.SYNC_SECRET;
-  if (!secret) return true; // no secret configured: open (local dev only)
-  return request.headers.get("authorization") === `Bearer ${secret}`;
-}
-
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isSyncAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

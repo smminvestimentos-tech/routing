@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isSyncAuthorized } from "@/lib/sync/auth";
 
 // detect_stops() is a single set-returning PL/pgSQL call: it walks each
 // vehicle's pings from where that vehicle's last stop left off, so the work
@@ -9,12 +10,6 @@ export const maxDuration = 300;
 
 const TRACKIT_ACCOUNT = "default";
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.SYNC_SECRET;
-  if (!secret) return true; // no secret configured: open (local dev only)
-  return request.headers.get("authorization") === `Bearer ${secret}`;
-}
-
 type DetectStopsRow = {
   vehicle_id: number;
   stops_upserted: number;
@@ -22,7 +17,7 @@ type DetectStopsRow = {
 };
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isSyncAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

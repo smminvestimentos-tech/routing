@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findNearestLocationId, type GeoPoint } from "@/lib/geo";
+import { isSyncAuthorized } from "@/lib/sync/auth";
 import {
   getPois,
   getVehiclesForUser,
@@ -55,13 +56,6 @@ function formatTrackitDate(date: Date): string {
   );
 }
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.SYNC_SECRET;
-  if (!secret) return true; // no secret configured: open (local dev only)
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
-}
-
 export async function POST(request: NextRequest) {
   // TEMPORARY: timing instrumentation to find where the Hobby 10s budget is
   // going. Remove once the bottleneck is identified. fnStart must be local
@@ -71,7 +65,7 @@ export async function POST(request: NextRequest) {
   const mark = (label: string) => console.log(`[timing] ${label} +${Date.now() - fnStart}ms`);
   mark("function start");
 
-  if (!isAuthorized(request)) {
+  if (!isSyncAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
