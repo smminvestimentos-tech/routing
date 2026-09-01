@@ -21,7 +21,7 @@ export default async function DashboardPage() {
     supabase
       .from("v_recent_trips")
       .select(
-        "vehicle_id, origin_name, destination_name, departed_at, arrived_at, travel_seconds, leg_km",
+        "vehicle_id, vehicle_plate, origin_name, destination_name, departed_at, arrived_at, travel_seconds, leg_km",
       )
       // Section 1 is store↔store↔warehouse trips — both ends must be a known location.
       .not("origin_location_id", "is", null)

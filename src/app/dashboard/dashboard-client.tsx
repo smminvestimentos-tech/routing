@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 
 export type Trip = {
   vehicle_id: number;
+  vehicle_plate: string | null;
   origin_name: string | null;
   destination_name: string | null;
   departed_at: string | null;
@@ -149,7 +150,12 @@ function SortableTable<T>({
 }
 
 const tripColumns: Col<Trip>[] = [
-  { key: "vehicle", label: "Veículo", value: (r) => r.vehicle_id },
+  {
+    key: "vehicle",
+    label: "Veículo",
+    value: (r) => r.vehicle_plate ?? String(r.vehicle_id),
+    render: (r) => r.vehicle_plate ?? String(r.vehicle_id),
+  },
   { key: "origin", label: "Origem", value: (r) => r.origin_name ?? "" , render: (r) => r.origin_name ?? "—" },
   {
     key: "route",
