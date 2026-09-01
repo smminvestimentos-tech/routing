@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
+import {
+  SortableTable,
+  useDebouncedSearch,
+  Notice,
+  chipClass,
+  type Col,
+} from "./_shared";
 
 export type Trip = {
   vehicle_id: number;
@@ -197,110 +204,6 @@ function ExportButton({
 
 // ---------------------------------------------------------------------------
 
-type Col<T> = {
-  key: string;
-  label: string;
-  align?: "right";
-  /** value used for sorting */
-  value: (row: T) => string | number | null;
-  /** display; falls back to value() */
-  render?: (row: T) => ReactNode;
-};
-
-type Sort = { key: string; dir: "asc" | "desc" };
-
-function SortableTable<T>({
-  rows,
-  columns,
-  initialSort,
-}: {
-  rows: T[];
-  columns: Col<T>[];
-  initialSort: Sort;
-}) {
-  const [sort, setSort] = useState<Sort>(initialSort);
-
-  const sorted = useMemo(() => {
-    const col = columns.find((c) => c.key === sort.key);
-    if (!col) return rows;
-    const arr = [...rows];
-    arr.sort((a, b) => {
-      const av = col.value(a);
-      const bv = col.value(b);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      const cmp =
-        typeof av === "number" && typeof bv === "number"
-          ? av - bv
-          : String(av).localeCompare(String(bv), "pt");
-      return sort.dir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [rows, columns, sort]);
-
-  const toggle = (key: string) =>
-    setSort((s) =>
-      s.key === key
-        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "asc" },
-    );
-
-  return (
-    <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-black/[.03] text-left dark:bg-white/[.04]">
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                onClick={() => toggle(c.key)}
-                className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium ${
-                  c.align === "right" ? "text-right" : "text-left"
-                }`}
-              >
-                {c.label}
-                <span className="text-black/40 dark:text-white/40">
-                  {sort.key === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-                </span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row, i) => (
-            <tr
-              key={i}
-              className="border-t border-black/[.06] hover:bg-black/[.02] dark:border-white/[.08] dark:hover:bg-white/[.03]"
-            >
-              {columns.map((c) => (
-                <td
-                  key={c.key}
-                  className={`whitespace-nowrap px-3 py-1.5 ${
-                    c.align === "right" ? "text-right tabular-nums" : ""
-                  }`}
-                >
-                  {c.render ? c.render(row) : (c.value(row) ?? "—")}
-                </td>
-              ))}
-            </tr>
-          ))}
-          {sorted.length === 0 && (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-3 py-6 text-center text-black/50 dark:text-white/50"
-              >
-                Sem dados
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 const tripColumns: Col<Trip>[] = [
   {
     key: "vehicle",
@@ -425,28 +328,6 @@ function matrixMatchesSearch(m: MatrixRow, needle: string): boolean {
   ].some((v) => v != null && String(v).toLowerCase().includes(needle));
 }
 
-// Text box + its debounced (~200ms), trimmed, lower-cased value.
-function useDebouncedSearch() {
-  const [input, setInput] = useState("");
-  const [value, setValue] = useState("");
-  useEffect(() => {
-    const id = setTimeout(() => setValue(input.trim().toLowerCase()), 200);
-    return () => clearTimeout(id);
-  }, [input]);
-  return { input, setInput, value };
-}
-
-const chipClass =
-  "rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/[.04] dark:border-white/20 dark:hover:bg-white/[.06]";
-
-function Notice({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-      {children}
-    </div>
-  );
-}
-
 export function DashboardClient({
   trips,
   tripsError,
@@ -527,9 +408,14 @@ export function DashboardClient({
             Uso interno · sem autenticação
           </p>
         </div>
-        <ExportButton onClick={() => void exportAll()}>
-          Exportar tudo
-        </ExportButton>
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard/locations" className={chipClass}>
+            Gerir locations
+          </Link>
+          <ExportButton onClick={() => void exportAll()}>
+            Exportar tudo
+          </ExportButton>
+        </div>
       </header>
 
       {anyError && (
