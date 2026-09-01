@@ -41,9 +41,149 @@ function fmtDateTime(iso: string | null): string {
   });
 }
 
+// Table cells: 1 decimal. The .xlsx export uses fmtKm2 (2 decimals) per spec.
 function fmtKm(n: number | null): string {
   return n == null ? "—" : `${n.toFixed(1)} km`;
 }
+
+function fmtKm2(n: number | null): string {
+  return n == null ? "—" : `${n.toFixed(2)} km`;
+}
+
+// ---------------------------------------------------------------------------
+// .xlsx export (SheetJS). Runs entirely in the browser — xlsx is loaded lazily
+// on first click so it stays out of the initial /dashboard bundle.
+// ---------------------------------------------------------------------------
+
+function todayStamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+type ExportRow = Record<string, string | number>;
+
+// Explicit column order per export. Kept as constants so an empty section can
+// still produce a header-only sheet. Must match the keys built in
+// tripsToExportRows / matrixToExportRows below.
+const TRIP_HEADERS = [
+  "Veículo",
+  "Origem",
+  "Destino",
+  "Partida",
+  "Chegada",
+  "Duração",
+  "Km",
+] as const;
+
+const MATRIX_HEADERS = [
+  "Fonte",
+  "Origem",
+  "Destino",
+  "Viagens",
+  "Tempo médio",
+  "Tempo mediano",
+  "Km médio",
+] as const;
+
+// Human-readable rows — same formatting as the on-screen tables (durations as
+// "1h 23m", dates in pt-PT), km at 2 decimals — never the raw seconds/ISO.
+function tripsToExportRows(trips: Trip[]): ExportRow[] {
+  return trips.map((t) => ({
+    Veículo: t.vehicle_plate ?? String(t.vehicle_id),
+    Origem: t.origin_name ?? "—",
+    Destino: t.destination_name ?? "—",
+    Partida: fmtDateTime(t.departed_at),
+    Chegada: fmtDateTime(t.arrived_at),
+    Duração: fmtDuration(t.travel_seconds),
+    Km: fmtKm2(t.leg_km),
+  }));
+}
+
+function matrixToExportRows(matrix: MatrixRow[]): ExportRow[] {
+  return matrix.map((m) => ({
+    Fonte: m.source,
+    Origem: m.origin_name ?? "—",
+    Destino: m.destination_name ?? "—",
+    Viagens: m.trip_count,
+    "Tempo médio": fmtDuration(m.avg_duration_seconds),
+    "Tempo mediano": fmtDuration(m.median_duration_seconds),
+    "Km médio": fmtKm2(m.avg_distance_km),
+  }));
+}
+
+// A header-only sheet when there are no rows, so the section is visibly
+// present in the workbook rather than a blank tab that reads as corrupt.
+function makeSheet(
+  XLSX: typeof import("xlsx"),
+  rows: ExportRow[],
+  headers: readonly string[],
+) {
+  return rows.length > 0
+    ? XLSX.utils.json_to_sheet(rows)
+    : XLSX.utils.aoa_to_sheet([[...headers]]);
+}
+
+async function exportToXlsx(
+  rows: ExportRow[],
+  filename: string,
+  sheetName: string,
+  headers: readonly string[],
+): Promise<void> {
+  try {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, makeSheet(XLSX, rows, headers), sheetName);
+    XLSX.writeFile(wb, filename);
+  } catch (e) {
+    console.error("xlsx export failed", e);
+    alert("Falha ao exportar o ficheiro.");
+  }
+}
+
+async function exportWorkbook(
+  sheets: { name: string; rows: ExportRow[]; headers: readonly string[] }[],
+  filename: string,
+): Promise<void> {
+  try {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.utils.book_new();
+    for (const s of sheets) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        makeSheet(XLSX, s.rows, s.headers),
+        s.name,
+      );
+    }
+    XLSX.writeFile(wb, filename);
+  } catch (e) {
+    console.error("xlsx export failed", e);
+    alert("Falha ao exportar o ficheiro.");
+  }
+}
+
+function ExportButton({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="shrink-0 rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:hover:bg-white/[.06]"
+    >
+      {children}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 type Col<T> = {
   key: string;
@@ -250,13 +390,49 @@ export function DashboardClient({
 }) {
   const anyError = tripsError ?? matrixError;
 
+  const exportTrips = () =>
+    exportToXlsx(
+      tripsToExportRows(trips),
+      `trajetos-recentes-${todayStamp()}.xlsx`,
+      "Trajetos",
+      TRIP_HEADERS,
+    );
+  const exportMatrix = () =>
+    exportToXlsx(
+      matrixToExportRows(matrix),
+      `matriz-tempo-km-${todayStamp()}.xlsx`,
+      "Matriz",
+      MATRIX_HEADERS,
+    );
+  const exportAll = () =>
+    exportWorkbook(
+      [
+        {
+          name: "Trajetos",
+          rows: tripsToExportRows(trips),
+          headers: TRIP_HEADERS,
+        },
+        {
+          name: "Matriz",
+          rows: matrixToExportRows(matrix),
+          headers: MATRIX_HEADERS,
+        },
+      ],
+      `dashboard-completo-${todayStamp()}.xlsx`,
+    );
+
   return (
     <main className="mx-auto w-full max-w-6xl px-6 py-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="mt-1 text-sm text-black/50 dark:text-white/50">
-          Uso interno · sem autenticação
-        </p>
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-black/50 dark:text-white/50">
+            Uso interno · sem autenticação
+          </p>
+        </div>
+        <ExportButton onClick={() => void exportAll()}>
+          Exportar tudo
+        </ExportButton>
       </header>
 
       {anyError && (
@@ -271,12 +447,17 @@ export function DashboardClient({
       )}
 
       <section className="mb-12">
-        <h2 className="mb-3 text-lg font-medium">
-          Trajetos recentes{" "}
-          <span className="text-sm font-normal text-black/40 dark:text-white/40">
-            (últimos {trips.length}, via stops)
-          </span>
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-medium">
+            Trajetos recentes{" "}
+            <span className="text-sm font-normal text-black/40 dark:text-white/40">
+              (últimos {trips.length}, via stops)
+            </span>
+          </h2>
+          <ExportButton onClick={() => void exportTrips()}>
+            Exportar .xlsx
+          </ExportButton>
+        </div>
         {!tripsError && (
           <SortableTable
             rows={trips}
@@ -287,12 +468,17 @@ export function DashboardClient({
       </section>
 
       <section>
-        <h2 className="mb-3 text-lg font-medium">
-          Matriz tempo / km por par de locais{" "}
-          <span className="text-sm font-normal text-black/40 dark:text-white/40">
-            ({matrix.length} pares · stops + route_legs)
-          </span>
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-medium">
+            Matriz tempo / km por par de locais{" "}
+            <span className="text-sm font-normal text-black/40 dark:text-white/40">
+              ({matrix.length} pares · stops + route_legs)
+            </span>
+          </h2>
+          <ExportButton onClick={() => void exportMatrix()}>
+            Exportar .xlsx
+          </ExportButton>
+        </div>
         {!matrixError && (
           <SortableTable
             rows={matrix}
