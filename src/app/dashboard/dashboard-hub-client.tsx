@@ -26,6 +26,12 @@ import {
   DWELL_STAT_HEADERS,
   type DwellStatRow,
 } from "./paragens/paragens-client";
+import {
+  computeRoutes,
+  rotasToExportRows,
+  ROTA_HEADERS,
+  type RouteEstimateRow,
+} from "./rotas/rotas-client";
 
 const CARDS = [
   {
@@ -43,6 +49,11 @@ const CARDS = [
     title: "Paragens",
     desc: "Paragens detetadas (local, chegada/partida, tempo parado, pings) e o tempo médio parado por local.",
   },
+  {
+    href: "/dashboard/rotas",
+    title: "Rotas",
+    desc: "Estimativa de tempo total por rota — carga + viagem + descarga, com margem editável por rota.",
+  },
 ] as const;
 
 export function DashboardHubClient({
@@ -50,12 +61,18 @@ export function DashboardHubClient({
   matrix,
   stops,
   dwellStats,
+  routes,
+  routeOverrides,
+  defaultMargin,
   anyError,
 }: {
   trips: Trip[];
   matrix: MatrixRow[];
   stops: StopRow[];
   dwellStats: DwellStatRow[];
+  routes: RouteEstimateRow[];
+  routeOverrides: Record<string, number>;
+  defaultMargin: number;
   anyError: string | null;
 }) {
   // "Exportar tudo" — one workbook, one sheet per section, at today's range.
@@ -81,6 +98,13 @@ export function DashboardHubClient({
           name: "Tempo por local",
           rows: dwellStatsToExportRows(dwellStats),
           headers: DWELL_STAT_HEADERS,
+        },
+        {
+          name: "Rotas",
+          rows: rotasToExportRows(
+            computeRoutes(routes, routeOverrides, defaultMargin),
+          ),
+          headers: ROTA_HEADERS,
         },
       ],
       `dashboard-completo-${todayStamp()}.xlsx`,
@@ -114,7 +138,7 @@ export function DashboardHubClient({
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {CARDS.map((c) => (
           <Link
             key={c.href}

@@ -67,14 +67,14 @@ export function SortableTable<T>({
     );
 
   // Pagination is client-side, over the already sorted+filtered rows (same
-  // model as search/sort — no extra server round-trips). `sorted` gets a new
-  // identity whenever `rows` (search changes it) or the sort changes, so this
-  // snaps back to page 1 then — you never sit on a page that no longer holds
-  // relevant rows. (Adjusting state during render, per the React docs, rather
-  // than an effect.)
-  const [pagedFrom, setPagedFrom] = useState(sorted);
-  if (pagedFrom !== sorted) {
-    setPagedFrom(sorted);
+  // model as search/sort — no extra server round-trips). Snap back to page 1
+  // when the result set changes size (search) or the sort changes — but NOT on
+  // every re-render of `rows` (an inline-edited cell keeps the same rows), so
+  // you don't get bounced off the page you're working on. (Adjusting state
+  // during render, per the React docs, rather than an effect.)
+  const [pageAnchor, setPageAnchor] = useState({ len: rows.length, sort });
+  if (pageAnchor.len !== rows.length || pageAnchor.sort !== sort) {
+    setPageAnchor({ len: rows.length, sort });
     setPage(1);
   }
 

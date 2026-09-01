@@ -4,6 +4,7 @@ import { DashboardHubClient } from "./dashboard-hub-client";
 import type { Trip } from "./trajetos/trajetos-client";
 import type { MatrixRow } from "./matriz/matriz-client";
 import type { DwellStatRow } from "./paragens/paragens-client";
+import type { RouteEstimateRow } from "./rotas/rotas-client";
 import {
   todayInLisbon,
   addDaysYmd,
@@ -11,6 +12,7 @@ import {
   flattenStops,
   MAX_PLAUSIBLE_TRAVEL_SECONDS,
 } from "./_server";
+import { DEFAULT_MARGIN_PERCENT } from "@/lib/margins";
 
 // Internal tool, no auth yet. Navigation hub for the three sections; it still
 // fetches all three (at today's range) so "Exportar tudo" can build the
@@ -27,7 +29,8 @@ export default async function DashboardPage() {
   const fromISO = lisbonDayStartISO(today);
   const toISO = lisbonDayStartISO(addDaysYmd(today, 1));
 
-  const [tripsRes, matrixRes, stopsRes, dwellRes] = await Promise.all([
+  const [tripsRes, matrixRes, stopsRes, dwellRes, routesRes, marginsRes, settingsRes] =
+    await Promise.all([
     supabase
       .from("v_recent_trips")
       .select(
@@ -63,7 +66,28 @@ export default async function DashboardPage() {
       )
       .order("stop_count", { ascending: false })
       .limit(1000),
+    supabase
+      .from("v_route_estimates")
+      .select(
+        "origin_location_id, destination_location_id, origin_code, origin_name, destination_code, destination_name, trip_count, avg_travel_minutes, origin_load_minutes, destination_load_minutes",
+      )
+      .order("trip_count", { ascending: false })
+      .limit(2000),
+    supabase
+      .from("route_margins")
+      .select("origin_location_id, destination_location_id, margin_percent"),
+    supabase
+      .from("dashboard_settings")
+      .select("default_margin_percent")
+      .eq("id", true)
+      .maybeSingle(),
   ]);
+
+  const routeOverrides: Record<string, number> = {};
+  for (const m of marginsRes.data ?? []) {
+    routeOverrides[`${m.origin_location_id}|${m.destination_location_id}`] =
+      Number(m.margin_percent);
+  }
 
   // Same sanity cut as /dashboard/trajetos so the export matches the page.
   const trips = ((tripsRes.data ?? []) as Trip[]).filter(
@@ -78,11 +102,19 @@ export default async function DashboardPage() {
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
       stops={flattenStops(stopsRes.data)}
       dwellStats={(dwellRes.data ?? []) as DwellStatRow[]}
+      routes={(routesRes.data ?? []) as RouteEstimateRow[]}
+      routeOverrides={routeOverrides}
+      defaultMargin={
+        settingsRes.data?.default_margin_percent != null
+          ? Number(settingsRes.data.default_margin_percent)
+          : DEFAULT_MARGIN_PERCENT
+      }
       anyError={
         tripsRes.error?.message ??
         matrixRes.error?.message ??
         stopsRes.error?.message ??
         dwellRes.error?.message ??
+        routesRes.error?.message ??
         null
       }
     />
