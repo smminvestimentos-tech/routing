@@ -8,7 +8,7 @@ import { validateLocationInput } from "@/lib/locations/validate";
 export const dynamic = "force-dynamic";
 
 const COLUMNS =
-  "id, code, arp2_code, name, type, address, locality, latitude, longitude, radius_meters, updated_at";
+  "id, code, arp2_code, name, type, address, locality, time_window, latitude, longitude, radius_meters, updated_at";
 
 // Postgres unique_violation — here it can only be the `code` unique index.
 const UNIQUE_VIOLATION = "23505";

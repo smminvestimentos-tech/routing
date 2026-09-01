@@ -34,6 +34,7 @@ export type Location = {
   type: string | null;
   address: string | null;
   locality: string | null;
+  time_window: string | null;
   latitude: number | null;
   longitude: number | null;
   radius_meters: number;
@@ -100,6 +101,12 @@ const columns: Col<Location>[] = [
     render: (r) => r.locality ?? "—",
   },
   {
+    key: "time_window",
+    label: "Janela horária",
+    value: (r) => r.time_window ?? "",
+    render: (r) => r.time_window ?? "—",
+  },
+  {
     key: "lat",
     label: "Lat",
     align: "right",
@@ -145,6 +152,7 @@ type FormState = {
   type: string;
   address: string;
   locality: string;
+  time_window: string;
   latitude: string;
   longitude: string;
   radius_meters: string;
@@ -158,6 +166,7 @@ function toForm(l: Location | null): FormState {
     type: l?.type ?? "",
     address: l?.address ?? "",
     locality: l?.locality ?? "",
+    time_window: l?.time_window ?? "",
     latitude: l?.latitude != null ? String(l.latitude) : "",
     longitude: l?.longitude != null ? String(l.longitude) : "",
     radius_meters: l?.radius_meters != null ? String(l.radius_meters) : "150",
@@ -357,6 +366,18 @@ function LocationPanel({
               className={inputClass}
               value={form.locality}
               onChange={set("locality")}
+            />
+          </Field>
+
+          <Field
+            label="Janela horária"
+            error={errors.time_window}
+            hint="Texto livre, ex. 08:00-12:00 ou “qualquer hora”"
+          >
+            <input
+              className={inputClass}
+              value={form.time_window}
+              onChange={set("time_window")}
             />
           </Field>
 

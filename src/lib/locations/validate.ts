@@ -28,6 +28,9 @@ export type LocationInput = {
   type: LocationType | null;
   address: string | null;
   locality: string | null;
+  // Free text for now (e.g. "08:00-12:00", "qualquer hora") — the source data
+  // format isn't settled yet, so no format validation.
+  time_window: string | null;
   latitude: number | null;
   longitude: number | null;
   radius_meters: number;
@@ -137,6 +140,7 @@ export function validateLocationInput(raw: unknown): ValidationResult {
       type,
       address: asTrimmedOrNull(body.address),
       locality: asTrimmedOrNull(body.locality),
+      time_window: asTrimmedOrNull(body.time_window),
       latitude: latitude ?? null,
       longitude: longitude ?? null,
       radius_meters,

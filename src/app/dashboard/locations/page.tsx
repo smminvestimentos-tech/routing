@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 const COLUMNS =
-  "id, code, arp2_code, name, type, address, locality, latitude, longitude, radius_meters, active, updated_at";
+  "id, code, arp2_code, name, type, address, locality, time_window, latitude, longitude, radius_meters, active, updated_at";
 
 export default async function LocationsPage() {
   const supabase = createAdminClient();
