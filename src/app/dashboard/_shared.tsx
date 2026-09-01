@@ -20,19 +20,25 @@ export type Col<T> = {
 
 export type Sort = { key: string; dir: "asc" | "desc" };
 
+const DEFAULT_PAGE_SIZE = 50;
+
 export function SortableTable<T>({
   rows,
   columns,
   initialSort,
   onRowClick,
+  pageSize = DEFAULT_PAGE_SIZE,
 }: {
   rows: T[];
   columns: Col<T>[];
   initialSort: Sort;
   /** when set, rows become clickable (pointer cursor + click handler) */
   onRowClick?: (row: T) => void;
+  /** client-side rows per page; defaults to 50 */
+  pageSize?: number;
 }) {
   const [sort, setSort] = useState<Sort>(initialSort);
+  const [page, setPage] = useState(1);
 
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort.key);
@@ -60,60 +66,119 @@ export function SortableTable<T>({
         : { key, dir: "asc" },
     );
 
+  // Pagination is client-side, over the already sorted+filtered rows (same
+  // model as search/sort — no extra server round-trips). `sorted` gets a new
+  // identity whenever `rows` (search changes it) or the sort changes, so this
+  // snaps back to page 1 then — you never sit on a page that no longer holds
+  // relevant rows. (Adjusting state during render, per the React docs, rather
+  // than an effect.)
+  const [pagedFrom, setPagedFrom] = useState(sorted);
+  if (pagedFrom !== sorted) {
+    setPagedFrom(sorted);
+    setPage(1);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const paged = useMemo(
+    () => sorted.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [sorted, currentPage, pageSize],
+  );
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-black/[.03] text-left dark:bg-white/[.04]">
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                onClick={() => toggle(c.key)}
-                className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium ${
-                  c.align === "right" ? "text-right" : "text-left"
-                }`}
-              >
-                {c.label}
-                <span className="text-black/40 dark:text-white/40">
-                  {sort.key === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-                </span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row, i) => (
-            <tr
-              key={i}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={`border-t border-black/[.06] hover:bg-black/[.02] dark:border-white/[.08] dark:hover:bg-white/[.03] ${
-                onRowClick ? "cursor-pointer" : ""
-              }`}
-            >
+    <div>
+      {/* max-h + overflow-auto: keeps the existing horizontal scroll on narrow
+          screens AND makes this the vertical scroll container, so the sticky
+          <thead> pins to the top of the table as its rows scroll under it.
+          Short tables never reach max-h, so nothing changes for them. */}
+      <div className="max-h-[70vh] overflow-auto rounded-lg border border-black/10 dark:border-white/15">
+        <table className="w-full border-collapse text-sm">
+          <thead className="sticky top-0 z-10 bg-background text-left">
+            <tr>
               {columns.map((c) => (
-                <td
+                <th
                   key={c.key}
-                  className={`whitespace-nowrap px-3 py-1.5 ${
-                    c.align === "right" ? "text-right tabular-nums" : ""
+                  onClick={() => toggle(c.key)}
+                  // Opaque via bg-background on <thead>; the .03/.04 tint on the
+                  // cells reproduces the old header colour over it. inset shadow
+                  // is the bottom divider (survives border-collapse + sticky,
+                  // unlike border-b).
+                  className={`cursor-pointer select-none whitespace-nowrap bg-black/[.03] px-3 py-2 font-medium shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-white/[.04] dark:shadow-[inset_0_-1px_0_rgba(255,255,255,0.16)] ${
+                    c.align === "right" ? "text-right" : "text-left"
                   }`}
                 >
-                  {c.render ? c.render(row) : (c.value(row) ?? "—")}
-                </td>
+                  {c.label}
+                  <span className="text-black/40 dark:text-white/40">
+                    {sort.key === c.key
+                      ? sort.dir === "asc"
+                        ? " ▲"
+                        : " ▼"
+                      : ""}
+                  </span>
+                </th>
               ))}
             </tr>
-          ))}
-          {sorted.length === 0 && (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-3 py-6 text-center text-black/50 dark:text-white/50"
+          </thead>
+          <tbody>
+            {paged.map((row, i) => (
+              <tr
+                key={i}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={`border-t border-black/[.06] hover:bg-black/[.02] dark:border-white/[.08] dark:hover:bg-white/[.03] ${
+                  onRowClick ? "cursor-pointer" : ""
+                }`}
               >
-                Sem dados
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    className={`whitespace-nowrap px-3 py-1.5 ${
+                      c.align === "right" ? "text-right tabular-nums" : ""
+                    }`}
+                  >
+                    {c.render ? c.render(row) : (c.value(row) ?? "—")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {sorted.length === 0 && (
+              <tr>
+                <td
+                  colSpan={columns.length}
+                  className="px-3 py-6 text-center text-black/50 dark:text-white/50"
+                >
+                  Sem dados
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {pageCount > 1 && (
+        <div className="mt-2 flex items-center justify-between gap-3 text-sm text-black/60 dark:text-white/60">
+          <span>
+            Página {currentPage} de {pageCount}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+              className={`${chipClass} disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage(Math.min(pageCount, currentPage + 1))}
+              disabled={currentPage >= pageCount}
+              className={`${chipClass} disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              Próxima
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
