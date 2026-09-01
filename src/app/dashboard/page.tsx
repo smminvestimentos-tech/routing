@@ -14,24 +14,85 @@ export const metadata: Metadata = {
   title: "Dashboard — Trajetos",
 };
 
-export default async function DashboardPage() {
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// "Recent trips" day boundaries are anchored to Portugal, not the server's UTC.
+function todayInLisbon(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon" }).format(
+    new Date(),
+  );
+}
+
+function addDaysYmd(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+function lisbonOffsetMinutes(at: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(at);
+  const g = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  const asUTC = Date.UTC(
+    g("year"),
+    g("month") - 1,
+    g("day"),
+    g("hour"),
+    g("minute"),
+    g("second"),
+  );
+  return Math.round((asUTC - at.getTime()) / 60000);
+}
+
+// Midnight (Lisbon wall-clock) of the given calendar date, as a UTC ISO string.
+function lisbonDayStartISO(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const off = lisbonOffsetMinutes(new Date(guess));
+  return new Date(guess - off * 60000).toISOString();
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const today = todayInLisbon();
+  const rawFrom = typeof sp.from === "string" && YMD_RE.test(sp.from) ? sp.from : null;
+  const rawTo = typeof sp.to === "string" && YMD_RE.test(sp.to) ? sp.to : null;
+  // No params -> "today" (from 00:00 today, Lisbon, through now).
+  const fromYmd = rawFrom ?? today;
+  const toYmd = rawTo ?? today;
+
   const supabase = createAdminClient();
 
   const [tripsRes, matrixRes] = await Promise.all([
     supabase
       .from("v_recent_trips")
       .select(
-        "vehicle_id, vehicle_plate, origin_name, destination_name, departed_at, arrived_at, travel_seconds, leg_km",
+        "vehicle_id, vehicle_plate, origin_name, destination_name, origin_code, destination_code, departed_at, arrived_at, travel_seconds, leg_km",
       )
       // Section 1 is store↔store↔warehouse trips — both ends must be a known location.
       .not("origin_location_id", "is", null)
       .not("destination_location_id", "is", null)
+      // Date range on arrived_at: [start of `from` day, start of the day after `to`).
+      .gte("arrived_at", lisbonDayStartISO(fromYmd))
+      .lt("arrived_at", lisbonDayStartISO(addDaysYmd(toYmd, 1)))
       .order("arrived_at", { ascending: false })
-      .limit(100),
+      // A day / week of trips is bounded; cap high just as a guard.
+      .limit(2000),
     supabase
       .from("v_location_pair_matrix")
       .select(
-        "source, origin_name, destination_name, trip_count, avg_duration_seconds, median_duration_seconds, avg_distance_km",
+        "source, origin_name, destination_name, origin_code, destination_code, trip_count, avg_duration_seconds, median_duration_seconds, avg_distance_km",
       )
       .order("trip_count", { ascending: false })
       .limit(500),
@@ -43,6 +104,9 @@ export default async function DashboardPage() {
       tripsError={tripsRes.error?.message ?? null}
       matrix={(matrixRes.data ?? []) as MatrixRow[]}
       matrixError={matrixRes.error?.message ?? null}
+      filterFrom={fromYmd}
+      filterTo={toYmd}
+      today={today}
     />
   );
 }
