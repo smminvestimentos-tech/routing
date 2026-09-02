@@ -78,6 +78,53 @@ function TruckGlyph({ className = "" }: { className?: string }) {
   );
 }
 
+// Faint decorative road + truck, anchored right and clipped; the fade overlay
+// keeps the left side (title) legible.
+function HeaderScene() {
+  return (
+    <svg
+      viewBox="0 0 400 130"
+      preserveAspectRatio="xMaxYMid slice"
+      className="absolute inset-0 h-full w-full text-black dark:text-white"
+      aria-hidden="true"
+    >
+      <path
+        d="M0 95 Q80 78 160 92 T400 85"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        opacity="0.15"
+      />
+      <path
+        d="M0 108 Q90 96 200 106 T400 100"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        opacity="0.12"
+      />
+      <rect x="0" y="108" width="400" height="22" fill="currentColor" opacity="0.06" />
+      <line
+        x1="0"
+        y1="119"
+        x2="400"
+        y2="119"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeDasharray="10 8"
+        opacity="0.18"
+      />
+      <g transform="translate(255,58)" opacity="0.22">
+        <rect x="0" y="20" width="66" height="34" rx="3" fill="currentColor" />
+        <path d="M66 54V34h14l11-12h13a5 5 0 0 1 5 5v27Z" fill="currentColor" />
+        <circle cx="18" cy="58" r="9" fill="currentColor" />
+        <circle cx="90" cy="58" r="9" fill="currentColor" />
+        <circle cx="18" cy="58" r="3.5" fill="white" fillOpacity="0.5" />
+        <circle cx="90" cy="58" r="3.5" fill="white" fillOpacity="0.5" />
+      </g>
+    </svg>
+  );
+}
+
 export function DashboardHubClient({
   trips,
   matrix,
@@ -135,29 +182,35 @@ export function DashboardHubClient({
   return (
     <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
       {/* thin brand accent, monochrome */}
-      <div className="mb-7 h-[3px] w-full rounded-full bg-gradient-to-r from-black/70 via-black/25 to-transparent dark:from-white/60 dark:via-white/20" />
+      <div className="mb-4 h-[3px] w-full rounded-full bg-gradient-to-r from-black/70 via-black/25 to-transparent dark:from-white/60 dark:via-white/20" />
 
-      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-black/[.03] dark:border-white/15 dark:bg-white/[.05]">
-            <TruckGlyph className="h-[22px] w-[22px] text-black/75 dark:text-white/75" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="mt-0.5 text-sm text-black/50 dark:text-white/50">
-              Uso interno · sem autenticação
-            </p>
+      <div className="relative mb-8 overflow-hidden rounded-xl bg-black/[.015] dark:bg-white/[.02]">
+        <HeaderScene />
+        {/* fade the illustration out on the left so the title stays legible */}
+        <div className="absolute inset-0 bg-gradient-to-r from-white via-white/70 to-transparent dark:from-black dark:via-black/70" />
+
+        <header className="relative z-10 flex flex-wrap items-start justify-between gap-4 px-5 py-6 sm:px-7">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-black/[.03] dark:border-white/15 dark:bg-white/[.05]">
+              <TruckGlyph className="h-[22px] w-[22px] text-black/75 dark:text-white/75" />
+            </span>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+              <p className="mt-0.5 text-sm text-black/50 dark:text-white/50">
+                Uso interno · sem autenticação
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link href="/dashboard/locations" className={chipClass}>
-            Gerir locations
-          </Link>
-          <ExportButton onClick={() => void exportAll()}>
-            Exportar tudo
-          </ExportButton>
-        </div>
-      </header>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/dashboard/locations" className={chipClass}>
+              Gerir locations
+            </Link>
+            <ExportButton onClick={() => void exportAll()}>
+              Exportar tudo
+            </ExportButton>
+          </div>
+        </header>
+      </div>
 
       {anyError && (
         <div className="mb-8">
