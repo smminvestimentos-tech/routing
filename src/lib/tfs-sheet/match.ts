@@ -601,6 +601,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // a processed file couldn't be fed through again. All data rows belong to
     // `day` by construction (multi-day files are rejected upstream).
     if (cols.dayCol) w.out[cols.dayCol] = day;
+    // Write back whatever plate we resolved (sheet column, ID, or fleet_trucks)
+    // — including on "Rever manualmente" rows where a plate was identified but
+    // matched no stop. Not on "discrepancy" (w.plate is null there on purpose)
+    // or "none".
+    if (cols.plateCol && w.plate) w.out[cols.plateCol] = w.plate;
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
       w.out[cols.saidaCol] = fmtHM(w.assignedStop.departedAt);

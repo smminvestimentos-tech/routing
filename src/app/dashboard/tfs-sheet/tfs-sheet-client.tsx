@@ -225,7 +225,10 @@ export function TfsSheetClient() {
         <p className="mt-3">
           O ficheiro devolvido traz <strong>Hora de Chegada</strong> /{" "}
           <strong>Hora de Saída</strong> preenchidas (HH:MM) e as colunas{" "}
-          <strong>Confiança</strong> e <strong>Real</strong>.
+          <strong>Confiança</strong> e <strong>Real</strong>. A coluna{" "}
+          <strong>Matrícula da Viatura</strong> é preenchida sempre que a
+          matrícula foi identificada — mesmo nas linhas a rever sem paragem
+          correspondente.
         </p>
 
         <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">
