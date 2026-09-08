@@ -66,6 +66,8 @@ export type ResolvedColumns = {
   codeCol: string;
   designacaoCol: string | null;
   ordemCol: string | null;
+  /** "ID" column — {Transportador}-{Nº}-{Matrícula}-{Volta}ªRota-{Data} */
+  idCol: string | null;
   /** existing header if found, else the canonical name to add */
   chegadaCol: string;
   saidaCol: string;
@@ -79,6 +81,8 @@ export type MatchSummary = {
   review: number;
   /** blank rows passed through untouched */
   passthrough: number;
+  /** rows where the ID plate and fleet_trucks plate disagreed */
+  discrepancy: number;
 };
 
 export type RunMatchArgs = {
@@ -129,6 +133,44 @@ export function normalizeTruck(raw: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .replace(/^0+(?=.)/, "");
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// The "ID" column is {Transportador}-{Nº}-{Matrícula}-{Volta}ªRota-{Data}.
+// The transportador can itself contain spaces or hyphens ("TFS ALGARVE"), so
+// the only safe way to isolate the plate is to anchor on the Nº Camião (which
+// we already have as its own column) and read the alphanumeric run right after
+// it. Returns the normalised plate, or null when the ID doesn't parse.
+export function extractPlateFromId(
+  id: unknown,
+  truckNumber: string,
+): string | null {
+  if (id == null) return null;
+  const s = String(id).trim();
+  const truck = String(truckNumber).trim();
+  if (!s || !truck) return null;
+
+  // tolerate leading zeros on either side ("025" vs "25")
+  const anchor = `-\\s*0*${escapeRegExp(truck.replace(/^0+(?=\d)/, ""))}\\s*-\\s*`;
+  // primary: plate sits between the Nº anchor and the "-{volta}ªRota" tail.
+  // The plate segment is non-greedy and tolerates an internal space/hyphen
+  // ("12-HU92" -> "12HU92"); normalizePlate strips those. The trailing
+  // "-{digits}...Rota" is a hard right boundary, so the lazy match can't
+  // overrun. [^0-9A-Za-z\s]{0,3} soaks up the "ª" ordinal literally-free.
+  const precise = new RegExp(
+    `${anchor}([A-Za-z0-9][A-Za-z0-9 -]{2,12}?[A-Za-z0-9])\\s*-\\s*\\d+\\s*[^0-9A-Za-z\\s]{0,3}\\s*Rota`,
+    "i",
+  );
+  // fallback: just the alphanumeric run right after the Nº anchor.
+  const loose = new RegExp(`${anchor}([A-Za-z0-9]{5,8})\\s*-`, "i");
+
+  const m = s.match(precise) ?? s.match(loose);
+  if (!m) return null;
+  const plate = normalizePlate(m[1]);
+  return plate.length >= 5 && plate.length <= 9 ? plate : null;
 }
 
 // store code equality: exact (case-insensitive), then digits-only ignoring
@@ -305,6 +347,7 @@ export function resolveColumns(header: string[]): ResolvedColumns {
   const ordemCol = take("ordem de entrega", "ordem entrega", "ordem");
   const chegadaCol = take("hora de chegada", "hora chegada", "chegada");
   const saidaCol = take("hora de saida", "hora saida", "saida");
+  const idCol = take("id");
 
   const errors: string[] = [];
   if (!dayCol) errors.push("Falta a coluna «Dia do Serviço».");
@@ -322,6 +365,7 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     codeCol: codeCol ?? "",
     designacaoCol,
     ordemCol,
+    idCol,
     chegadaCol: chegadaCol ?? "Hora de Chegada",
     saidaCol: saidaCol ?? "Hora de Saída",
     errors,
@@ -340,11 +384,19 @@ type Work = {
   empty: boolean;
   /** resolved candidate plate (normalised) */
   plate: string | null;
-  source: "sheet" | "fleet" | "none";
+  //  sheet  — plate came from the "Matrícula da Viatura" column
+  //  id     — extracted from the "ID" column (authoritative, TFS-assigned)
+  //  fleet  — looked up in fleet_trucks by nº (a hint, may be stale)
+  //  discrepancy — ID and fleet_trucks disagreed; not resolved on purpose
+  //  none   — no plate anywhere
+  source: "sheet" | "id" | "fleet" | "discrepancy" | "none";
   rawTruck: string;
   rawPlate: string;
   code: string;
   ordem: number;
+  /** set when source === "discrepancy" */
+  idPlate: string | null;
+  fleetPlate: string | null;
   conf: "" | "OK" | typeof REVIEW;
   real: string;
   assignedStop: WStop | null;
@@ -375,6 +427,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     let plate: string | null = null;
     let source: Work["source"] = "none";
+    let idPlate: string | null = null;
+    let fleetPlate: string | null = null;
+
     if (rawPlate) {
       const np = normalizePlate(rawPlate);
       if (np) {
@@ -382,10 +437,21 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         source = "sheet";
       }
     }
+
     if (!plate && rawTruck) {
-      const p = fleetByTruck.get(normalizeTruck(rawTruck));
-      if (p) {
-        plate = p;
+      idPlate = cols.idCol
+        ? extractPlateFromId(r[cols.idCol], rawTruck)
+        : null;
+      fleetPlate = fleetByTruck.get(normalizeTruck(rawTruck)) ?? null;
+
+      if (idPlate && fleetPlate && idPlate !== fleetPlate) {
+        // both sources have an opinion and they differ — refuse to guess
+        source = "discrepancy";
+      } else if (idPlate) {
+        plate = idPlate; // wins even when it agrees with fleet_trucks
+        source = "id";
+      } else if (fleetPlate) {
+        plate = fleetPlate;
         source = "fleet";
       }
     }
@@ -405,6 +471,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       rawPlate,
       code,
       ordem,
+      idPlate,
+      fleetPlate,
       conf: "",
       real: "",
       assignedStop: null,
@@ -480,8 +548,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     return m;
   };
 
-  // Step 1 — rows that brought their own plate.
-  for (const gw of groupByPlate((w) => w.source === "sheet").values()) {
+  // Step 1 — rows with a trusted plate: from the sheet column, or extracted
+  // from the ID string (TFS-assigned, authoritative).
+  for (const gw of groupByPlate(
+    (w) => w.source === "sheet" || w.source === "id",
+  ).values()) {
     assignGroup(gw);
   }
   // Step 2 — rows relying on fleet_trucks; only unconsumed stops are eligible.
@@ -493,9 +564,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   for (const w of works) {
     if (w.empty || w.conf) continue;
     w.conf = REVIEW;
-    if (w.source === "none") {
+    if (w.source === "discrepancy") {
+      w.real =
+        `Matrícula divergente para o camião ${w.rawTruck}: ` +
+        `ID indica ${w.idPlate}, fleet_trucks indica ${w.fleetPlate}. ` +
+        `ID ${w.idPlate}: ${describeReal(w.idPlate)} | ` +
+        `fleet ${w.fleetPlate}: ${describeReal(w.fleetPlate)}`;
+    } else if (w.source === "none") {
       if (w.rawTruck && !w.rawPlate) {
-        w.real = `Camião «${w.rawTruck}» sem matrícula em fleet_trucks.`;
+        w.real = `Camião «${w.rawTruck}» sem matrícula (nem no ID, nem em fleet_trucks).`;
       } else if (!w.rawTruck && !w.rawPlate) {
         w.real = "Linha sem nº de camião nem matrícula.";
       } else {
@@ -510,6 +587,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let ok = 0;
   let review = 0;
   let passthrough = 0;
+  let discrepancy = 0;
   for (const w of works) {
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
@@ -517,6 +595,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       passthrough++;
       continue;
     }
+    // Rewrite the day cell as an unambiguous YYYY-MM-DD. On the way in the
+    // "Dia do Serviço" cell is an Excel date serial; SheetJS would render it
+    // back as a locale-dependent "9/7/26" that can't be re-parsed reliably, so
+    // a processed file couldn't be fed through again. All data rows belong to
+    // `day` by construction (multi-day files are rejected upstream).
+    if (cols.dayCol) w.out[cols.dayCol] = day;
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
       w.out[cols.saidaCol] = fmtHM(w.assignedStop.departedAt);
@@ -525,11 +609,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     w.out[REAL_COL] = w.real || "";
     if (w.conf === "OK") ok++;
     else review++;
+    if (w.source === "discrepancy") discrepancy++;
   }
 
   return {
     rows: works.map((w) => w.out),
     header: outHeader,
-    summary: { total: ok + review, ok, review, passthrough },
+    summary: { total: ok + review, ok, review, passthrough, discrepancy },
   };
 }

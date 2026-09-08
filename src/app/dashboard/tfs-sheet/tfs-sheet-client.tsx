@@ -10,6 +10,7 @@ type Summary = {
   ok: number;
   review: number;
   passthrough: number;
+  discrepancy: number;
   dayStops: number;
   fleetTrucks: number | null;
   fleetError: string | null;
@@ -157,6 +158,9 @@ export function TfsSheetClient() {
                   ⚠️ Rever manualmente:
                 </span>{" "}
                 {result.summary.review}
+                {result.summary.discrepancy > 0
+                  ? ` (${result.summary.discrepancy} por matrícula divergente ID × fleet_trucks)`
+                  : ""}
               </li>
               <li className="text-black/50 dark:text-white/50">
                 {result.summary.dayStops} paragens nossas nesse dia
@@ -196,11 +200,20 @@ export function TfsSheetClient() {
             pela paragem cujo código de loja bate certo.
           </li>
           <li>
-            Linhas <strong>sem matrícula</strong>: o nº do camião é procurado em{" "}
+            Linhas <strong>sem matrícula</strong>: tenta-se extrair a matrícula
+            da coluna <strong>ID</strong> (
+            <code>Transportador-Nº-Matrícula-VoltaªRota-Data</code>, ancorando no
+            nº do camião). Se o ID não der, procura-se o nº em{" "}
             <Link href="/dashboard/camioes" className="underline">
               /dashboard/camioes
             </Link>{" "}
-            e só é confirmado se sobrar uma paragem com o código de loja certo.
+            e confirma-se só se sobrar uma paragem com o código de loja certo.
+          </li>
+          <li>
+            Se o ID e o <code>fleet_trucks</code> derem matrículas{" "}
+            <strong>diferentes</strong>, a linha fica{" "}
+            <strong>⚠️ Rever manualmente</strong> sem escolher nenhuma — a coluna{" "}
+            <strong>Real</strong> mostra as duas e onde cada uma esteve.
           </li>
           <li>
             Sem correspondência clara: a linha fica{" "}
