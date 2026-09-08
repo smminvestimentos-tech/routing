@@ -1,0 +1,227 @@
+"use client";
+
+import Link from "next/link";
+import { useRef, useState } from "react";
+import { Notice, chipClass } from "../_shared";
+import { EXPECTED_COLUMNS } from "@/lib/tfs-sheet/match";
+
+type Summary = {
+  total: number;
+  ok: number;
+  review: number;
+  passthrough: number;
+  dayStops: number;
+  fleetTrucks: number | null;
+  fleetError: string | null;
+};
+
+type Result = {
+  filename: string;
+  fileBase64: string;
+  day: string;
+  summary: Summary;
+};
+
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function download(base64: string, filename: string) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: XLSX_MIME }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function TfsSheetClient() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
+
+  async function process() {
+    if (!file || busy) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/tfs-sheet", { method: "POST", body });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json.error ?? `Erro ${res.status}.`);
+        return;
+      }
+      setResult(json as Result);
+      download((json as Result).fileBase64, (json as Result).filename);
+    } catch {
+      setError("Falha de rede ao processar o ficheiro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reset() {
+    setFile(null);
+    setError(null);
+    setResult(null);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Folha TFS</h1>
+          <p className="mt-1 text-sm text-black/50 dark:text-white/50">
+            Uso interno · sem autenticação
+          </p>
+        </div>
+        <Link href="/dashboard" className={chipClass}>
+          ← Dashboard
+        </Link>
+      </header>
+
+      <div className="mb-6">
+        <Notice>
+          Carrega a folha de <strong>um dia</strong> de serviço. O ficheiro é
+          processado e devolvido na hora — nada é guardado entre carregamentos.
+        </Notice>
+      </div>
+
+      <section className="rounded-xl border border-black/10 bg-white/70 p-5 shadow-xs backdrop-blur-md dark:border-white/15 dark:bg-neutral-900/70">
+        <label className="flex flex-col gap-2 text-sm">
+          <span className="font-medium">Ficheiro .xlsx</span>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setError(null);
+              setResult(null);
+            }}
+            className="text-sm file:mr-3 file:rounded-md file:border file:border-black/15 file:bg-white/75 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-white dark:file:border-white/20 dark:file:bg-neutral-900/75 dark:hover:file:bg-neutral-900"
+          />
+        </label>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void process()}
+            disabled={!file || busy}
+            className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "A processar…" : "Processar e descarregar"}
+          </button>
+          {(file || result) && (
+            <button
+              type="button"
+              onClick={reset}
+              className={chipClass}
+              disabled={busy}
+            >
+              Limpar
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="mt-5 rounded-lg border border-black/10 bg-black/[.02] p-4 text-sm dark:border-white/15 dark:bg-white/[.03]">
+            <p className="font-medium">
+              Dia {result.day} · {result.summary.total} linhas
+            </p>
+            <ul className="mt-2 space-y-1 text-black/70 dark:text-white/70">
+              <li>
+                <span className="font-medium text-green-700 dark:text-green-400">
+                  OK:
+                </span>{" "}
+                {result.summary.ok}
+              </li>
+              <li>
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  ⚠️ Rever manualmente:
+                </span>{" "}
+                {result.summary.review}
+              </li>
+              <li className="text-black/50 dark:text-white/50">
+                {result.summary.dayStops} paragens nossas nesse dia
+                {result.summary.fleetTrucks != null
+                  ? ` · ${result.summary.fleetTrucks} camiões na referência`
+                  : ""}
+                {result.summary.passthrough > 0
+                  ? ` · ${result.summary.passthrough} linhas vazias ignoradas`
+                  : ""}
+              </li>
+            </ul>
+            {result.summary.fleetError && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                Sem tabela fleet_trucks ({result.summary.fleetError}) — as linhas
+                sem matrícula não puderam usar a referência.
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => download(result.fileBase64, result.filename)}
+              className="mt-3 rounded-md border border-black/15 bg-white/75 px-3 py-1.5 text-sm font-medium hover:bg-white dark:border-white/20 dark:bg-neutral-900/75 dark:hover:bg-neutral-900"
+            >
+              Descarregar novamente
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-8 text-sm text-black/60 dark:text-white/60">
+        <h2 className="mb-2 font-medium text-black/80 dark:text-white/80">
+          Como funciona
+        </h2>
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>
+            Linhas <strong>com matrícula</strong>: ligadas diretamente às
+            paragens desse dia (por matrícula, ignorando hífens) e emparelhadas
+            pela paragem cujo código de loja bate certo.
+          </li>
+          <li>
+            Linhas <strong>sem matrícula</strong>: o nº do camião é procurado em{" "}
+            <Link href="/dashboard/camioes" className="underline">
+              /dashboard/camioes
+            </Link>{" "}
+            e só é confirmado se sobrar uma paragem com o código de loja certo.
+          </li>
+          <li>
+            Sem correspondência clara: a linha fica{" "}
+            <strong>⚠️ Rever manualmente</strong> e a coluna <strong>Real</strong>{" "}
+            mostra o que os nossos dados dizem para esse camião/dia (loja +
+            horas).
+          </li>
+        </ol>
+        <p className="mt-3">
+          O ficheiro devolvido traz <strong>Hora de Chegada</strong> /{" "}
+          <strong>Hora de Saída</strong> preenchidas (HH:MM) e as colunas{" "}
+          <strong>Confiança</strong> e <strong>Real</strong>.
+        </p>
+
+        <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">
+          Colunas esperadas
+        </h2>
+        <p className="text-black/50 dark:text-white/50">
+          {EXPECTED_COLUMNS.join(" · ")}
+        </p>
+      </section>
+    </main>
+  );
+}

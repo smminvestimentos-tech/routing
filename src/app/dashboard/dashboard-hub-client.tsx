@@ -205,6 +205,12 @@ export function DashboardHubClient({
             <Link href="/dashboard/locations" className={chipClass}>
               Gerir locations
             </Link>
+            <Link href="/dashboard/camioes" className={chipClass}>
+              Gerir camiões
+            </Link>
+            <Link href="/dashboard/tfs-sheet" className={chipClass}>
+              Folha TFS
+            </Link>
             <ExportButton onClick={() => void exportAll()}>
               Exportar tudo
             </ExportButton>
