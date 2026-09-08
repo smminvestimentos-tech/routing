@@ -24,21 +24,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="pt"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="relative min-h-full flex flex-col isolate">
-        {/* Background photo */}
       <body className="relative min-h-full flex flex-col">
         {/* Background photo & overlay */}
         <div
           aria-hidden="true"
-          className="fixed inset-0 -z-20 bg-cover bg-center bg-no-repeat bg-fixed"
-          style={{ backgroundImage: "url('/background.jpg')" }}
-        />
-        {/* Ambient overlay / scrim so text and components remain crisp and readable */}
-        <div
-          aria-hidden="true"
-          className="fixed inset-0 -z-10 bg-white/80 backdrop-blur-[1px] dark:bg-black/85"
-        />
-        <div className="relative z-0 flex min-h-full flex-1 flex-col">
           className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
         >
           <Image
