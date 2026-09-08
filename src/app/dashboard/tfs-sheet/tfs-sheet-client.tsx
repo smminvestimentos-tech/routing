@@ -9,6 +9,7 @@ type Summary = {
   total: number;
   ok: number;
   review: number;
+  swap: number;
   passthrough: number;
   discrepancy: number;
   dayStops: number;
@@ -153,6 +154,14 @@ export function TfsSheetClient() {
                 </span>{" "}
                 {result.summary.ok}
               </li>
+              {result.summary.swap > 0 && (
+                <li>
+                  <span className="font-medium text-blue-700 dark:text-blue-400">
+                    🔄 Possível troca de viatura:
+                  </span>{" "}
+                  {result.summary.swap} (matrícula sugerida + horas; confirmar)
+                </li>
+              )}
               <li>
                 <span className="font-medium text-amber-700 dark:text-amber-400">
                   ⚠️ Rever manualmente:
@@ -214,6 +223,14 @@ export function TfsSheetClient() {
             <strong>diferentes</strong>, a linha fica{" "}
             <strong>⚠️ Rever manualmente</strong> sem escolher nenhuma — a coluna{" "}
             <strong>Real</strong> mostra as duas e onde cada uma esteve.
+          </li>
+          <li>
+            <strong>🔄 Possível troca de viatura</strong>: se a matrícula da
+            linha não bater com nenhuma paragem mas outra viatura tiver estado
+            nessa loja a uma hora plausível (±3h da janela), sugere-se essa
+            matrícula + horas. Linhas concorrentes planeadas para a mesma
+            loja/janela em veículos <em>sem</em> GPS nosso são ignoradas; se
+            houver mais que uma alternativa real, fica em Rever.
           </li>
           <li>
             Sem correspondência clara: a linha fica{" "}

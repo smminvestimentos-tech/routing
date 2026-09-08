@@ -14,8 +14,15 @@
 //   2. Rows with no plate look their truck number up in `fleet_trucks`
 //      (nº → matrícula) as a *candidate* plate, and are only confirmed if that
 //      plate still has an unconsumed stop that day whose store code matches.
+//      A plate can also come from the "ID" column (see extractPlateFromId).
 //
-//   3. Anything still ambiguous, unmatched, or with no data of ours to back it
+//   3. Rows whose resolved plate matched no stop: if a *leftover* stop at the
+//      right store and a plausible time belongs to a DIFFERENT vehicle — and no
+//      rival sheet row on a GPS-tracked vehicle was planned for that same
+//      store/window — the row is flagged "🔄 Possível troca de viatura" with
+//      the suggested plate + times.
+//
+//   4. Anything still ambiguous, unmatched, or with no data of ours to back it
 //      up is flagged "⚠️ Rever manualmente", and the "Real" column is filled
 //      with what our data actually shows for that truck/day (stores + times) so
 //      the user can tell a swapped store from a mis-assigned truck from a gap
@@ -24,8 +31,13 @@
 import { normalizePlate } from "@/lib/fleet/validate";
 
 export const REVIEW = "⚠️ Rever manualmente";
+export const SWAP = "🔄 Possível troca de viatura";
 export const CONFIANCA_COL = "Confiança";
 export const REAL_COL = "Real";
+
+// How far outside the planned delivery window a real stop may still be counted
+// as "the same visit" when looking for a vehicle swap.
+const SWAP_WINDOW_PAD_MIN = 180;
 
 // The columns the TFS sheet is expected to carry, in its own order. Shown in
 // the UI as a reference; matching itself is accent/spacing tolerant.
@@ -68,6 +80,8 @@ export type ResolvedColumns = {
   ordemCol: string | null;
   /** "ID" column — {Transportador}-{Nº}-{Matrícula}-{Volta}ªRota-{Data} */
   idCol: string | null;
+  janIniCol: string | null;
+  janFimCol: string | null;
   /** existing header if found, else the canonical name to add */
   chegadaCol: string;
   saidaCol: string;
@@ -83,6 +97,8 @@ export type MatchSummary = {
   passthrough: number;
   /** rows where the ID plate and fleet_trucks plate disagreed */
   discrepancy: number;
+  /** rows flagged "🔄 Possível troca de viatura" */
+  swap: number;
 };
 
 export type RunMatchArgs = {
@@ -93,6 +109,12 @@ export type RunMatchArgs = {
   stops: DayStop[];
   /** normalizeTruck(nº) -> normalizePlate(matrícula) */
   fleetByTruck: Map<string, string>;
+  /**
+   * Every plate that appears in vehicle_pings on ANY day (normalised). Used to
+   * decide whether a rival sheet row's vehicle is real competition for a swap
+   * suggestion, or a GPS-less ghost to ignore.
+   */
+  platesWithGps: Set<string>;
 };
 
 export type RunMatchResult = {
@@ -212,6 +234,48 @@ export function fmtHM(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   return HM.format(d);
 }
+
+// A clock value -> minutes since midnight. Handles "HH:MM", an Excel day
+// fraction (0.5417 -> 13:00, as number or string), and a bare hour ("13").
+// null when it can't be read.
+export function parseClockMin(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const asFraction = (n: number): number | null => {
+    if (!Number.isFinite(n)) return null;
+    if (n >= 0 && n <= 1) return Math.round(n * 1440);
+    if (n > 1 && n < 24) return Math.round(n * 60);
+    return null;
+  };
+  if (typeof v === "number") return asFraction(v);
+  const s = String(v).trim();
+  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hm) {
+    const min = Number(hm[1]) * 60 + Number(hm[2]);
+    return min >= 0 && min < 1440 ? min : null;
+  }
+  return asFraction(Number(s.replace(",", ".")));
+}
+
+type TimeWindow = { lo: number; hi: number };
+
+// Planned window widened by `padMin` on each side. null when neither end reads
+// (caller then treats it as "no constraint").
+function widenWindow(
+  iniV: unknown,
+  fimV: unknown,
+  padMin: number,
+): TimeWindow | null {
+  const lo = parseClockMin(iniV);
+  const hi = parseClockMin(fimV);
+  if (lo == null && hi == null) return null;
+  return { lo: (lo ?? hi!) - padMin, hi: (hi ?? lo!) + padMin };
+}
+
+const inWindow = (min: number, w: TimeWindow | null) =>
+  w == null || (min >= w.lo && min <= w.hi);
+
+const windowsOverlap = (a: TimeWindow | null, b: TimeWindow | null) =>
+  a == null || b == null || (a.lo <= b.hi && b.lo <= a.hi);
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -345,6 +409,8 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     "nome da loja",
   );
   const ordemCol = take("ordem de entrega", "ordem entrega", "ordem");
+  const janIniCol = take("janela inicio", "janela ini", "inicio janela");
+  const janFimCol = take("janela fim", "janela fim loja", "fim janela");
   const chegadaCol = take("hora de chegada", "hora chegada", "chegada");
   const saidaCol = take("hora de saida", "hora saida", "saida");
   const idCol = take("id");
@@ -366,6 +432,8 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     designacaoCol,
     ordemCol,
     idCol,
+    janIniCol,
+    janFimCol,
     chegadaCol: chegadaCol ?? "Hora de Chegada",
     saidaCol: saidaCol ?? "Hora de Saída",
     errors,
@@ -393,17 +461,22 @@ type Work = {
   rawTruck: string;
   rawPlate: string;
   code: string;
+  designacao: string;
   ordem: number;
+  planIni: string | number;
+  planFim: string | number;
   /** set when source === "discrepancy" */
   idPlate: string | null;
   fleetPlate: string | null;
-  conf: "" | "OK" | typeof REVIEW;
+  /** suggested plate when conf === SWAP */
+  swapPlate: string | null;
+  conf: "" | "OK" | typeof REVIEW | typeof SWAP;
   real: string;
   assignedStop: WStop | null;
 };
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
-  const { day, records, header, cols, fleetByTruck } = args;
+  const { day, records, header, cols, fleetByTruck, platesWithGps } = args;
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   const outHeader = [...header];
@@ -470,9 +543,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       rawTruck,
       rawPlate,
       code,
+      designacao,
       ordem,
+      planIni: cols.janIniCol
+        ? (r[cols.janIniCol] as string | number) ?? ""
+        : "",
+      planFim: cols.janFimCol
+        ? (r[cols.janFimCol] as string | number) ?? ""
+        : "",
       idPlate,
       fleetPlate,
+      swapPlate: null,
       conf: "",
       real: "",
       assignedStop: null,
@@ -560,7 +641,88 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     assignGroup(gw);
   }
 
-  // Step 3 — whatever is left.
+  // Step 3 — "possível troca de viatura". A row whose resolved plate matched no
+  // stop, but a leftover stop at the right store and a plausible time belongs
+  // to a *different* vehicle. Tuned on the 07/09 case: camião 206 planned as
+  // BM94RL for E89, but BN20PG is the one that actually stopped there.
+  const arrivalMin = (s: WStop): number => {
+    const hm = fmtHM(s.arrivedAt).match(/^(\d{2}):(\d{2})$/);
+    return hm ? Number(hm[1]) * 60 + Number(hm[2]) : -1;
+  };
+  const storeLabel = (w: Work) =>
+    w.designacao ? `${w.code} (${w.designacao})` : w.code;
+
+  for (const w of works) {
+    if (
+      w.empty ||
+      w.assignedStop ||
+      !w.plate ||
+      !w.code ||
+      w.source === "discrepancy" ||
+      (w.conf !== "" && w.conf !== REVIEW)
+    ) {
+      continue;
+    }
+
+    const win = widenWindow(w.planIni, w.planFim, SWAP_WINDOW_PAD_MIN);
+
+    // leftover stops at this store, by another vehicle, at a plausible time
+    const candidates = stops.filter(
+      (s) =>
+        !s.assigned &&
+        s.plate != null &&
+        s.plate !== w.plate &&
+        codeEq(s.code, w.code) &&
+        inWindow(arrivalMin(s), win),
+    );
+    if (candidates.length === 0) continue;
+
+    const suggPlates = [...new Set(candidates.map((s) => s.plate as string))];
+    if (suggPlates.length !== 1) continue; // >1 verifiable candidate -> review
+    const suggPlate = suggPlates[0];
+    const suggStops = candidates.filter((s) => s.plate === suggPlate);
+    if (suggStops.length !== 1) continue; // same vehicle, 2 visits -> ambiguous
+    const suggStop = suggStops[0];
+
+    // rival sheet rows planned for the same store in an overlapping window
+    const rivals = works.filter(
+      (c) =>
+        c !== w &&
+        !c.empty &&
+        !!c.code &&
+        codeEq(c.code, w.code) &&
+        windowsOverlap(
+          win,
+          widenWindow(c.planIni, c.planFim, SWAP_WINDOW_PAD_MIN),
+        ),
+    );
+    // real competition = a rival whose resolved plate is a GPS-tracked vehicle
+    // (other than the one we're suggesting). A rival on a GPS-less vehicle
+    // (like 91DD34) is a planning ghost — ignore it.
+    const realRivals = rivals.filter(
+      (c) => c.plate && c.plate !== suggPlate && platesWithGps.has(c.plate),
+    );
+    if (realRivals.length > 0) continue; // can't attribute the visit -> review
+
+    const ghost = rivals.find((c) => c.plate && !platesWithGps.has(c.plate));
+
+    w.conf = SWAP;
+    w.swapPlate = suggPlate;
+    suggStop.assigned = true;
+    w.assignedStop = suggStop;
+    w.real =
+      `Camião ${w.rawTruck} planeado como ${w.plate}, mas ${suggPlate} ` +
+      `esteve em ${storeLabel(w)} às ${fmtHM(suggStop.arrivedAt)}–` +
+      `${fmtHM(suggStop.departedAt) || "?"}.` +
+      (ghost
+        ? ` Nota: ${ghost.rawTruck || "outra linha"} também estava planeado ` +
+          `para esta loja/janela, mas o veículo ${ghost.plate} não tem dados ` +
+          `GPS — não é uma alternativa real.`
+        : "") +
+      ` Confirma antes de aceitar.`;
+  }
+
+  // Step 4 — whatever is left.
   for (const w of works) {
     if (w.empty || w.conf) continue;
     w.conf = REVIEW;
@@ -588,6 +750,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let review = 0;
   let passthrough = 0;
   let discrepancy = 0;
+  let swap = 0;
   for (const w of works) {
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
@@ -603,9 +766,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (cols.dayCol) w.out[cols.dayCol] = day;
     // Write back whatever plate we resolved (sheet column, ID, or fleet_trucks)
     // — including on "Rever manualmente" rows where a plate was identified but
-    // matched no stop. Not on "discrepancy" (w.plate is null there on purpose)
-    // or "none".
-    if (cols.plateCol && w.plate) w.out[cols.plateCol] = w.plate;
+    // matched no stop. On a swap suggestion, write the SUGGESTED plate instead.
+    // Not on "discrepancy" (w.plate is null there on purpose) or "none".
+    const plateOut =
+      w.conf === SWAP && w.swapPlate ? w.swapPlate : w.plate;
+    if (cols.plateCol && plateOut) w.out[cols.plateCol] = plateOut;
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
       w.out[cols.saidaCol] = fmtHM(w.assignedStop.departedAt);
@@ -613,6 +778,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
     w.out[REAL_COL] = w.real || "";
     if (w.conf === "OK") ok++;
+    else if (w.conf === SWAP) swap++;
     else review++;
     if (w.source === "discrepancy") discrepancy++;
   }
@@ -620,6 +786,6 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   return {
     rows: works.map((w) => w.out),
     header: outHeader,
-    summary: { total: ok + review, ok, review, passthrough, discrepancy },
+    summary: { total: ok + review + swap, ok, review, passthrough, discrepancy, swap },
   };
 }

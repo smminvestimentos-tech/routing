@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
   const dayStart = lisbonDayStartISO(day);
   const dayEnd = lisbonDayStartISO(addDaysYmd(day, 1));
 
-  const [stopsRes, pingsRes, fleetRes] = await Promise.all([
+  const [stopsRes, pingsRes, fleetRes, allPlatesRes] = await Promise.all([
     supabase
       .from("stops")
       .select("id, vehicle_id, arrived_at, departed_at, location:locations(code)")
@@ -133,6 +133,9 @@ export async function POST(request: NextRequest) {
       .not("plate", "is", null)
       .limit(PING_LIMIT),
     supabase.from("fleet_trucks").select("truck_number, plate"),
+    // Every plate our GPS feed has ever seen (one row per vehicle). Used by the
+    // swap-suggestion logic to tell a real rival vehicle from a GPS-less ghost.
+    supabase.from("latest_vehicle_plate").select("plate"),
   ]);
 
   if (stopsRes.error) {
@@ -191,6 +194,15 @@ export async function POST(request: NextRequest) {
     fleetByTruck.set(normalizeTruck(String(f.truck_number)), np);
   }
 
+  // Plates known to our GPS feed (any day). Falls back to the day's ping plates
+  // if the view query failed, so the feature degrades instead of breaking.
+  const platesWithGps = new Set<string>();
+  for (const r of allPlatesRes.data ?? []) {
+    const np = normalizePlate(String(r.plate ?? ""));
+    if (np) platesWithGps.add(np);
+  }
+  for (const pl of plateByVehicle.values()) platesWithGps.add(pl);
+
   const { rows, header: outHeader, summary } = runMatch({
     day,
     records,
@@ -198,6 +210,7 @@ export async function POST(request: NextRequest) {
     cols,
     stops,
     fleetByTruck,
+    platesWithGps,
   });
 
   const outWs = XLSX.utils.json_to_sheet(rows, { header: outHeader });
