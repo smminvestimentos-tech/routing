@@ -375,11 +375,11 @@ export function RotasClient({
             max={MARGIN_MAX}
             value={edits[DEFAULT_KEY] ?? String(defaultMargin)}
             onChange={(e) => onDefaultInput(e.target.value)}
-            className={`w-28 rounded-md border bg-transparent px-2 py-1 tabular-nums outline-none transition-colors ${
+            className={`w-28 rounded-md border bg-white/75 px-2 py-1 tabular-nums outline-none backdrop-blur-xs transition-colors dark:bg-neutral-900/75 ${
               savedKeys.has(DEFAULT_KEY)
-                ? "border-green-500 bg-green-500/10"
+                ? "border-green-500 bg-green-500/10 dark:bg-green-500/20"
                 : errorKeys.has(DEFAULT_KEY)
-                  ? "border-red-500 bg-red-500/10"
+                  ? "border-red-500 bg-red-500/10 dark:bg-red-500/20"
                   : "border-black/15 dark:border-white/20"
             }`}
           />
@@ -398,7 +398,7 @@ export function RotasClient({
             value={search.input}
             onChange={(e) => search.setInput(e.target.value)}
             placeholder="origem ou destino…"
-            className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+            className="w-56 rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
           />
         </label>
       </div>

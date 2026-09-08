@@ -4,6 +4,7 @@
 // for everything and only falls back to a cached shell when the network fails.
 
 const CACHE = "routing-dashboard-v1";
+const CACHE = "routing-dashboard-v2";
 const SHELL = [
   "/dashboard",
   "/manifest.json",

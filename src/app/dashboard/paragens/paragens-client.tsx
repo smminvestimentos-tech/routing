@@ -353,7 +353,7 @@ export function ParagensClient({
               value={search.input}
               onChange={(e) => search.setInput(e.target.value)}
               placeholder="matrícula, local, código, tipo…"
-              className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+              className="w-56 rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
             />
           </label>
         </div>
@@ -402,7 +402,7 @@ export function ParagensClient({
               value={dwellSearch.input}
               onChange={(e) => dwellSearch.setInput(e.target.value)}
               placeholder="local, código, tipo…"
-              className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+              className="w-56 rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
             />
           </label>
         </div>

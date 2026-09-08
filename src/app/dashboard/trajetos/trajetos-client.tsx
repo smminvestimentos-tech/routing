@@ -216,7 +216,7 @@ export function TrajetosClient({
             value={search.input}
             onChange={(e) => search.setInput(e.target.value)}
             placeholder="loja, código, matrícula, ID…"
-            className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+            className="w-56 rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
           />
         </label>
       </div>

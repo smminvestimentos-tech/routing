@@ -91,7 +91,7 @@ export function SortableTable<T>({
           screens AND makes this the vertical scroll container, so the sticky
           <thead> pins to the top of the table as its rows scroll under it.
           Short tables never reach max-h, so nothing changes for them. */}
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-black/10 dark:border-white/15">
+      <div className="max-h-[70vh] overflow-auto rounded-lg border border-black/10 bg-white/80 shadow-xs backdrop-blur-md dark:border-white/15 dark:bg-neutral-900/80">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10 bg-background text-left">
             <tr>
@@ -195,7 +195,7 @@ export function useDebouncedSearch() {
 }
 
 export const chipClass =
-  "rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/[.04] dark:border-white/20 dark:hover:bg-white/[.06]";
+  "rounded-md border border-black/15 bg-white/75 px-3 py-1.5 text-sm font-medium backdrop-blur-xs transition-colors hover:bg-white dark:border-white/20 dark:bg-neutral-900/75 dark:hover:bg-neutral-900";
 
 export function Notice({ children }: { children: ReactNode }) {
   return (
@@ -295,7 +295,7 @@ export function DateRangeForm({
           name="from"
           defaultValue={filterFrom}
           max={today}
-          className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+          className="rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -305,7 +305,7 @@ export function DateRangeForm({
           name="to"
           defaultValue={filterTo}
           max={today}
-          className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+          className="rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
         />
       </label>
       <button type="submit" className={chipClass}>
@@ -400,7 +400,7 @@ export function ExportButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="shrink-0 rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:hover:bg-white/[.06]"
+      className="shrink-0 rounded-md border border-black/15 bg-white/75 px-3 py-1.5 text-sm font-medium backdrop-blur-xs transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:bg-neutral-900/75 dark:hover:bg-neutral-900"
     >
       {children}
     </button>

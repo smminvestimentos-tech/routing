@@ -184,7 +184,7 @@ export function DashboardHubClient({
       {/* thin brand accent, monochrome */}
       <div className="mb-4 h-[3px] w-full rounded-full bg-gradient-to-r from-black/70 via-black/25 to-transparent dark:from-white/60 dark:via-white/20" />
 
-      <div className="relative mb-8 overflow-hidden rounded-xl bg-black/[.015] dark:bg-white/[.02]">
+      <div className="relative mb-8 overflow-hidden rounded-xl border border-black/10 bg-white/70 shadow-xs backdrop-blur-md dark:border-white/15 dark:bg-neutral-900/70">
         <HeaderScene />
         {/* fade the illustration out on the left so the title stays legible */}
         <div className="absolute inset-0 bg-gradient-to-r from-white via-white/70 to-transparent dark:from-black dark:via-black/70" />
@@ -226,7 +226,7 @@ export function DashboardHubClient({
           <Link
             key={c.href}
             href={c.href}
-            className="group rounded-xl border border-black/10 p-5 transition-colors hover:border-black/25 hover:bg-black/[.02] dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-white/[.03]"
+            className="group rounded-xl border border-black/10 bg-white/70 p-5 shadow-xs backdrop-blur-md transition-all hover:border-black/25 hover:bg-white/90 dark:border-white/15 dark:bg-neutral-900/70 dark:hover:border-white/30 dark:hover:bg-neutral-900/90"
           >
             <div className="flex items-center gap-2.5">
               <c.Icon

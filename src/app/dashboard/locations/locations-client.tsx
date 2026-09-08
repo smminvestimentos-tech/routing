@@ -532,7 +532,7 @@ export function LocationsClient({
               value={search.input}
               onChange={(e) => search.setInput(e.target.value)}
               placeholder="nome ou código…"
-              className="w-56 rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+              className="w-56 rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
             />
           </label>
 
@@ -541,7 +541,7 @@ export function LocationsClient({
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="rounded-md border border-black/15 bg-transparent px-2 py-1 dark:border-white/20"
+              className="rounded-md border border-black/15 bg-white/75 px-2 py-1 backdrop-blur-xs dark:border-white/20 dark:bg-neutral-900/75"
             >
               <option value="all">Todos</option>
               {LOCATION_TYPES.map((t) => (
