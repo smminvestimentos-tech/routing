@@ -195,24 +195,34 @@ export function extractPlateFromId(
   return plate.length >= 5 && plate.length <= 9 ? plate : null;
 }
 
-// store code equality: exact (case-insensitive), then digits-only ignoring
-// leading zeros, then leading-zero-stripped text.
+// Store code equality. Store codes here are "{optional letter prefix}{digits}"
+// ("E25", "B97", "133") or a merged/composite code ("B97-E72", "H96-B37").
+//
+//  - exact, case-insensitive
+//  - same letter prefix + same digits ignoring leading zeros: "A5" == "A05",
+//    "01" == "1". A *different* letter is a different store, so "B97" != "E97"
+//    (an earlier digits-only rule wrongly matched those).
+//  - one code is the "-"/"/" base segment of the other: "B97" == "B97-E72"
+//    (the sheet uses the base, our locations row carries the merged code).
 export function codeEq(
   a: string | null | undefined,
   b: string | null | undefined,
 ): boolean {
   if (a == null || b == null) return false;
-  const x = String(a).trim();
-  const y = String(b).trim();
+  const x = String(a).trim().toUpperCase();
+  const y = String(b).trim().toUpperCase();
   if (!x || !y) return false;
-  if (x.toLowerCase() === y.toLowerCase()) return true;
-  const dx = x.replace(/\D/g, "").replace(/^0+(?=.)/, "");
-  const dy = y.replace(/\D/g, "").replace(/^0+(?=.)/, "");
-  if (dx && dy && dx === dy) return true;
-  return (
-    x.replace(/^0+(?=.)/, "").toLowerCase() ===
-    y.replace(/^0+(?=.)/, "").toLowerCase()
-  );
+  if (x === y) return true;
+
+  const seg = (v: string) => v.match(/^([A-Z]*)0*(\d+)$/);
+  const mx = seg(x);
+  const my = seg(y);
+  if (mx && my && mx[1] === my[1] && mx[2] === my[2]) return true;
+
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  if (long.startsWith(`${short}-`) || long.startsWith(`${short}/`)) return true;
+
+  return false;
 }
 
 function codeKey(code: string): string {
