@@ -113,6 +113,28 @@ export function fmtHM(iso: string | null | undefined): string {
   return HM.format(d);
 }
 
+const DMY_HM = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Lisbon",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+// ISO timestamp -> "DD/MM/YYYY HH:MM" in Portugal wall-clock. "" for
+// null/invalid. Used for sheets whose delivery cycles cross midnight (Azambuja),
+// where a bare "HH:MM" is ambiguous about which calendar day it belongs to.
+export function fmtDateTimeLisbon(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p: Record<string, string> = {};
+  for (const part of DMY_HM.formatToParts(d)) p[part.type] = part.value;
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
+}
+
 // A clock value -> minutes since midnight. Handles "HH:MM", an Excel day
 // fraction (0.5417 -> 13:00, as number or string), and a bare hour ("13").
 // null when it can't be read.

@@ -253,7 +253,9 @@ export function AzambujaSheetClient() {
         </ol>
         <p className="mt-3">
           O ficheiro devolvido traz <strong>Hora Chegada</strong> /{" "}
-          <strong>Hora Saida</strong> preenchidas (HH:MM) e as colunas{" "}
+          <strong>Hora Saida</strong> preenchidas com{" "}
+          <strong>data + hora de Lisboa</strong> (DD/MM/AAAA HH:MM — os ciclos
+          atravessam a meia-noite, a hora sozinha seria ambígua) e as colunas{" "}
           <strong>Confiança</strong> e <strong>Real</strong>. A{" "}
           <strong>MATRICULA</strong> só é reescrita quando há sugestão de troca.
         </p>

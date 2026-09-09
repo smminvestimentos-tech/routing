@@ -35,6 +35,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   findVehicleSwap,
+  fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
   normalizePlate,
@@ -510,12 +511,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
     // Always (re)write the two time columns so the output reflects only our
-    // matching: our HH:MM when a stop was matched, blank otherwise. A stale
-    // pre-filled value on a "Rever" row would just be misleading — the Real
-    // column carries what our data shows instead.
+    // matching: "DD/MM/YYYY HH:MM" (Lisbon) when a stop was matched, blank
+    // otherwise. Full date + time — not bare HH:MM like the TFS sheet —
+    // because Azambuja cycles cross midnight, so the hour alone is ambiguous
+    // about the day. This mirrors the transporter's own pre-filled cells
+    // (e.g. "08/09/2026 20:58"). A stale pre-filled value on a "Rever" row
+    // would just be misleading — the Real column carries our data instead.
     if (w.assignedStop) {
-      w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
-      w.out[cols.saidaCol] = fmtHM(w.assignedStop.departedAt);
+      w.out[cols.chegadaCol] = fmtDateTimeLisbon(w.assignedStop.arrivedAt);
+      w.out[cols.saidaCol] = fmtDateTimeLisbon(w.assignedStop.departedAt);
     } else {
       w.out[cols.chegadaCol] = "";
       w.out[cols.saidaCol] = "";
