@@ -211,6 +211,9 @@ export function DashboardHubClient({
             <Link href="/dashboard/tfs-sheet" className={chipClass}>
               Folha TFS
             </Link>
+            <Link href="/dashboard/azambuja-sheet" className={chipClass}>
+              Folha Azambuja
+            </Link>
             <ExportButton onClick={() => void exportAll()}>
               Exportar tudo
             </ExportButton>

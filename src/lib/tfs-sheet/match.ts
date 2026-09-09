@@ -5,6 +5,10 @@
 // writes the result back to a workbook. Keeping it isolated makes the "by
 // elimination" logic testable on its own.
 //
+// Layout-agnostic pieces (store-code equality, clock/window helpers, the
+// "HH:MM" formatters, the vehicle-swap detector) live in
+// src/lib/sheet-match/common.ts and are shared with the Azambuja matcher.
+//
 // The logic, in order:
 //
 //   1. Rows that already carry a plate ("Matrícula da Viatura") are joined
@@ -28,17 +32,39 @@
 //      the user can tell a swapped store from a mis-assigned truck from a gap
 //      in our tracking.
 
-import { normalizePlate } from "@/lib/fleet/validate";
+import {
+  codeEq,
+  codeKey,
+  CONFIANCA_COL,
+  type DayStop,
+  findVehicleSwap,
+  fmtDuration,
+  fmtHM,
+  normalizePlate,
+  parseClockMin,
+  parseServiceDay,
+  pick,
+  REAL_COL,
+  REVIEW,
+  type SheetRecord,
+  SWAP,
+  SWAP_OUT_OF_WINDOW,
+  type SwapRival,
+  type WStop,
+} from "@/lib/sheet-match/common";
 
-export const REVIEW = "⚠️ Rever manualmente";
-export const SWAP = "🔄 Possível troca de viatura";
-export const SWAP_OUT_OF_WINDOW = "🔄❗ Possível troca (fora da janela)";
-export const CONFIANCA_COL = "Confiança";
-export const REAL_COL = "Real";
-
-// How far outside the planned delivery window a real stop may still be counted
-// as "the same visit" when looking for a vehicle swap.
-const SWAP_WINDOW_PAD_MIN = 180;
+export {
+  CONFIANCA_COL,
+  REAL_COL,
+  REVIEW,
+  SWAP,
+  SWAP_OUT_OF_WINDOW,
+  codeEq,
+  fmtHM,
+  parseClockMin,
+  parseServiceDay,
+};
+export type { DayStop, SheetRecord };
 
 // The columns the TFS sheet is expected to carry, in its own order. Shown in
 // the UI as a reference; matching itself is accent/spacing tolerant.
@@ -58,19 +84,6 @@ export const EXPECTED_COLUMNS = [
   "ID",
   "Entreposto",
 ] as const;
-
-export type SheetRecord = Record<string, string | number>;
-
-export type DayStop = {
-  id: string;
-  vehicleId: number;
-  /** normalised (upper, no hyphens/spaces); null when no ping told us a plate */
-  plate: string | null;
-  /** locations.code, raw */
-  code: string | null;
-  arrivedAt: string; // ISO
-  departedAt: string | null; // ISO
-};
 
 export type ResolvedColumns = {
   dayCol: string;
@@ -127,27 +140,11 @@ export type RunMatchResult = {
 };
 
 // ---------------------------------------------------------------------------
-// Small helpers
+// Small helpers (TFS-specific)
 // ---------------------------------------------------------------------------
 
-const pad2 = (n: number | string) => String(n).padStart(2, "0");
-
-function deburr(s: string): string {
-  // Strip combining diacritical marks (U+0300–U+036F) so "Camião" ~ "camiao".
-  let out = "";
-  for (const ch of s.normalize("NFD")) {
-    const c = ch.codePointAt(0) ?? 0;
-    if (c >= 0x300 && c <= 0x36f) continue;
-    out += ch;
-  }
-  return out;
-}
-
-function normHeader(s: string): string {
-  return deburr(String(s))
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // nº do camião: upper, alphanumerics only, no leading zeros. Applied on both
@@ -158,10 +155,6 @@ export function normalizeTruck(raw: string): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "")
     .replace(/^0+(?=.)/, "");
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // The "ID" column is {Transportador}-{Nº}-{Matrícula}-{Volta}ªRota-{Data}.
@@ -196,148 +189,6 @@ export function extractPlateFromId(
   if (!m) return null;
   const plate = normalizePlate(m[1]);
   return plate.length >= 5 && plate.length <= 9 ? plate : null;
-}
-
-// Store code equality. Store codes here are "{optional letter prefix}{digits}"
-// ("E25", "B97", "133") or a merged/composite code ("B97-E72", "H96-B37").
-//
-//  - exact, case-insensitive
-//  - same letter prefix + same digits ignoring leading zeros: "A5" == "A05",
-//    "01" == "1". A *different* letter is a different store, so "B97" != "E97"
-//    (an earlier digits-only rule wrongly matched those).
-//  - one code is the "-"/"/" base segment of the other: "B97" == "B97-E72"
-//    (the sheet uses the base, our locations row carries the merged code).
-export function codeEq(
-  a: string | null | undefined,
-  b: string | null | undefined,
-): boolean {
-  if (a == null || b == null) return false;
-  const x = String(a).trim().toUpperCase();
-  const y = String(b).trim().toUpperCase();
-  if (!x || !y) return false;
-  if (x === y) return true;
-
-  const seg = (v: string) => v.match(/^([A-Z]*)0*(\d+)$/);
-  const mx = seg(x);
-  const my = seg(y);
-  if (mx && my && mx[1] === my[1] && mx[2] === my[2]) return true;
-
-  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  if (long.startsWith(`${short}-`) || long.startsWith(`${short}/`)) return true;
-
-  return false;
-}
-
-function codeKey(code: string): string {
-  const k = code.trim().replace(/^0+(?=.)/, "").toLowerCase();
-  return k || "(sem código)";
-}
-
-const HM = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Lisbon",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-// ISO timestamp -> "HH:MM" in Portugal wall-clock. "" for null/invalid.
-export function fmtHM(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return HM.format(d);
-}
-
-// A clock value -> minutes since midnight. Handles "HH:MM", an Excel day
-// fraction (0.5417 -> 13:00, as number or string), and a bare hour ("13").
-// null when it can't be read.
-export function parseClockMin(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const asFraction = (n: number): number | null => {
-    if (!Number.isFinite(n)) return null;
-    if (n >= 0 && n <= 1) return Math.round(n * 1440);
-    if (n > 1 && n < 24) return Math.round(n * 60);
-    return null;
-  };
-  if (typeof v === "number") return asFraction(v);
-  const s = String(v).trim();
-  const hm = s.match(/^(\d{1,2}):(\d{2})/);
-  if (hm) {
-    const min = Number(hm[1]) * 60 + Number(hm[2]);
-    return min >= 0 && min < 1440 ? min : null;
-  }
-  return asFraction(Number(s.replace(",", ".")));
-}
-
-type TimeWindow = { lo: number; hi: number };
-
-// Planned window widened by `padMin` on each side. null when neither end reads
-// (caller then treats it as "no constraint").
-function widenWindow(
-  iniV: unknown,
-  fimV: unknown,
-  padMin: number,
-): TimeWindow | null {
-  const lo = parseClockMin(iniV);
-  const hi = parseClockMin(fimV);
-  if (lo == null && hi == null) return null;
-  return { lo: (lo ?? hi!) - padMin, hi: (hi ?? lo!) + padMin };
-}
-
-const inWindow = (min: number, w: TimeWindow | null) =>
-  w == null || (min >= w.lo && min <= w.hi);
-
-const windowsOverlap = (a: TimeWindow | null, b: TimeWindow | null) =>
-  a == null || b == null || (a.lo <= b.hi && b.lo <= a.hi);
-
-// Minutes-since-midnight -> "HH:MM", wrapping into 0..1439 first (a widened
-// window's lo/hi can spill past midnight in either direction).
-function minToHM(min: number): string {
-  const wrapped = ((min % 1440) + 1440) % 1440;
-  return `${pad2(Math.floor(wrapped / 60))}:${pad2(wrapped % 60)}`;
-}
-
-// How far `min` (arrival, minutes since midnight) sits outside `w` (already
-// widened by the swap pad) — 0 when inside. Used to caption an out-of-window
-// swap suggestion with "~12h25" style text.
-function minutesOutside(min: number, w: TimeWindow): number {
-  if (min < w.lo) return w.lo - min;
-  if (min > w.hi) return min - w.hi;
-  return 0;
-}
-
-function fmtDuration(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if (h > 0 && m > 0) return `${h}h${pad2(m)}`;
-  if (h > 0) return `${h}h`;
-  return `${m}min`;
-}
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-// "Dia do Serviço" cell -> YYYY-MM-DD. Handles ISO, DD/MM/YYYY, DD-MM-YY,
-// JS Date, and Excel serial numbers.
-export function parseServiceDay(v: unknown): string | null {
-  if (v == null || v === "") return null;
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : isoDate(v);
-  if (typeof v === "number" && Number.isFinite(v)) {
-    if (v > 20000 && v < 80000) {
-      return isoDate(new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000));
-    }
-    return null;
-  }
-  const s = String(v).trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
-  m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})/);
-  if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-  m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2})$/);
-  if (m) return `20${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : isoDate(d);
 }
 
 // The sheet must be a single service day (see the request). Returns the day, or
@@ -378,31 +229,6 @@ export function collectServiceDay(
 // ---------------------------------------------------------------------------
 // Column resolution
 // ---------------------------------------------------------------------------
-
-function pick(
-  header: string[],
-  used: Set<string>,
-  targets: string[],
-): string | null {
-  const cands = header
-    .filter((h) => !used.has(h))
-    .map((h) => [h, normHeader(h)] as const);
-  for (const t of targets) {
-    const hit = cands.find(([, n]) => n === t);
-    if (hit) return hit[0];
-  }
-  for (const t of targets) {
-    const hit = cands.find(
-      ([, n]) => n.startsWith(`${t} `) || t.startsWith(`${n} `),
-    );
-    if (hit) return hit[0];
-  }
-  for (const t of targets) {
-    const hit = cands.find(([, n]) => n.includes(t));
-    if (hit) return hit[0];
-  }
-  return null;
-}
 
 export function resolveColumns(header: string[]): ResolvedColumns {
   const used = new Set<string>();
@@ -480,8 +306,6 @@ export function resolveColumns(header: string[]): ResolvedColumns {
 // ---------------------------------------------------------------------------
 // The matcher
 // ---------------------------------------------------------------------------
-
-type WStop = DayStop & { assigned: boolean };
 
 type Work = {
   idx: number;
@@ -682,10 +506,6 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // stop, but a leftover stop at the right store and a plausible time belongs
   // to a *different* vehicle. Tuned on the 07/09 case: camião 206 planned as
   // BM94RL for E89, but BN20PG is the one that actually stopped there.
-  const arrivalMin = (s: WStop): number => {
-    const hm = fmtHM(s.arrivedAt).match(/^(\d{2}):(\d{2})$/);
-    return hm ? Number(hm[1]) * 60 + Number(hm[2]) : -1;
-  };
   const storeLabel = (w: Work) =>
     w.designacao ? `${w.code} (${w.designacao})` : w.code;
 
@@ -701,109 +521,49 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
 
-    const win = widenWindow(w.planIni, w.planFim, SWAP_WINDOW_PAD_MIN);
+    const rivals: SwapRival[] = works
+      .filter((c) => c !== w && !c.empty)
+      .map((c) => ({
+        code: c.code,
+        planIni: c.planIni,
+        planFim: c.planFim,
+        plate: c.plate,
+        label: c.rawTruck,
+        assignedStop: c.assignedStop,
+      }));
 
-    // leftover stops at this store, by another vehicle, at a plausible time
-    const windowed = stops.filter(
-      (s) =>
-        !s.assigned &&
-        s.plate != null &&
-        s.plate !== w.plate &&
-        codeEq(s.code, w.code) &&
-        inWindow(arrivalMin(s), win),
-    );
+    const sw = findVehicleSwap({
+      plate: w.plate,
+      code: w.code,
+      planIni: w.planIni,
+      planFim: w.planFim,
+      stops,
+      rivals,
+      platesWithGps,
+    });
+    if (!sw) continue;
 
-    // Nothing inside the padded window — before giving up, check whether
-    // exactly one unassigned stop exists at this store/day regardless of
-    // time. A real swap can land hours off the planned slot (e.g. a truck
-    // covering a delivery the evening before instead of overnight); pursue
-    // it only when there is still a single, unambiguous leftover, same bar
-    // as the windowed case, and flag it more loudly (SWAP_OUT_OF_WINDOW).
-    let candidates = windowed;
-    let outOfWindow = false;
-    if (candidates.length === 0) {
-      const anyTime = stops.filter(
-        (s) =>
-          !s.assigned &&
-          s.plate != null &&
-          s.plate !== w.plate &&
-          codeEq(s.code, w.code),
-      );
-      if (anyTime.length === 0) continue;
-      candidates = anyTime;
-      outOfWindow = true;
-    }
+    w.conf = sw.outOfWindow ? SWAP_OUT_OF_WINDOW : SWAP;
+    w.swapPlate = sw.suggPlate;
+    sw.suggStop.assigned = true;
+    w.assignedStop = sw.suggStop;
 
-    const suggPlates = [...new Set(candidates.map((s) => s.plate as string))];
-    if (suggPlates.length !== 1) continue; // >1 verifiable candidate -> review
-    const suggPlate = suggPlates[0];
-    const suggStops = candidates.filter((s) => s.plate === suggPlate);
-    if (suggStops.length !== 1) continue; // same vehicle, 2 visits -> ambiguous
-    const suggStop = suggStops[0];
-
-    // rival sheet rows planned for the same store in an overlapping window
-    const rivals = works.filter(
-      (c) =>
-        c !== w &&
-        !c.empty &&
-        !!c.code &&
-        codeEq(c.code, w.code) &&
-        windowsOverlap(
-          win,
-          widenWindow(c.planIni, c.planFim, SWAP_WINDOW_PAD_MIN),
-        ),
-    );
-    // real competition = a rival whose resolved plate is a GPS-tracked vehicle
-    // (other than the one we're suggesting) that could plausibly ALSO be the
-    // one behind suggStop. A rival on a GPS-less vehicle (like 91DD34) is a
-    // planning ghost — ignore it. And a rival already matched to its own real
-    // stop (via Step 1/2) isn't competing for suggStop at all — it already
-    // has its own visit accounted for elsewhere, so it can't be the one who
-    // actually made suggStop. Tuned on the 08/09 case: camião 282 (AR-75-PH)
-    // was also planned for D89 in this window and did stop there — but at its
-    // own time (00:15–01:20), not at the 32OG66 stop (20:25) being suggested
-    // for camião 297.
-    const realRivals = rivals.filter(
-      (c) =>
-        c.plate &&
-        c.plate !== suggPlate &&
-        platesWithGps.has(c.plate) &&
-        (!c.assignedStop || c.assignedStop === suggStop),
-    );
-    if (realRivals.length > 0) continue; // can't attribute the visit -> review
-
-    const ghost = rivals.find((c) => c.plate && !platesWithGps.has(c.plate));
-
-    w.conf = outOfWindow ? SWAP_OUT_OF_WINDOW : SWAP;
-    w.swapPlate = suggPlate;
-    suggStop.assigned = true;
-    w.assignedStop = suggStop;
-
-    // Only reached when outOfWindow — win is non-null in that case (a null
-    // window never fails the padded check above, so it never falls through
-    // to the unrestricted search).
-    const planIniMin = parseClockMin(w.planIni);
-    const planFimMin = parseClockMin(w.planFim);
-    const plannedLabel =
-      planIniMin != null || planFimMin != null
-        ? `${planIniMin != null ? minToHM(planIniMin) : "?"}–${planFimMin != null ? minToHM(planFimMin) : "?"}`
-        : null;
     const timing =
-      outOfWindow && win
-        ? ` (fora da janela planeada${plannedLabel ? ` ${plannedLabel}` : ""}, ` +
-          `~${fmtDuration(minutesOutside(arrivalMin(suggStop), win))} além da margem de ±3h)`
+      sw.outOfWindow && sw.win
+        ? ` (fora da janela planeada${sw.plannedLabel ? ` ${sw.plannedLabel}` : ""}, ` +
+          `~${fmtDuration(sw.outsideBy)} além da margem de ±3h)`
         : "";
 
     w.real =
-      `Camião ${w.rawTruck} planeado como ${w.plate}, mas ${suggPlate} ` +
-      `esteve em ${storeLabel(w)} às ${fmtHM(suggStop.arrivedAt)}–` +
-      `${fmtHM(suggStop.departedAt) || "?"}${timing}.` +
-      (ghost
-        ? ` Nota: ${ghost.rawTruck || "outra linha"} também estava planeado ` +
-          `para esta loja/janela, mas o veículo ${ghost.plate} não tem dados ` +
+      `Camião ${w.rawTruck} planeado como ${w.plate}, mas ${sw.suggPlate} ` +
+      `esteve em ${storeLabel(w)} às ${fmtHM(sw.suggStop.arrivedAt)}–` +
+      `${fmtHM(sw.suggStop.departedAt) || "?"}${timing}.` +
+      (sw.ghost
+        ? ` Nota: ${sw.ghost.label || "outra linha"} também estava planeado ` +
+          `para esta loja/janela, mas o veículo ${sw.ghost.plate} não tem dados ` +
           `GPS — não é uma alternativa real.`
         : "") +
-      (outOfWindow
+      (sw.outOfWindow
         ? " ⚠️ Fora do intervalo habitual — confirma com cuidado antes de aceitar."
         : " Confirma antes de aceitar.");
   }
