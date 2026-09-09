@@ -3,8 +3,7 @@
 // database, so this deliberately does NOT try to work offline: it network-first
 // for everything and only falls back to a cached shell when the network fails.
 
-const CACHE = "routing-dashboard-v1";
-const CACHE = "routing-dashboard-v2";
+const CACHE = "routing-dashboard-v3";
 const SHELL = [
   "/dashboard",
   "/manifest.json",
