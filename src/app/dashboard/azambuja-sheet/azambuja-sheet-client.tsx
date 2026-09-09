@@ -243,7 +243,11 @@ export function AzambujaSheetClient() {
             matrícula + horas. Rotas concorrentes em veículos <em>sem</em> GPS
             nosso são ignoradas; havendo mais que uma alternativa real, fica em
             Rever. A variante <strong>🔄❗ fora da janela</strong> aparece quando
-            a paragem é a única hipótese mas cai fora da margem habitual.
+            a paragem é a única hipótese mas cai fora da margem habitual. Se{" "}
+            <strong>não houver GPS nosso da viatura planeada</strong> a cobrir a
+            janela da entrega (o caso da frota nova sem histórico), não se
+            sugere nada — fica <strong>⚠️ Rever manualmente</strong> com nota de{" "}
+            <em>sem cobertura GPS</em>.
           </li>
           <li>
             Sem correspondência clara: <strong>⚠️ Rever manualmente</strong>, com

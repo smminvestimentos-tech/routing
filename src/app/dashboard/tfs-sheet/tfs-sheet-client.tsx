@@ -240,7 +240,11 @@ export function TfsSheetClient() {
             nessa loja a uma hora plausível (±3h da janela), sugere-se essa
             matrícula + horas. Linhas concorrentes planeadas para a mesma
             loja/janela em veículos <em>sem</em> GPS nosso são ignoradas; se
-            houver mais que uma alternativa real, fica em Rever.
+            houver mais que uma alternativa real, fica em Rever. Se{" "}
+            <strong>não houver GPS nosso da viatura planeada</strong> a cobrir
+            essa entrega, não se arrisca sugestão nenhuma — a linha fica{" "}
+            <strong>⚠️ Rever manualmente</strong> com nota de{" "}
+            <em>sem cobertura GPS</em>.
           </li>
           <li>
             Sem correspondência clara: a linha fica{" "}

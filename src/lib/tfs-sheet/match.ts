@@ -40,15 +40,18 @@ import {
   findVehicleSwap,
   fmtDuration,
   fmtHM,
+  noGpsCoverageNote,
   normalizePlate,
   parseClockMin,
   parseServiceDay,
   pick,
+  plannedPlateHasCoverage,
   REAL_COL,
   REVIEW,
   type SheetRecord,
   SWAP,
   SWAP_OUT_OF_WINDOW,
+  SWAP_WINDOW_PAD_MIN,
   type SwapRival,
   type WStop,
 } from "@/lib/sheet-match/common";
@@ -131,6 +134,12 @@ export type RunMatchArgs = {
    * suggestion, or a GPS-less ghost to ignore.
    */
   platesWithGps: Set<string>;
+  /**
+   * normalised plate -> [min, max] epoch-ms of that plate's pings in the
+   * loaded day window. Gates swap suggestions: no coverage around a candidate
+   * stop -> "sem cobertura GPS", not a guess.
+   */
+  pingWindowByPlate: Map<string, { min: number; max: number }>;
 };
 
 export type RunMatchResult = {
@@ -338,6 +347,7 @@ type Work = {
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, header, cols, fleetByTruck, platesWithGps } = args;
+  const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   const outHeader = [...header];
@@ -521,6 +531,22 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
 
+    // No GPS of ours covering this vehicle's planned delivery window -> we
+    // can't tell if it made the stop itself, so don't guess a swap.
+    if (
+      !plannedPlateHasCoverage(
+        pingWindowByPlate.get(w.plate) ?? null,
+        day,
+        w.planIni,
+        w.planFim,
+        SWAP_WINDOW_PAD_MIN,
+      )
+    ) {
+      w.conf = REVIEW;
+      w.real = noGpsCoverageNote(w.plate, platesWithGps.has(w.plate));
+      continue;
+    }
+
     const rivals: SwapRival[] = works
       .filter((c) => c !== w && !c.empty)
       .map((c) => ({
@@ -540,8 +566,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       stops,
       rivals,
       platesWithGps,
+      plannedPlateGpsSpan: pingWindowByPlate.get(w.plate) ?? null,
     });
     if (!sw) continue;
+
+    if (sw.kind === "no-gps-coverage") {
+      w.conf = REVIEW;
+      w.real = sw.note;
+      continue;
+    }
 
     w.conf = sw.outOfWindow ? SWAP_OUT_OF_WINDOW : SWAP;
     w.swapPlate = sw.suggPlate;

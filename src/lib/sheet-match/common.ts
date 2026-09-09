@@ -211,6 +211,65 @@ export function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Lisbon wall-clock offset (minutes east of UTC) at a given instant. Same
+// technique as app/dashboard/_server.ts, duplicated here to keep this module
+// framework-free.
+function lisbonOffsetMin(at: Date): number {
+  const s = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Lisbon",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(at);
+  const m = s.match(/(\d+)\/(\d+)\/(\d+),?\s+(\d+):(\d+):(\d+)/);
+  if (!m) return 0;
+  const asUTC = Date.UTC(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6]);
+  return Math.round((asUTC - at.getTime()) / 60000);
+}
+
+// Epoch ms for "YYYY-MM-DD" + minutes-since-midnight, read as Lisbon wall-clock.
+function lisbonEpoch(day: string, minOfDay: number): number {
+  const [y, mo, d] = day.split("-").map(Number);
+  const guess = Date.UTC(y, mo - 1, d, 0, 0, 0) + minOfDay * 60000;
+  return guess - lisbonOffsetMin(new Date(guess)) * 60000;
+}
+
+// The message stamped on a row whose planned vehicle we can't corroborate.
+export function noGpsCoverageNote(plate: string, everSeen: boolean): string {
+  return everSeen
+    ? `Sem cobertura GPS para ${plate} no período desta entrega ` +
+        `(temos posições dessa viatura noutras alturas, não aqui) — ` +
+        `não dá para confirmar se a fez; sem sugestão de troca.`
+    : `Sem cobertura GPS para ${plate} (nenhum dado GPS registado) — ` +
+        `sem sugestão de troca.`;
+}
+
+// Does the planned vehicle's ping span overlap its planned delivery window
+// (widened by `padMin`) on the service day? `span` is [min,max] epoch-ms of
+// that plate's pings in the loaded data. Returns true when we can't tell (no
+// planned window) so a missing CICLO/Janela never over-flags; false when the
+// plate has no pings at all.
+export function plannedPlateHasCoverage(
+  span: { min: number; max: number } | null,
+  day: string,
+  planIni: string | number,
+  planFim: string | number,
+  padMin: number,
+): boolean {
+  if (!span) return false;
+  const loMin = parseClockMin(planIni);
+  const hiMin = parseClockMin(planFim);
+  if (loMin == null && hiMin == null) return true;
+  const padMs = padMin * 60000;
+  const lo = lisbonEpoch(day, loMin ?? hiMin!) - padMs;
+  const hi = lisbonEpoch(day, hiMin ?? loMin!) + padMs;
+  return span.max >= lo && span.min <= hi;
+}
+
 // A date-ish cell -> YYYY-MM-DD. Handles ISO, DD/MM/YYYY, DD-MM-YY, JS Date,
 // and Excel serial numbers.
 export function parseServiceDay(v: unknown): string | null {
@@ -287,6 +346,7 @@ export type SwapRival = {
 };
 
 export type SwapResult = {
+  kind: "swap";
   outOfWindow: boolean;
   suggPlate: string;
   suggStop: WStop;
@@ -300,10 +360,19 @@ export type SwapResult = {
   ghost: { label: string; plate: string } | null;
 };
 
+// The planned vehicle has no GPS of ours covering this delivery, so we can't
+// tell whether it made the stop itself — no swap is suggested, the row goes to
+// manual review with `note`.
+export type SwapNoCoverage = {
+  kind: "no-gps-coverage";
+  note: string;
+};
+
 /**
- * Returns a swap suggestion for `plate` at store `code`, or null when there
+ * Returns a swap suggestion for `plate` at store `code`; a "no-gps-coverage"
+ * marker when the planned vehicle can't be corroborated; or null when there
  * isn't a single unambiguous leftover stop to point at. Does NOT mutate — the
- * caller marks `result.suggStop.assigned` once it commits the suggestion.
+ * caller marks `result.suggStop.assigned` once it commits a swap.
  */
 export function findVehicleSwap(params: {
   /** the row's resolved plate, which matched no stop of its own */
@@ -315,11 +384,27 @@ export function findVehicleSwap(params: {
   stops: WStop[];
   /** every other sheet row, for the "real rival" check */
   rivals: SwapRival[];
-  /** plates our GPS feed has ever seen (this fleet) */
+  /** plates our GPS feed has ever seen (all fleets, any day) */
   platesWithGps: Set<string>;
+  /**
+   * [min, max] epoch-ms of the PLANNED plate's own pings in the loaded window,
+   * or null if it has none. A swap is only suggested when this span (padded by
+   * `padMin`) covers the candidate stop's time — otherwise we had no eyes on
+   * the planned vehicle then and whoever else was nearby is a coincidence.
+   */
+  plannedPlateGpsSpan: { min: number; max: number } | null;
   padMin?: number;
-}): SwapResult | null {
-  const { plate, code, planIni, planFim, stops, rivals, platesWithGps } = params;
+}): SwapResult | SwapNoCoverage | null {
+  const {
+    plate,
+    code,
+    planIni,
+    planFim,
+    stops,
+    rivals,
+    platesWithGps,
+    plannedPlateGpsSpan,
+  } = params;
   const padMin = params.padMin ?? SWAP_WINDOW_PAD_MIN;
   const win = widenWindow(planIni, planFim, padMin);
 
@@ -359,6 +444,24 @@ export function findVehicleSwap(params: {
   if (suggStops.length !== 1) return null; // same vehicle, 2 visits -> ambiguous
   const suggStop = suggStops[0];
 
+  // Would we even have seen the planned vehicle at this store? If our GPS for
+  // it doesn't reach the candidate stop's time (padded), we can't say it
+  // wasn't there — pointing at whoever else happened to stop nearby would be a
+  // coincidence, not evidence. Bail to manual review with a "no coverage" note.
+  const stopT = new Date(suggStop.arrivedAt).getTime();
+  const padMs = padMin * 60_000;
+  const covered =
+    plannedPlateGpsSpan != null &&
+    Number.isFinite(stopT) &&
+    stopT >= plannedPlateGpsSpan.min - padMs &&
+    stopT <= plannedPlateGpsSpan.max + padMs;
+  if (!covered) {
+    return {
+      kind: "no-gps-coverage",
+      note: noGpsCoverageNote(plate, platesWithGps.has(plate)),
+    };
+  }
+
   // rival sheet rows planned for the same store in an overlapping window
   const rivalMatches = rivals.filter(
     (c) =>
@@ -392,6 +495,7 @@ export function findVehicleSwap(params: {
       : null;
 
   return {
+    kind: "swap",
     outOfWindow,
     suggPlate,
     suggStop,

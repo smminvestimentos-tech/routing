@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       .limit(STOP_LIMIT),
     supabase
       .from("vehicle_pings")
-      .select("vehicle_id, plate")
+      .select("vehicle_id, plate, recorded_at")
       .gte("recorded_at", dayStart)
       .lt("recorded_at", dayEnd)
       .not("plate", "is", null)
@@ -151,8 +151,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Most-seen plate per vehicle that day (vehicle_pings.plate, normalised).
+  // Most-seen plate per vehicle that day (vehicle_pings.plate, normalised), and
+  // per plate the [min, max] time span of its pings in this window (for the
+  // swap-coverage gate).
   const plateTally = new Map<number, Map<string, number>>();
+  const pingWindowByPlate = new Map<string, { min: number; max: number }>();
   for (const p of pingsRes.data ?? []) {
     if (!p.plate) continue;
     const np = normalizePlate(String(p.plate));
@@ -163,6 +166,16 @@ export async function POST(request: NextRequest) {
       plateTally.set(p.vehicle_id, m);
     }
     m.set(np, (m.get(np) ?? 0) + 1);
+
+    const t = new Date(p.recorded_at as string).getTime();
+    if (Number.isFinite(t)) {
+      const span = pingWindowByPlate.get(np);
+      if (!span) pingWindowByPlate.set(np, { min: t, max: t });
+      else {
+        if (t < span.min) span.min = t;
+        if (t > span.max) span.max = t;
+      }
+    }
   }
   const plateByVehicle = new Map<number, string>();
   for (const [vid, m] of plateTally) {
@@ -211,6 +224,7 @@ export async function POST(request: NextRequest) {
     stops,
     fleetByTruck,
     platesWithGps,
+    pingWindowByPlate,
   });
 
   const outWs = XLSX.utils.json_to_sheet(rows, { header: outHeader });

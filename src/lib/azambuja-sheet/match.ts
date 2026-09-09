@@ -20,11 +20,14 @@
 //      order. When the stop count matches the store count and the codes line
 //      up, those groups are "OK"; otherwise "⚠️ Rever manualmente".
 //
-//   3. A store-group the route's plate couldn't cover: if a single leftover
-//      stop at that store belongs to a DIFFERENT vehicle (and no rival route
-//      on a GPS-tracked vehicle was planned for the same store/window), it is
-//      flagged "🔄 Possível troca de viatura" with the suggested plate + times
-//      (same detector as the TFS sheet, incl. the "fora da janela" variant).
+//   3. A store-group the plate couldn't cover: if we have NO GPS of ours for
+//      the planned vehicle across its CICLO window, we can't tell it wasn't
+//      there itself — flag "⚠️ Rever manualmente" with a "sem cobertura GPS"
+//      note and suggest nothing. Otherwise, if a single leftover stop at that
+//      store belongs to a DIFFERENT vehicle (and no rival route on a
+//      GPS-tracked vehicle was planned for the same store/window), flag
+//      "🔄 Possível troca de viatura" with the suggested plate + times (same
+//      detector as the TFS sheet, incl. the "fora da janela" variant).
 //
 //   4. Whatever is left is "⚠️ Rever manualmente", with the "Real" column
 //      showing what our data actually has for that route's plate that day.
@@ -38,15 +41,18 @@ import {
   fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
+  noGpsCoverageNote,
   normalizePlate,
   parseClockMin,
   parseServiceDay,
   pick,
+  plannedPlateHasCoverage,
   REAL_COL,
   REVIEW,
   type SheetRecord,
   SWAP,
   SWAP_OUT_OF_WINDOW,
+  SWAP_WINDOW_PAD_MIN,
   type SwapRival,
   type WStop,
 } from "@/lib/sheet-match/common";
@@ -106,6 +112,12 @@ export type RunMatchArgs = {
   stops: DayStop[];
   /** every plate our GPS feed has ever seen (normalised) */
   platesWithGps: Set<string>;
+  /**
+   * normalised plate -> [min, max] epoch-ms of that plate's pings in the
+   * loaded window. Gates swap suggestions: a planned vehicle with no coverage
+   * around a candidate stop gets "sem cobertura GPS", not a guessed swap.
+   */
+  pingWindowByPlate: Map<string, { min: number; max: number }>;
 };
 
 export type RunMatchResult = {
@@ -261,6 +273,7 @@ type StoreGroup = {
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, header, cols, platesWithGps } = args;
+  const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   const outHeader = [...header];
@@ -446,6 +459,21 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   for (const g of groups) {
     if (g.conf !== "" || !g.plate || !g.code || g.assignedStop) continue;
 
+    // No GPS of ours covering this vehicle's planned window (CICLO) -> we can't
+    // tell if it made the stop itself, so don't guess a swap.
+    if (
+      !plannedPlateHasCoverage(
+        pingWindowByPlate.get(g.plate) ?? null,
+        day,
+        g.planIni,
+        g.planFim,
+        SWAP_WINDOW_PAD_MIN,
+      )
+    ) {
+      setGroup(g, REVIEW, null, noGpsCoverageNote(g.plate, platesWithGps.has(g.plate)));
+      continue;
+    }
+
     const sw = findVehicleSwap({
       plate: g.plate,
       code: g.code,
@@ -454,8 +482,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       stops,
       rivals: rivalRows.filter((r) => r.label !== `rota ${g.rota}`),
       platesWithGps,
+      plannedPlateGpsSpan: pingWindowByPlate.get(g.plate) ?? null,
     });
     if (!sw) continue;
+
+    if (sw.kind === "no-gps-coverage") {
+      setGroup(g, REVIEW, null, sw.note);
+      continue;
+    }
 
     sw.suggStop.assigned = true;
     const timing =
