@@ -10,6 +10,7 @@ type Summary = {
   ok: number;
   review: number;
   swap: number;
+  swapOutOfWindow: number;
   passthrough: number;
   discrepancy: number;
   dayStops: number;
@@ -160,6 +161,15 @@ export function TfsSheetClient() {
                     🔄 Possível troca de viatura:
                   </span>{" "}
                   {result.summary.swap} (matrícula sugerida + horas; confirmar)
+                </li>
+              )}
+              {result.summary.swapOutOfWindow > 0 && (
+                <li>
+                  <span className="font-medium text-orange-700 dark:text-orange-400">
+                    🔄❗ Possível troca (fora da janela):
+                  </span>{" "}
+                  {result.summary.swapOutOfWindow} (fora da margem de ±3h;
+                  confirmar com cuidado)
                 </li>
               )}
               <li>

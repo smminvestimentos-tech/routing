@@ -32,6 +32,7 @@ import { normalizePlate } from "@/lib/fleet/validate";
 
 export const REVIEW = "⚠️ Rever manualmente";
 export const SWAP = "🔄 Possível troca de viatura";
+export const SWAP_OUT_OF_WINDOW = "🔄❗ Possível troca (fora da janela)";
 export const CONFIANCA_COL = "Confiança";
 export const REAL_COL = "Real";
 
@@ -99,6 +100,8 @@ export type MatchSummary = {
   discrepancy: number;
   /** rows flagged "🔄 Possível troca de viatura" */
   swap: number;
+  /** rows flagged "🔄❗ Possível troca (fora da janela)" */
+  swapOutOfWindow: number;
 };
 
 export type RunMatchArgs = {
@@ -286,6 +289,30 @@ const inWindow = (min: number, w: TimeWindow | null) =>
 
 const windowsOverlap = (a: TimeWindow | null, b: TimeWindow | null) =>
   a == null || b == null || (a.lo <= b.hi && b.lo <= a.hi);
+
+// Minutes-since-midnight -> "HH:MM", wrapping into 0..1439 first (a widened
+// window's lo/hi can spill past midnight in either direction).
+function minToHM(min: number): string {
+  const wrapped = ((min % 1440) + 1440) % 1440;
+  return `${pad2(Math.floor(wrapped / 60))}:${pad2(wrapped % 60)}`;
+}
+
+// How far `min` (arrival, minutes since midnight) sits outside `w` (already
+// widened by the swap pad) — 0 when inside. Used to caption an out-of-window
+// swap suggestion with "~12h25" style text.
+function minutesOutside(min: number, w: TimeWindow): number {
+  if (min < w.lo) return w.lo - min;
+  if (min > w.hi) return min - w.hi;
+  return 0;
+}
+
+function fmtDuration(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h > 0 && m > 0) return `${h}h${pad2(m)}`;
+  if (h > 0) return `${h}h`;
+  return `${m}min`;
+}
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -478,9 +505,9 @@ type Work = {
   /** set when source === "discrepancy" */
   idPlate: string | null;
   fleetPlate: string | null;
-  /** suggested plate when conf === SWAP */
+  /** suggested plate when conf === SWAP or SWAP_OUT_OF_WINDOW */
   swapPlate: string | null;
-  conf: "" | "OK" | typeof REVIEW | typeof SWAP;
+  conf: "" | "OK" | typeof REVIEW | typeof SWAP | typeof SWAP_OUT_OF_WINDOW;
   real: string;
   assignedStop: WStop | null;
 };
@@ -677,7 +704,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const win = widenWindow(w.planIni, w.planFim, SWAP_WINDOW_PAD_MIN);
 
     // leftover stops at this store, by another vehicle, at a plausible time
-    const candidates = stops.filter(
+    const windowed = stops.filter(
       (s) =>
         !s.assigned &&
         s.plate != null &&
@@ -685,7 +712,27 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         codeEq(s.code, w.code) &&
         inWindow(arrivalMin(s), win),
     );
-    if (candidates.length === 0) continue;
+
+    // Nothing inside the padded window — before giving up, check whether
+    // exactly one unassigned stop exists at this store/day regardless of
+    // time. A real swap can land hours off the planned slot (e.g. a truck
+    // covering a delivery the evening before instead of overnight); pursue
+    // it only when there is still a single, unambiguous leftover, same bar
+    // as the windowed case, and flag it more loudly (SWAP_OUT_OF_WINDOW).
+    let candidates = windowed;
+    let outOfWindow = false;
+    if (candidates.length === 0) {
+      const anyTime = stops.filter(
+        (s) =>
+          !s.assigned &&
+          s.plate != null &&
+          s.plate !== w.plate &&
+          codeEq(s.code, w.code),
+      );
+      if (anyTime.length === 0) continue;
+      candidates = anyTime;
+      outOfWindow = true;
+    }
 
     const suggPlates = [...new Set(candidates.map((s) => s.plate as string))];
     if (suggPlates.length !== 1) continue; // >1 verifiable candidate -> review
@@ -716,20 +763,38 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     const ghost = rivals.find((c) => c.plate && !platesWithGps.has(c.plate));
 
-    w.conf = SWAP;
+    w.conf = outOfWindow ? SWAP_OUT_OF_WINDOW : SWAP;
     w.swapPlate = suggPlate;
     suggStop.assigned = true;
     w.assignedStop = suggStop;
+
+    // Only reached when outOfWindow — win is non-null in that case (a null
+    // window never fails the padded check above, so it never falls through
+    // to the unrestricted search).
+    const planIniMin = parseClockMin(w.planIni);
+    const planFimMin = parseClockMin(w.planFim);
+    const plannedLabel =
+      planIniMin != null || planFimMin != null
+        ? `${planIniMin != null ? minToHM(planIniMin) : "?"}–${planFimMin != null ? minToHM(planFimMin) : "?"}`
+        : null;
+    const timing =
+      outOfWindow && win
+        ? ` (fora da janela planeada${plannedLabel ? ` ${plannedLabel}` : ""}, ` +
+          `~${fmtDuration(minutesOutside(arrivalMin(suggStop), win))} além da margem de ±3h)`
+        : "";
+
     w.real =
       `Camião ${w.rawTruck} planeado como ${w.plate}, mas ${suggPlate} ` +
       `esteve em ${storeLabel(w)} às ${fmtHM(suggStop.arrivedAt)}–` +
-      `${fmtHM(suggStop.departedAt) || "?"}.` +
+      `${fmtHM(suggStop.departedAt) || "?"}${timing}.` +
       (ghost
         ? ` Nota: ${ghost.rawTruck || "outra linha"} também estava planeado ` +
           `para esta loja/janela, mas o veículo ${ghost.plate} não tem dados ` +
           `GPS — não é uma alternativa real.`
         : "") +
-      ` Confirma antes de aceitar.`;
+      (outOfWindow
+        ? " ⚠️ Fora do intervalo habitual — confirma com cuidado antes de aceitar."
+        : " Confirma antes de aceitar.");
   }
 
   // Step 4 — whatever is left.
@@ -761,6 +826,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let passthrough = 0;
   let discrepancy = 0;
   let swap = 0;
+  let swapOutOfWindow = 0;
   for (const w of works) {
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
@@ -779,7 +845,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // matched no stop. On a swap suggestion, write the SUGGESTED plate instead.
     // Not on "discrepancy" (w.plate is null there on purpose) or "none".
     const plateOut =
-      w.conf === SWAP && w.swapPlate ? w.swapPlate : w.plate;
+      (w.conf === SWAP || w.conf === SWAP_OUT_OF_WINDOW) && w.swapPlate
+        ? w.swapPlate
+        : w.plate;
     if (cols.plateCol && plateOut) w.out[cols.plateCol] = plateOut;
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
@@ -789,6 +857,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     w.out[REAL_COL] = w.real || "";
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;
+    else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;
     else review++;
     if (w.source === "discrepancy") discrepancy++;
   }
@@ -796,6 +865,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   return {
     rows: works.map((w) => w.out),
     header: outHeader,
-    summary: { total: ok + review + swap, ok, review, passthrough, discrepancy, swap },
+    summary: {
+      total: ok + review + swap + swapOutOfWindow,
+      ok,
+      review,
+      passthrough,
+      discrepancy,
+      swap,
+      swapOutOfWindow,
+    },
   };
 }
