@@ -35,6 +35,47 @@ export type DayStop = {
 /** A DayStop plus the matcher's "already handed to a row" flag. */
 export type WStop = DayStop & { assigned: boolean };
 
+// The sheet routes read `stops` across ALL trackit_accounts (one shared
+// fleet). A vehicle tracked by more than one account has each physical visit
+// detected once per account — slightly different arrived/departed each time —
+// which would make the positional pairing count twice as many stops as
+// stores. Merge, per vehicle, any stops whose time intervals overlap into one.
+export function dedupeStops(stops: DayStop[]): DayStop[] {
+  const byVehicle = new Map<number, DayStop[]>();
+  for (const s of stops) {
+    const arr = byVehicle.get(s.vehicleId);
+    if (arr) arr.push(s);
+    else byVehicle.set(s.vehicleId, [s]);
+  }
+  const endMs = (s: DayStop) => {
+    const start = new Date(s.arrivedAt).getTime();
+    // treat an open stop as ~2h long for overlap purposes
+    return s.departedAt ? new Date(s.departedAt).getTime() : start + 2 * 3600_000;
+  };
+  const out: DayStop[] = [];
+  for (const arr of byVehicle.values()) {
+    arr.sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
+    let cur: DayStop | null = null;
+    let curEnd = 0;
+    for (const s of arr) {
+      const start = new Date(s.arrivedAt).getTime();
+      const end = endMs(s);
+      if (cur && start <= curEnd) {
+        if (end > curEnd) {
+          cur.departedAt = s.departedAt ?? cur.departedAt;
+          curEnd = end;
+        }
+        if (!cur.code && s.code) cur.code = s.code;
+      } else {
+        cur = { ...s };
+        out.push(cur);
+        curEnd = end;
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------

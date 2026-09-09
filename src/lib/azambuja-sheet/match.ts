@@ -14,11 +14,12 @@
 //
 //   2. Per PLATE (a plate is one physical vehicle; if it runs two routes those
 //      are just earlier/later legs of one run): take that plate's stops for the
-//      day from OUR data (stops ↔ vehicle_pings.plate — all TRACKiT accounts;
-//      vehicle_id is company-wide and it's one shared fleet), sort them by
-//      arrival, and pair them positionally to the plate's store-groups in sheet
-//      order. When the stop count matches the store count and the codes line
-//      up, those groups are "OK"; otherwise "⚠️ Rever manualmente".
+//      day from OUR data (stops ↔ vehicle_pings.plate — all TRACKiT accounts,
+//      deduped; vehicle_id is company-wide and it's one shared fleet). For each
+//      store-group, in sheet order, claim the earliest still-unassigned stop of
+//      that plate whose location code matches (codeEq) → "OK". The plate's
+//      depot/workshop stops (not on the sheet) and out-of-order driving are
+//      simply ignored. Same principle as the TFS matcher.
 //
 //   3. A store-group the plate couldn't cover: if we have NO GPS of ours for
 //      the planned vehicle across its CICLO window, we can't tell it wasn't
@@ -37,6 +38,7 @@ import {
   codeKey,
   CONFIANCA_COL,
   type DayStop,
+  dedupeStops,
   findVehicleSwap,
   fmtDateTimeLisbon,
   fmtDuration,
@@ -57,8 +59,22 @@ import {
   type WStop,
 } from "@/lib/sheet-match/common";
 
-export { CONFIANCA_COL, REAL_COL, REVIEW, SWAP, SWAP_OUT_OF_WINDOW, parseServiceDay };
+export {
+  CONFIANCA_COL,
+  REAL_COL,
+  REVIEW,
+  SWAP,
+  SWAP_OUT_OF_WINDOW,
+  dedupeStops,
+  parseServiceDay,
+};
 export type { DayStop, SheetRecord };
+
+// Written into every output row so a re-uploaded (already conferido) file
+// still carries its service day unambiguously — the sheet name and file name
+// are both fragile (a save renames the sheet to "Azambuja", the browser
+// appends "(1)" to the file). Day resolution reads this back first.
+export const DIA_COL = "Dia Serviço";
 
 // Columns the Azambuja sheet is expected to carry (its own order). Shown in the
 // UI for reference; resolution itself is accent/spacing tolerant and also
@@ -82,6 +98,8 @@ export type ResolvedColumns = {
   nomeCol: string | null;
   plateCol: string;
   cicloCol: string | null;
+  /** our own "Dia Serviço" column, present only on a re-uploaded output */
+  diaCol: string | null;
   /** existing header if found, else the canonical name to add */
   chegadaCol: string;
   saidaCol: string;
@@ -153,6 +171,12 @@ export function resolveColumns(header: string[]): ResolvedColumns {
   const nomeCol = take("nome", "designacao", "nome da loja", "designacao da loja");
   const plateCol = take("matricula", "matricula da viatura", "matricula viatura");
   const cicloCol = take("ciclo");
+  const diaCol = take(
+    "dia servico",
+    "dia de servico",
+    "data servico",
+    "data do servico",
+  );
   const chegadaCol = take("hora de chegada", "hora chegada", "chegada");
   const saidaCol = take("hora de saida", "hora saida", "saida");
 
@@ -167,6 +191,7 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     nomeCol,
     plateCol: plateCol ?? "",
     cicloCol,
+    diaCol,
     chegadaCol: chegadaCol ?? "Hora Chegada",
     saidaCol: saidaCol ?? "Hora Saida",
     errors,
@@ -276,8 +301,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
+  const diaCol = cols.diaCol ?? DIA_COL;
   const outHeader = [...header];
-  for (const c of [cols.chegadaCol, cols.saidaCol, CONFIANCA_COL, REAL_COL]) {
+  for (const c of [diaCol, cols.chegadaCol, cols.saidaCol, CONFIANCA_COL, REAL_COL]) {
     if (!outHeader.includes(c)) outHeader.push(c);
   }
 
@@ -395,13 +421,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     }
   };
 
-  // ----- Step 1/2: positional pairing, per PLATE -----
+  // ----- Step 1/2: match each store-group to a stop BY STORE CODE, per PLATE -----
   //
-  // A plate is one physical vehicle with one timeline of stops for the day. If
-  // it runs two routes in the sheet, those routes' stores are just earlier and
-  // later legs of the same run — pooling the store-groups by plate (kept in
-  // sheet order) and pairing them against that plate's stops (in time order)
-  // handles a multi-route vehicle without the first route eating all its stops.
+  // A plate is one physical vehicle. Its real GPS stops for the day include
+  // depot/workshop stops that aren't on the sheet, and the sheet's row order
+  // isn't the driving order — so a positional zip doesn't work. Instead, for
+  // each store-group (in sheet order) take the earliest still-unassigned stop
+  // of that plate whose location code matches (codeEq). Extra stops are simply
+  // left over; order doesn't matter. Same principle as the TFS matcher.
   const byPlate = new Map<string, StoreGroup[]>();
   for (const g of groups) {
     if (!g.plate) {
@@ -419,28 +446,18 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       .filter((s) => s.plate === plate)
       .sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
 
-    const pairCount = Math.min(plateGroups.length, plateStops.length);
-    // "clean" = every store-group got a stop, every stop got a store-group, and
-    // no positional pair has two codes that clearly disagree.
-    let codesLineUp = true;
-    for (let i = 0; i < pairCount; i++) {
-      const g = plateGroups[i];
-      const s = plateStops[i];
-      if (g.code && s.code && !codeEq(g.code, s.code)) codesLineUp = false;
+    for (const g of plateGroups) {
+      if (!g.code) {
+        setGroup(g, REVIEW, null, describeReal(plate));
+        continue;
+      }
+      const hit = plateStops.find((s) => !s.assigned && codeEq(s.code, g.code));
+      if (hit) {
+        hit.assigned = true;
+        setGroup(g, "OK", hit, "");
+      }
+      // no code match -> leave conf === "" for step 3 (swap) / step 4 (review)
     }
-    const clean =
-      plateGroups.length === plateStops.length &&
-      plateStops.length > 0 &&
-      codesLineUp;
-
-    for (let i = 0; i < pairCount; i++) {
-      const g = plateGroups[i];
-      const s = plateStops[i];
-      s.assigned = true;
-      setGroup(g, clean ? "OK" : REVIEW, s, clean ? "" : describeReal(plate));
-    }
-    // leftover store-groups (more stores than stops seen) stay conf === "" for
-    // step 3.
   }
 
   // ----- Step 3: vehicle-swap suggestion for uncovered store-groups -----
@@ -538,6 +555,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let swap = 0;
   let swapOutOfWindow = 0;
   for (const w of works) {
+    // Stamp the service day on every row (blank ones included) so a
+    // re-uploaded output is never ambiguous about which day it is.
+    w.out[diaCol] = day;
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
       if (!(REAL_COL in w.out)) w.out[REAL_COL] = "";

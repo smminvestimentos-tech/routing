@@ -125,7 +125,8 @@ export function AzambujaSheetClient() {
           <span className="font-medium">
             Dia de serviço{" "}
             <span className="font-normal text-black/50 dark:text-white/50">
-              (opcional — deteta-se do nome da folha/ficheiro)
+              (opcional — deteta-se da coluna «Dia Serviço», do nome da folha ou
+              do ficheiro; preenche aqui se a ferramenta não conseguir)
             </span>
           </span>
           <input
@@ -229,12 +230,12 @@ export function AzambujaSheetClient() {
             mesma Chegada/Saída.
           </li>
           <li>
-            Usa-se a <strong>MATRICULA</strong> já preenchida: por viatura,
-            cruza-se com as paragens desse dia (por matrícula, ignorando
-            hífens — todas as viaturas, é uma frota só), ordenam-se por hora de
-            chegada e <strong>associam-se por posição</strong> às lojas dessa
-            viatura pela ordem da folha (se a viatura fizer duas rotas, as lojas
-            das duas entram na mesma sequência).
+            Usa-se a <strong>MATRICULA</strong> já preenchida: para cada loja
+            da rota, procura-se a <strong>paragem dessa viatura no mesmo código
+            de loja</strong> (por hora de chegada, ignorando hífens na
+            matrícula; a viatura é a mesma frota em todas as contas). As
+            paragens em armazéns/oficinas que não estão na folha, e a ordem de
+            condução, são ignoradas.
           </li>
           <li>
             <strong>🔄 Possível troca de viatura</strong>: se a matrícula da
@@ -260,8 +261,10 @@ export function AzambujaSheetClient() {
           <strong>Hora Saida</strong> preenchidas com{" "}
           <strong>data + hora de Lisboa</strong> (DD/MM/AAAA HH:MM — os ciclos
           atravessam a meia-noite, a hora sozinha seria ambígua) e as colunas{" "}
-          <strong>Confiança</strong> e <strong>Real</strong>. A{" "}
-          <strong>MATRICULA</strong> só é reescrita quando há sugestão de troca.
+          <strong>Confiança</strong>, <strong>Real</strong> e{" "}
+          <strong>Dia Serviço</strong> (para poder recarregar o ficheiro
+          conferido sem ambiguidade quanto ao dia). A <strong>MATRICULA</strong>{" "}
+          só é reescrita quando há sugestão de troca.
         </p>
 
         <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">

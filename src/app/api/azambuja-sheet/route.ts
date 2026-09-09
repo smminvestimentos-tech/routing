@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
 import {
+  dedupeStops,
   parseServiceDay,
   resolveColumns,
   resolveDay,
@@ -24,8 +26,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // A day's fleet at ~one ping / 5 min is a few thousand rows; cap generously.
+// Hard ceiling on how many ping rows we'll page in for one day's window.
 const PING_LIMIT = 200_000;
-const STOP_LIMIT = 20_000;
 
 type StopEmbedRow = {
   id: string;
@@ -105,18 +107,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // The sheet carries no service-day column. Prefer an explicit form field,
-  // then the sheet name ("route-…-YYYYMMDDHHMMSS-…"), then the file name.
+  // The transporter's raw sheet carries no service-day column, so the day is
+  // resolved, in order of trust:
+  //   1. the explicit "Dia" field on the page
+  //   2. our own "Dia Serviço" column (present on a re-uploaded conferido file)
+  //   3. the sheet name ("route-…-YYYYMMDDHHMMSS-…")
+  //   4. the file name (…YYYY-MM-DD… / …DD-MM-YYYY…)
+  // If none give a date, refuse — better a clear error than 500 false negatives
+  // from querying the wrong (or no) day.
   const dayField = String(form.get("day") ?? "").trim();
+  const dayFromCell = cols.diaCol
+    ? parseServiceDay(
+        records.map((r) => r[cols.diaCol!]).find((v) => v != null && v !== "") ??
+          "",
+      )
+    : null;
   const day =
     (dayField && parseServiceDay(dayField)) ||
+    dayFromCell ||
     resolveDay(sheetName, file.name);
   if (!day) {
     return NextResponse.json(
       {
         error:
-          "Não consegui determinar o dia de serviço (nem no nome da folha, " +
-          "nem no nome do ficheiro). Indica a data no campo «Dia».",
+          "Não consigo determinar a data deste ficheiro (não há coluna «Dia " +
+          "Serviço», e nem o nome da folha nem o do ficheiro têm uma data " +
+          "reconhecível). Indica a data no campo «Dia» e volta a carregar.",
       },
       { status: 422 },
     );
@@ -135,21 +151,36 @@ export async function POST(request: NextRequest) {
     new Date(lisbonDayStartISO(addDaysYmd(day, 1))).getTime() + SKIRT_MS,
   ).toISOString();
 
+  // PostgREST caps every response at 1000 rows regardless of .limit(), so both
+  // of these must be paged — a full backfilled day is well over 1000 stops and
+  // tens of thousands of pings, and truncation shows up as silent "Rever
+  // manualmente" for whichever vehicles fall past the cut.
   const [stopsRes, pingsRes, allPlatesRes] = await Promise.all([
-    supabase
-      .from("stops")
-      .select("id, vehicle_id, arrived_at, departed_at, location:locations(code)")
-      .gte("arrived_at", dayStart)
-      .lt("arrived_at", dayEnd)
-      .order("arrived_at", { ascending: true })
-      .limit(STOP_LIMIT),
-    supabase
-      .from("vehicle_pings")
-      .select("vehicle_id, plate, recorded_at")
-      .gte("recorded_at", dayStart)
-      .lt("recorded_at", dayEnd)
-      .not("plate", "is", null)
-      .limit(PING_LIMIT),
+    fetchAllRows<StopEmbedRow>((from, to) =>
+      supabase
+        .from("stops")
+        .select("id, vehicle_id, arrived_at, departed_at, location:locations(code)", {
+          count: "exact",
+        })
+        .gte("arrived_at", dayStart)
+        .lt("arrived_at", dayEnd)
+        .order("arrived_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows<{ vehicle_id: number; plate: string | null; recorded_at: string }>(
+      (from, to) =>
+        supabase
+          .from("vehicle_pings")
+          .select("vehicle_id, plate, recorded_at", { count: "exact" })
+          .gte("recorded_at", dayStart)
+          .lt("recorded_at", dayEnd)
+          .not("plate", "is", null)
+          .order("recorded_at", { ascending: true })
+          .order("vehicle_id", { ascending: true })
+          .range(from, to),
+      { hardCap: PING_LIMIT },
+    ),
     // Every plate our GPS feed has ever seen (one row per vehicle/account).
     // Used by the swap-suggestion logic to tell a real rival from a ghost.
     supabase.from("latest_vehicle_plate").select("plate"),
@@ -157,13 +188,13 @@ export async function POST(request: NextRequest) {
 
   if (stopsRes.error) {
     return NextResponse.json(
-      { error: `Falha a ler paragens: ${stopsRes.error.message}` },
+      { error: `Falha a ler paragens: ${stopsRes.error}` },
       { status: 500 },
     );
   }
   if (pingsRes.error) {
     return NextResponse.json(
-      { error: `Falha a ler posições: ${pingsRes.error.message}` },
+      { error: `Falha a ler posições: ${pingsRes.error}` },
       { status: 500 },
     );
   }
@@ -173,7 +204,7 @@ export async function POST(request: NextRequest) {
   // swap-coverage gate).
   const plateTally = new Map<number, Map<string, number>>();
   const pingWindowByPlate = new Map<string, { min: number; max: number }>();
-  for (const p of pingsRes.data ?? []) {
+  for (const p of pingsRes.data) {
     if (!p.plate) continue;
     const np = normalizePlate(String(p.plate));
     if (!np) continue;
@@ -207,14 +238,18 @@ export async function POST(request: NextRequest) {
     if (best) plateByVehicle.set(vid, best);
   }
 
-  const stops: DayStop[] = ((stopsRes.data ?? []) as StopEmbedRow[]).map((s) => ({
-    id: s.id,
-    vehicleId: s.vehicle_id,
-    plate: plateByVehicle.get(s.vehicle_id) ?? null,
-    code: embeddedCode(s.location),
-    arrivedAt: s.arrived_at,
-    departedAt: s.departed_at,
-  }));
+  // dedupeStops merges the same physical visit when a vehicle is tracked by
+  // more than one TRACKiT account (the query spans all accounts).
+  const stops: DayStop[] = dedupeStops(
+    stopsRes.data.map((s) => ({
+      id: s.id,
+      vehicleId: s.vehicle_id,
+      plate: plateByVehicle.get(s.vehicle_id) ?? null,
+      code: embeddedCode(s.location),
+      arrivedAt: s.arrived_at,
+      departedAt: s.departed_at,
+    })),
+  );
 
   // Plates known to our GPS feed (any day). Falls back to the day's ping
   // plates if the view query failed, so the feature degrades gracefully.
@@ -237,7 +272,14 @@ export async function POST(request: NextRequest) {
 
   const outWs = XLSX.utils.json_to_sheet(rows, { header: outHeader });
   const outWb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(outWb, outWs, "Azambuja");
+  // Keep the transporter's original sheet name when it's a valid one (it
+  // usually encodes the day, "route-806-YYYYMMDD…") — SheetJS rejects names
+  // over 31 chars or with []:*?/\, and needs something non-empty.
+  const outSheetName =
+    sheetName && sheetName.length <= 31 && !/[[\]:*?/\\]/.test(sheetName)
+      ? sheetName
+      : "Azambuja";
+  XLSX.utils.book_append_sheet(outWb, outWs, outSheetName);
   const fileBase64 = XLSX.write(outWb, { type: "base64", bookType: "xlsx" });
 
   return NextResponse.json({
