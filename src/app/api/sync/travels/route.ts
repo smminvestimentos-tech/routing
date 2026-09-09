@@ -3,9 +3,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { findNearestLocationId, type GeoPoint } from "@/lib/geo";
 import { isSyncAuthorized } from "@/lib/sync/auth";
 import {
+  getAccountCredentials,
   getPois,
   getVehiclesForUser,
   getVehicleTravels,
+  type TrackitAccount,
   type TrackitTravel,
 } from "@/lib/trackit/client";
 
@@ -14,9 +16,11 @@ import {
 // this was set to 60).
 export const maxDuration = 300;
 
-// Only one TRACKiT account/credential pair is wired up today (TRACKIT_USER/TRACKIT_PASS).
-// When a second account is added, this becomes one iteration of a loop over
-// {account, user, pass} entries, each with its own sync_runs row.
+// Travels still syncs a single account (the "default" one). The credential
+// lookup is generalised — src/lib/trackit/client.ts can resolve any configured
+// account — but the cursor/sync_runs batching here is per-account state, so
+// multi-account travels would need a run per account (one future step). The
+// positions/stops syncs already iterate every configured account.
 const TRACKIT_ACCOUNT = "default";
 
 // Each vehicleTravels call takes ~15s on TRACKiT's own end regardless of
@@ -67,6 +71,16 @@ export async function POST(request: NextRequest) {
 
   if (!isSyncAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let account: TrackitAccount;
+  try {
+    account = getAccountCredentials(TRACKIT_ACCOUNT);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 
   let body: {
@@ -155,7 +169,7 @@ export async function POST(request: NextRequest) {
         Date.now() - new Date(metadata.pois_synced_at).getTime() > POIS_STALE_AFTER_MS;
 
       if (poisStale) {
-        const pois = await getPois();
+        const pois = await getPois(account);
         mark("getPois() done");
         trackitPoisUpserted = pois.length;
 
@@ -194,7 +208,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const vehicles = await getVehiclesForUser();
+      const vehicles = await getVehiclesForUser(account);
       mark("getVehiclesForUser() done");
       const vehicleIds = Array.from(new Set(vehicles.map((v) => v.mid)));
 
@@ -255,7 +269,7 @@ export async function POST(request: NextRequest) {
     const label = `[timing] getVehicleTravels(${vehicleId})`;
     console.time(label);
     try {
-      travels = await getVehicleTravels(vehicleId, run.date_begin, run.date_end);
+      travels = await getVehicleTravels(account, vehicleId, run.date_begin, run.date_end);
       console.timeEnd(label);
       mark(`getVehicleTravels(${vehicleId}) done`);
     } catch (err) {

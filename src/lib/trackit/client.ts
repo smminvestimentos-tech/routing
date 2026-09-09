@@ -2,6 +2,49 @@ import "server-only";
 
 const BASE_URL = "https://trackit.targatelematics.com/api";
 
+// A resolved TRACKiT account: a stable id (also used as the `trackit_account`
+// column value everywhere the sync writes) plus its Basic-auth credentials.
+export type TrackitAccount = {
+  id: string;
+  user: string;
+  pass: string;
+};
+
+// Every account this codebase knows how to talk to, in priority order. An
+// entry with either credential half missing in the current environment is
+// dropped by getConfiguredAccounts() below — so a preview/staging env that
+// only has the default pair set still works, it just syncs one account.
+const ACCOUNT_ENV: Array<{ id: string; user?: string; pass?: string }> = [
+  { id: "default", user: process.env.TRACKIT_USER, pass: process.env.TRACKIT_PASS },
+  { id: "azambuja", user: process.env.TRACKIT_USER_2, pass: process.env.TRACKIT_PASS_2 },
+];
+
+/**
+ * The accounts that are actually usable in this environment (both
+ * TRACKIT_USER* and TRACKIT_PASS* present). Callers iterate this so adding a
+ * third account is just another ACCOUNT_ENV row.
+ */
+export function getConfiguredAccounts(): TrackitAccount[] {
+  return ACCOUNT_ENV.filter(
+    (a): a is TrackitAccount => Boolean(a.user) && Boolean(a.pass),
+  );
+}
+
+/**
+ * Resolve one account by id, throwing if it isn't configured here. Use when a
+ * caller needs a specific account (e.g. the "default" one) rather than
+ * iterating them all.
+ */
+export function getAccountCredentials(accountId: string): TrackitAccount {
+  const account = getConfiguredAccounts().find((a) => a.id === accountId);
+  if (!account) {
+    throw new Error(
+      `TRACKiT account "${accountId}" is not configured (missing TRACKIT_USER*/TRACKIT_PASS*)`,
+    );
+  }
+  return account;
+}
+
 export type TrackitPoi = {
   id: number;
   id_external?: string | null;
@@ -99,41 +142,50 @@ export class TrackitError extends Error {
   }
 }
 
-const REQUEST_TIMEOUT_MS = 20_000;
+// 30s, not 20s: a TRACKiT tenant with a large fleet (observed: ~180 vehicles)
+// can take 20-30s just to build the /vehiclesForUser payload, and a 20s cap was
+// tripping the timeout and burning all 3 retries (~60s) before eventually
+// succeeding. vehicleTravels is ~15s server-side, comfortably inside 30s too.
+const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 500;
 
-// TRACKiT enforces a global ~1 request/second limit per account (observed as
+// TRACKiT enforces a global ~1 request/second limit *per account* (observed as
 // a 200-OK business error, not HTTP 429: "wait 1000ms between requests").
 // Every call funnels through this pacer so callers can freely issue several
-// requests without needing to know about the limit themselves.
+// requests without needing to know about the limit themselves. State is keyed
+// by account id: distinct accounts have distinct limits, so their calls never
+// wait on each other and can run fully in parallel; only calls sharing an
+// account id are serialised.
 const MIN_REQUEST_INTERVAL_MS = 1100;
-let nextRequestAt = 0;
+const nextRequestAt = new Map<string, number>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function paceRequest(): Promise<void> {
+async function paceRequest(accountId: string): Promise<void> {
   const now = Date.now();
-  const waitMs = Math.max(0, nextRequestAt - now);
-  nextRequestAt = Math.max(now, nextRequestAt) + MIN_REQUEST_INTERVAL_MS;
+  const scheduled = nextRequestAt.get(accountId) ?? 0;
+  const waitMs = Math.max(0, scheduled - now);
+  // Reserve this account's slot synchronously (before any await) so concurrent
+  // callers on the same account queue up deterministically.
+  nextRequestAt.set(accountId, Math.max(now, scheduled) + MIN_REQUEST_INTERVAL_MS);
   if (waitMs > 0) await sleep(waitMs);
 }
 
 const RATE_LIMIT_MESSAGE_RE = /wait \d+ms between requests/i;
 
-function authHeader(): string {
-  const user = process.env.TRACKIT_USER;
-  const pass = process.env.TRACKIT_PASS;
-  if (!user || !pass) {
-    throw new Error("TRACKIT_USER / TRACKIT_PASS not configured");
-  }
-  return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
+function authHeader(account: TrackitAccount): string {
+  return `Basic ${Buffer.from(`${account.user}:${account.pass}`).toString("base64")}`;
 }
 
-async function callTrackitOnce<T>(path: string, init?: RequestInit): Promise<T> {
-  await paceRequest();
+async function callTrackitOnce<T>(
+  account: TrackitAccount,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  await paceRequest(account.id);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -143,7 +195,7 @@ async function callTrackitOnce<T>(path: string, init?: RequestInit): Promise<T> 
     res = await fetch(`${BASE_URL}${path}`, {
       ...init,
       headers: {
-        Authorization: authHeader(),
+        Authorization: authHeader(account),
         "Content-Type": "application/json",
         ...init?.headers,
       },
@@ -184,12 +236,16 @@ async function callTrackitOnce<T>(path: string, init?: RequestInit): Promise<T> 
   return (doc.data ?? ([] as unknown as T));
 }
 
-async function callTrackit<T>(path: string, init?: RequestInit): Promise<T> {
+async function callTrackit<T>(
+  account: TrackitAccount,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      return await callTrackitOnce<T>(path, init);
+      return await callTrackitOnce<T>(account, path, init);
     } catch (err) {
       lastError = err;
       const transient = err instanceof TrackitError ? err.transient : true;
@@ -202,20 +258,21 @@ async function callTrackit<T>(path: string, init?: RequestInit): Promise<T> {
   throw lastError;
 }
 
-export function getPois(): Promise<TrackitPoi[]> {
-  return callTrackit<TrackitPoi[]>("/poi/0");
+export function getPois(account: TrackitAccount): Promise<TrackitPoi[]> {
+  return callTrackit<TrackitPoi[]>(account, "/poi/0");
 }
 
-export function getVehiclesForUser(): Promise<TrackitVehicle[]> {
-  return callTrackit<TrackitVehicle[]>("/vehiclesForUser");
+export function getVehiclesForUser(account: TrackitAccount): Promise<TrackitVehicle[]> {
+  return callTrackit<TrackitVehicle[]>(account, "/vehiclesForUser");
 }
 
 export function getVehicleTravels(
+  account: TrackitAccount,
   vehicleId: number,
   dateBegin: string,
   dateEnd: string,
 ): Promise<TrackitTravel[]> {
-  return callTrackit<TrackitTravel[]>("/vehicleTravels?v=1", {
+  return callTrackit<TrackitTravel[]>(account, "/vehicleTravels?v=1", {
     method: "POST",
     body: JSON.stringify({ vehicleId, dateBegin, dateEnd }),
   });
