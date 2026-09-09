@@ -754,10 +754,21 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         ),
     );
     // real competition = a rival whose resolved plate is a GPS-tracked vehicle
-    // (other than the one we're suggesting). A rival on a GPS-less vehicle
-    // (like 91DD34) is a planning ghost — ignore it.
+    // (other than the one we're suggesting) that could plausibly ALSO be the
+    // one behind suggStop. A rival on a GPS-less vehicle (like 91DD34) is a
+    // planning ghost — ignore it. And a rival already matched to its own real
+    // stop (via Step 1/2) isn't competing for suggStop at all — it already
+    // has its own visit accounted for elsewhere, so it can't be the one who
+    // actually made suggStop. Tuned on the 08/09 case: camião 282 (AR-75-PH)
+    // was also planned for D89 in this window and did stop there — but at its
+    // own time (00:15–01:20), not at the 32OG66 stop (20:25) being suggested
+    // for camião 297.
     const realRivals = rivals.filter(
-      (c) => c.plate && c.plate !== suggPlate && platesWithGps.has(c.plate),
+      (c) =>
+        c.plate &&
+        c.plate !== suggPlate &&
+        platesWithGps.has(c.plate) &&
+        (!c.assignedStop || c.assignedStop === suggStop),
     );
     if (realRivals.length > 0) continue; // can't attribute the visit -> review
 
