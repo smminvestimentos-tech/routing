@@ -1,4 +1,5 @@
-// Output-workbook builder for /dashboard/tfs-sheet.
+// Output-workbook builder shared by /dashboard/tfs-sheet and
+// /dashboard/azambuja-sheet.
 //
 // PROTOTYPE — swaps SheetJS for exceljs on the WRITE side only so the returned
 // .xlsx can carry real conditional formatting + data validation. The upload is
@@ -26,6 +27,13 @@
 //     originally-suggested plate; the Confiança cell gets a dropdown whose only
 //     option is "OK". Change the plate, or pick "OK", and the fill clears. Only
 //     the Matrícula + Confiança cells are painted, not the whole row.
+//
+//   • 🔴 vermelho on the Matrícula cell alone when «Real» mentions "cobertura
+//     GPS" — i.e. we have NO data of ours to confirm or deny that this truck
+//     made these deliveries. It's a "go check by hand (Transpogest)" flag,
+//     distinct from the generic amber. No snapshot column is needed: the rule
+//     keys off «Real» (which the user doesn't edit), not off the plate cell's
+//     own value, so an accidental plate delete doesn't change whether it fires.
 
 import ExcelJS from "exceljs";
 import {
@@ -59,21 +67,21 @@ const SUGGESTION_CONFS: ReadonlySet<string> = new Set([
   PLATE_TYPO,
 ]);
 
-export type BuildTfsWorkbookArgs = {
+export type BuildSheetWorkbookArgs = {
   rows: SheetRecord[];
   /** header order for the output, WITHOUT the ZZ/YY/XX columns (added here) */
   header: string[];
-  /** resolved "Matrícula da Viatura" header, or "" if the sheet has none */
+  /** resolved plate column header ("Matrícula da Viatura" / "MATRICULA"), or "" */
   plateColName: string;
-  /** resolved "Hora de Chegada" header */
+  /** resolved arrival column header ("Hora de Chegada" / "Hora Chegada") */
   chegadaColName: string;
-  /** resolved "Hora de Saída" header */
+  /** resolved departure column header ("Hora de Saída" / "Hora Saida") */
   saidaColName: string;
   sheetName?: string;
 };
 
-export async function buildTfsWorkbook(
-  args: BuildTfsWorkbookArgs,
+export async function buildSheetWorkbook(
+  args: BuildSheetWorkbookArgs,
 ): Promise<string> {
   const { rows, header, plateColName, chegadaColName, saidaColName } = args;
 
@@ -83,9 +91,9 @@ export async function buildTfsWorkbook(
   ];
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "routing/tfs-sheet";
+  wb.creator = "routing/sheet-match";
   wb.created = new Date();
-  const ws = wb.addWorksheet(args.sheetName || "TFS");
+  const ws = wb.addWorksheet(args.sheetName || "Folha");
 
   ws.addRow(outHeader);
   ws.getRow(1).font = { bold: true };
@@ -126,6 +134,7 @@ export async function buildTfsWorkbook(
   const chegadaL = letter(chegadaColName);
   const saidaL = saidaColName ? letter(saidaColName) : null;
   const plateL = plateColName ? letter(plateColName) : null;
+  const realL = letter(REAL_COL);
   const zzL = letter(ZZ_COL)!;
   const yyL = letter(YY_COL)!;
   const xxL = letter(XX_COL)!;
@@ -205,6 +214,25 @@ export async function buildTfsWorkbook(
           formulae: [
             `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`,
           ],
+          style: solid(FILL_RED),
+        },
+      ],
+    });
+  }
+
+  // 🔴 no GPS of ours to confirm the planned truck — «Real» carries the phrase
+  // "cobertura GPS" (both "sem cobertura … no período desta entrega" and
+  // "nenhum dado GPS registado"). Painted ONLY on the Matrícula cell: a
+  // "confirm by hand (Transpogest)" flag. Keyed off «Real» (not user-edited),
+  // so it needs no snapshot column and an accidental plate delete can't hide it.
+  if (plateL && realL) {
+    ws.addConditionalFormatting({
+      ref: `${plateL}2:${plateL}${lastRow}`,
+      rules: [
+        {
+          type: "expression",
+          priority: 4,
+          formulae: [`ISNUMBER(SEARCH("cobertura GPS",$${realL}2))`],
           style: solid(FILL_RED),
         },
       ],

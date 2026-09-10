@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildTfsWorkbook } from "@/lib/tfs-sheet/xlsx-out";
+import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
@@ -250,7 +250,7 @@ export async function POST(request: NextRequest) {
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"
   // dropdown on suggestion rows). Input parsing above stays on SheetJS.
-  const fileBase64 = await buildTfsWorkbook({
+  const fileBase64 = await buildSheetWorkbook({
     rows,
     header: outHeader,
     plateColName: cols.plateCol ?? "",

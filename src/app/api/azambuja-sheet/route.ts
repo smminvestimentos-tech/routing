@@ -14,6 +14,7 @@ import {
   type DayStop,
   type SheetRecord,
 } from "@/lib/azambuja-sheet/match";
+import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 
 // Internal tool, no auth yet — same stance as the rest of /dashboard. Parses
 // one day's Azambuja route sheet, matches it against our stops, and returns a
@@ -293,17 +294,24 @@ export async function POST(request: NextRequest) {
     pingWindowByPlate,
   });
 
-  const outWs = XLSX.utils.json_to_sheet(rows, { header: outHeader });
-  const outWb = XLSX.utils.book_new();
   // Keep the transporter's original sheet name when it's a valid one (it
-  // usually encodes the day, "route-806-YYYYMMDD…") — SheetJS rejects names
-  // over 31 chars or with []:*?/\, and needs something non-empty.
+  // usually encodes the day, "route-806-YYYYMMDD…") — Excel rejects names over
+  // 31 chars or with []:*?/\, and needs something non-empty.
   const outSheetName =
     sheetName && sheetName.length <= 31 && !/[[\]:*?/\\]/.test(sheetName)
       ? sheetName
       : "Azambuja";
-  XLSX.utils.book_append_sheet(outWb, outWs, outSheetName);
-  const fileBase64 = XLSX.write(outWb, { type: "base64", bookType: "xlsx" });
+  // PROTOTYPE: output written with exceljs — conditional formatting (amber on
+  // missing times, red on suggestions / "sem cobertura GPS") + the "OK"
+  // dropdown. Input parsing above stays on SheetJS.
+  const fileBase64 = await buildSheetWorkbook({
+    rows,
+    header: outHeader,
+    plateColName: cols.plateCol,
+    chegadaColName: cols.chegadaCol,
+    saidaColName: cols.saidaCol,
+    sheetName: outSheetName,
+  });
 
   return NextResponse.json({
     filename: `azambuja-${day}-conferido.xlsx`,

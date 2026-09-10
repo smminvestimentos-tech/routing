@@ -298,21 +298,27 @@ export function TfsSheetClient() {
           correspondente.
         </p>
         <p className="mt-3">
-          <strong>Cores no Excel</strong> (protótipo): linhas{" "}
-          <strong>⚠️ Rever manualmente</strong> ficam a{" "}
+          <strong>Cores no Excel</strong> (protótipo): as células{" "}
+          <strong>Hora de Chegada</strong> / <strong>Hora de Saída</strong> ficam
+          a{" "}
           <span className="rounded bg-amber-200 px-1 dark:text-black">
             amarelo
           </span>{" "}
-          enquanto a Hora de Chegada estiver vazia — preenche-a e a cor
-          desaparece. Linhas de sugestão (troca, troca fora da janela, erro de
-          matrícula) ficam a{" "}
-          <span className="rounded bg-red-300 px-1 dark:text-black">
-            vermelho
-          </span>{" "}
+          enquanto estiverem vazias numa linha <strong>⚠️ Rever manualmente</strong>{" "}
+          — ou se apagares por engano uma hora que nós já tínhamos preenchido.
+          Cada célula reage só a si própria; preenche-a e a cor desaparece.
+          Linhas de sugestão (troca, troca fora da janela, erro de matrícula)
+          ficam com a <strong>Matrícula</strong> e a <strong>Confiança</strong> a{" "}
+          <span className="rounded bg-red-300 px-1 dark:text-black">vermelho</span>{" "}
           até <em>ou</em> corrigires a matrícula <em>ou</em> escolheres{" "}
-          <strong>OK</strong> na lista suspensa da célula Confiança. A coluna
-          técnica <strong>ZZ</strong> (oculta) guarda a matrícula sugerida — não
-          a apagues.
+          <strong>OK</strong> na lista suspensa da Confiança. E a{" "}
+          <strong>Matrícula</strong> fica a{" "}
+          <span className="rounded bg-red-300 px-1 dark:text-black">vermelho</span>{" "}
+          nos casos de <strong>«sem cobertura GPS»</strong> (a coluna Real
+          menciona-o) — não temos dados nenhuns para confirmar a rota, é preciso
+          verificar à mão (Transpogest). As colunas técnicas ocultas{" "}
+          <strong>ZZ / YY / XX</strong> guardam a matrícula sugerida e as horas
+          originais — não as apagues.
         </p>
 
         <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">

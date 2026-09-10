@@ -309,6 +309,23 @@ export function AzambujaSheetClient() {
           conferido sem ambiguidade quanto ao dia). A <strong>MATRICULA</strong>{" "}
           só é reescrita quando há sugestão de troca.
         </p>
+        <p className="mt-3">
+          <strong>Cores no Excel</strong> (protótipo): as células{" "}
+          <strong>Hora Chegada</strong> / <strong>Hora Saida</strong> ficam a{" "}
+          <span className="rounded bg-amber-200 px-1 dark:text-black">amarelo</span>{" "}
+          enquanto vazias numa linha <strong>⚠️ Rever manualmente</strong> — ou
+          se apagares por engano uma hora que já tínhamos preenchido. Linhas de
+          sugestão (troca / troca fora da janela / erro de matrícula) ficam com a{" "}
+          <strong>MATRICULA</strong> + <strong>Confiança</strong> a{" "}
+          <span className="rounded bg-red-300 px-1 dark:text-black">vermelho</span>{" "}
+          até corrigires a matrícula ou escolheres <strong>OK</strong> na
+          Confiança. E a <strong>MATRICULA</strong> fica a{" "}
+          <span className="rounded bg-red-300 px-1 dark:text-black">vermelho</span>{" "}
+          nos casos de <strong>«sem cobertura GPS»</strong> — não há dados nossos
+          para confirmar a rota, é preciso verificar à mão (Transpogest). Colunas
+          técnicas ocultas <strong>ZZ / YY / XX</strong> guardam a sugestão e as
+          horas originais — não as apagues.
+        </p>
 
         <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">
           Colunas esperadas
