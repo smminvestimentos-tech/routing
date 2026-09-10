@@ -8,9 +8,10 @@
 //
 // What the produced file does, live in Excel:
 //
-//   • 🟡 âmbar on a "⚠️ Rever manualmente" row — but only while «Hora de
-//     Chegada» is still empty. Type an arrival and the fill clears. Only the two
-//     time cells (Chegada + Saída) are painted, not the whole row.
+//   • 🟡 âmbar on a "⚠️ Rever manualmente" row — on each of «Hora de Chegada»
+//     and «Hora de Saída», independently, while THAT cell is still empty. Fill
+//     Chegada and only its fill clears; Saída stays amber until it too is
+//     filled. Only those two cells are painted, never the whole row.
 //
 //   • 🔴 vermelho on a suggestion row (troca / troca fora da janela / erro de
 //     matrícula) while the plate cell still equals the suggested value AND the
@@ -122,7 +123,7 @@ export async function buildTfsWorkbook(
     },
   });
 
-  // A `sqref` that lists just the given columns' data rows, e.g. "E2:E8 F2:F8".
+  // A `sqref` that lists just the given columns' data rows, e.g. "C2:C8 G2:G8".
   // OOXML allows a space-separated multi-range sqref; exceljs writes it through
   // verbatim. The rule's formula stays anchored to row 2 (the top-left row).
   const colsRef = (...letters: (string | null)[]) =>
@@ -131,23 +132,26 @@ export async function buildTfsWorkbook(
       .map((l) => `${l}2:${l}${lastRow}`)
       .join(" ");
 
-  // 🟡 "Rever manualmente" AND arrival still blank — painted ONLY on the two
-  // time cells (Chegada + Saída). Keyed off the substring "Rever" (unique to
-  // the REVIEW label among all Confiança values) rather than the emoji-bearing
-  // literal, so it survives a copy/paste that mangles the ⚠️.
-  if (confL && chegadaL) {
-    ws.addConditionalFormatting({
-      ref: colsRef(chegadaL, saidaL),
-      rules: [
-        {
-          type: "expression",
-          priority: 1,
-          formulae: [
-            `AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${chegadaL}2="")`,
-          ],
-          style: solid(FILL_AMBER),
-        },
-      ],
+  // 🟡 "Rever manualmente" AND that cell still blank — ONE INDEPENDENT rule per
+  // time column, each keyed off ITS OWN emptiness. (A shared rule would clear
+  // both cells once Chegada is typed, hiding that Saída is still missing.)
+  // Keyed off the substring "Rever" (unique to the REVIEW label among all
+  // Confiança values) rather than the emoji-bearing literal, so it survives a
+  // copy/paste that mangles the ⚠️.
+  if (confL) {
+    [chegadaL, saidaL].forEach((L, i) => {
+      if (!L) return;
+      ws.addConditionalFormatting({
+        ref: `${L}2:${L}${lastRow}`,
+        rules: [
+          {
+            type: "expression",
+            priority: i + 1,
+            formulae: [`AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${L}2="")`],
+            style: solid(FILL_AMBER),
+          },
+        ],
+      });
     });
   }
 
@@ -159,7 +163,7 @@ export async function buildTfsWorkbook(
       rules: [
         {
           type: "expression",
-          priority: 2,
+          priority: 3,
           formulae: [
             `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`,
           ],

@@ -116,24 +116,64 @@ async function main() {
   const cfs = (ws as unknown as { conditionalFormattings: Cf[] })
     .conditionalFormattings;
   const allRules = cfs.flatMap((c) => c.rules);
-  ok("2 conditional-format rules present", allRules.length === 2, allRules.map((r) => r.type));
-  const formulae = allRules
-    .map((r) => (r.formulae && r.formulae[0]) || "")
-    .filter(Boolean);
-  const amber = formulae.find((f) => f.includes('SEARCH("Rever"'));
-  const red = formulae.find((f) => f.includes('<>"OK"'));
-  ok("amber rule keys off Rever + empty arrival", !!amber && amber.includes('="")'), amber);
-  ok("red rule keys off ZZ match + not OK", !!red && red.includes("$I2") && red.includes('<>"OK"'), red);
+  ok("3 conditional-format rules present", allRules.length === 3, allRules.map((r) => r.type));
 
   // Column layout here: C=Matrícula, E=Chegada, F=Saída, G=Confiança.
-  const amberCf = cfs.find((c) => c.rules[0]?.formulae?.[0]?.includes('SEARCH("Rever"'));
-  const redCf = cfs.find((c) => c.rules[0]?.formulae?.[0]?.includes('<>"OK"'));
-  ok("amber sqref = time cells only (E+F, rows 2-8)", amberCf?.ref === "E2:E8 F2:F8", amberCf?.ref);
-  ok("red sqref = Matrícula + Confiança cells only (C+G, rows 2-8)", redCf?.ref === "C2:C8 G2:G8", redCf?.ref);
+  const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
+  const amberChegada = cfFor("E2:E8");
+  const amberSaida = cfFor("F2:F8");
+  const redCf = cfFor("C2:C8 G2:G8");
+  ok("amber Chegada rule: sqref E2:E8 only", !!amberChegada, cfs.map((c) => c.ref));
+  ok("amber Saída rule: sqref F2:F8 only", !!amberSaida, cfs.map((c) => c.ref));
+  ok("red rule: sqref C2:C8 G2:G8 only", !!redCf, cfs.map((c) => c.ref));
+  ok(
+    "amber Chegada formula references its OWN column ($E2)",
+    amberChegada?.rules[0]?.formulae?.[0] ===
+      'AND(ISNUMBER(SEARCH("Rever",$G2)),$E2="")',
+    amberChegada?.rules[0]?.formulae?.[0],
+  );
+  ok(
+    "amber Saída formula references its OWN column ($F2)",
+    amberSaida?.rules[0]?.formulae?.[0] ===
+      'AND(ISNUMBER(SEARCH("Rever",$G2)),$F2="")',
+    amberSaida?.rules[0]?.formulae?.[0],
+  );
   ok(
     "no CF paints a whole-row range",
-    cfs.every((c) => !/^A2:/.test(c.ref) && c.ref.includes(" ")),
+    cfs.every((c) => !/(^|\s)A2:/.test(c.ref)),
     cfs.map((c) => c.ref),
+  );
+
+  // ---- behavioural sim: evaluate the actual amber formulae per row state ----
+  // Mirrors AND(ISNUMBER(SEARCH("Rever",conf)), cell="").
+  const amberOn = (formula: string, conf: string, chegada: string, saida: string) => {
+    const hasRever = /rever/i.test(conf);
+    const col = formula.includes("$E2") ? chegada : formula.includes("$F2") ? saida : "";
+    return hasRever && col === "";
+  };
+  const fChe = amberChegada!.rules[0].formulae![0];
+  const fSai = amberSaida!.rules[0].formulae![0];
+  const REV = REVIEW;
+
+  ok(
+    "Rever, both blank -> Chegada amber + Saída amber",
+    amberOn(fChe, REV, "", "") === true && amberOn(fSai, REV, "", "") === true,
+  );
+  ok(
+    "Rever, only Chegada filled -> Chegada white, Saída STILL amber",
+    amberOn(fChe, REV, "08:00", "") === false && amberOn(fSai, REV, "08:00", "") === true,
+  );
+  ok(
+    "Rever, only Saída filled -> Saída white, Chegada STILL amber",
+    amberOn(fSai, REV, "", "08:20") === false && amberOn(fChe, REV, "", "08:20") === true,
+  );
+  ok(
+    "Rever, both filled -> both white",
+    amberOn(fChe, REV, "08:00", "08:20") === false && amberOn(fSai, REV, "08:00", "08:20") === false,
+  );
+  ok(
+    "not a Rever row -> neither amber, whatever the times",
+    amberOn(fChe, "OK", "", "") === false && amberOn(fSai, "OK", "", "") === false,
   );
 
   // ---- data validation ("OK" dropdown) ----
