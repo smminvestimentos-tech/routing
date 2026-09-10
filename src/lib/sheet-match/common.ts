@@ -10,6 +10,10 @@
 import { normalizePlate } from "@/lib/fleet/validate";
 
 export const REVIEW = "⚠️ Rever manualmente";
+// The input row already carried BOTH arrival and departure — it was resolved
+// somewhere else. We keep it verbatim and never run matching on it. Distinct
+// from "OK", which is a value WE computed.
+export const KEPT = "✅ Já preenchido (mantido)";
 export const SWAP = "🔄 Possível troca de viatura";
 export const SWAP_OUT_OF_WINDOW = "🔄❗ Possível troca (fora da janela)";
 // A distinct category from a swap: the sheet's plate has no GPS of ours at all

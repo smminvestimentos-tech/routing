@@ -44,6 +44,7 @@ import {
   fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
+  KEPT,
   noGpsCoverageNote,
   normalizePlate,
   parseClockMin,
@@ -67,6 +68,7 @@ export {
   CONFIANCA_COL,
   REAL_COL,
   REVIEW,
+  KEPT,
   SWAP,
   SWAP_OUT_OF_WINDOW,
   PLATE_TYPO,
@@ -116,6 +118,8 @@ export type MatchSummary = {
   total: number;
   ok: number;
   review: number;
+  /** rows that arrived with both times filled and were kept verbatim */
+  kept: number;
   /** blank rows passed through untouched */
   passthrough: number;
   /** rows flagged "🔄 Possível troca de viatura" */
@@ -273,6 +277,8 @@ type Work = {
   idx: number;
   out: SheetRecord;
   empty: boolean;
+  /** input row already had BOTH times — keep verbatim, skip all matching */
+  kept: boolean;
   rota: string;
   code: string;
   designacao: string;
@@ -287,6 +293,7 @@ type Work = {
     | ""
     | "OK"
     | typeof REVIEW
+    | typeof KEPT
     | typeof SWAP
     | typeof SWAP_OUT_OF_WINDOW
     | typeof PLATE_TYPO;
@@ -341,10 +348,18 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     const ciclo = cols.cicloCol ? parseCiclo(r[cols.cicloCol]) : { ini: "", fim: "" };
 
+    // Row already carries BOTH times in the uploaded file -> resolved elsewhere;
+    // keep it verbatim and skip grouping + every matching step.
+    const kept =
+      !empty &&
+      String(r[cols.chegadaCol] ?? "").trim() !== "" &&
+      String(r[cols.saidaCol] ?? "").trim() !== "";
+
     return {
       idx,
       out: { ...r },
       empty,
+      kept,
       rota,
       code,
       designacao,
@@ -353,7 +368,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       planIni: ciclo.ini,
       planFim: ciclo.fim,
       groupKey: `${rota} ${codeKey(code)}`,
-      conf: "",
+      conf: kept ? KEPT : "",
       real: "",
       swapPlate: null,
       assignedStop: null,
@@ -361,9 +376,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   });
 
   // ----- build (ROTA, N_LOJA) store-groups, in sheet order -----
+  // "kept" rows (both times already filled on input) are left out of grouping
+  // entirely — no stop is claimed for them, no swap/typo logic touches them.
   const groupMap = new Map<string, StoreGroup>();
   for (const w of works) {
-    if (w.empty) continue;
+    if (w.empty || w.kept) continue;
     let g = groupMap.get(w.groupKey);
     if (!g) {
       g = {
@@ -605,6 +622,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // ----- write back -----
   let ok = 0;
   let review = 0;
+  let kept = 0;
   let passthrough = 0;
   let swap = 0;
   let swapOutOfWindow = 0;
@@ -617,6 +635,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
       if (!(REAL_COL in w.out)) w.out[REAL_COL] = "";
       passthrough++;
+      continue;
+    }
+    // Row that arrived with both times filled: keep Chegada/Saída/MATRICULA
+    // exactly as they came in. Only «Dia Serviço» (stamped above) and the two
+    // derived columns are written.
+    if (w.kept) {
+      w.out[CONFIANCA_COL] = KEPT;
+      w.out[REAL_COL] = "";
+      kept++;
       continue;
     }
     // Always (re)write the two time columns so the output reflects only our
@@ -663,9 +690,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + swap + swapOutOfWindow + plateTypo,
+      total: ok + review + kept + swap + swapOutOfWindow + plateTypo,
       ok,
       review,
+      kept,
       passthrough,
       swap,
       swapOutOfWindow,

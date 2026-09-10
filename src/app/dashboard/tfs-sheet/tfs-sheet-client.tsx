@@ -9,6 +9,7 @@ type Summary = {
   total: number;
   ok: number;
   review: number;
+  kept: number;
   swap: number;
   swapOutOfWindow: number;
   plateTypo: number;
@@ -156,6 +157,15 @@ export function TfsSheetClient() {
                 </span>{" "}
                 {result.summary.ok}
               </li>
+              {result.summary.kept > 0 && (
+                <li>
+                  <span className="font-medium text-teal-700 dark:text-teal-400">
+                    ✅ Já preenchido (mantido):
+                  </span>{" "}
+                  {result.summary.kept} (linha veio com Chegada e Saída — passou
+                  intacta, sem matching)
+                </li>
+              )}
               {result.summary.swap > 0 && (
                 <li>
                   <span className="font-medium text-blue-700 dark:text-blue-400">
@@ -223,6 +233,12 @@ export function TfsSheetClient() {
           Como funciona
         </h2>
         <ol className="list-decimal space-y-1.5 pl-5">
+          <li>
+            Linhas que já vêm com <strong>Hora de Chegada e Hora de Saída</strong>{" "}
+            preenchidas passam <strong>intactas</strong> — não se lhes toca nem se
+            faz matching. Ficam <strong>✅ Já preenchido (mantido)</strong>,
+            distinto de <strong>OK</strong> (que é valor calculado por nós).
+          </li>
           <li>
             Linhas <strong>com matrícula</strong>: ligadas diretamente às
             paragens desse dia (por matrícula, ignorando hífens) e emparelhadas

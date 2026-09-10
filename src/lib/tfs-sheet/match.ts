@@ -42,6 +42,7 @@ import {
   findVehicleSwap,
   fmtDuration,
   fmtHM,
+  KEPT,
   noGpsCoverageNote,
   normalizePlate,
   parseClockMin,
@@ -65,6 +66,7 @@ export {
   CONFIANCA_COL,
   REAL_COL,
   REVIEW,
+  KEPT,
   SWAP,
   SWAP_OUT_OF_WINDOW,
   PLATE_TYPO,
@@ -117,6 +119,8 @@ export type MatchSummary = {
   total: number;
   ok: number;
   review: number;
+  /** rows that arrived with both times filled and were kept verbatim */
+  kept: number;
   /** blank rows passed through untouched */
   passthrough: number;
   /** rows where the ID plate and fleet_trucks plate disagreed */
@@ -329,6 +333,8 @@ type Work = {
   idx: number;
   out: SheetRecord;
   empty: boolean;
+  /** input row already had BOTH times — keep verbatim, skip all matching */
+  kept: boolean;
   /** resolved candidate plate (normalised) */
   plate: string | null;
   //  sheet  — plate came from the "Matrícula da Viatura" column
@@ -353,6 +359,7 @@ type Work = {
     | ""
     | "OK"
     | typeof REVIEW
+    | typeof KEPT
     | typeof SWAP
     | typeof SWAP_OUT_OF_WINDOW
     | typeof PLATE_TYPO;
@@ -420,10 +427,18 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       : "";
     const ordem = ordemDigits ? Number(ordemDigits) : idx + 1;
 
+    // Row already carries BOTH times in the uploaded file -> it was resolved
+    // elsewhere; keep it verbatim and skip every downstream step.
+    const kept =
+      !empty &&
+      String(r[cols.chegadaCol] ?? "").trim() !== "" &&
+      String(r[cols.saidaCol] ?? "").trim() !== "";
+
     return {
       idx,
       out,
       empty,
+      kept,
       plate,
       source,
       rawTruck,
@@ -440,7 +455,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       idPlate,
       fleetPlate,
       swapPlate: null,
-      conf: "",
+      conf: kept ? KEPT : "",
       real: "",
       assignedStop: null,
     };
@@ -698,6 +713,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // Write the derived columns back.
   let ok = 0;
   let review = 0;
+  let kept = 0;
   let passthrough = 0;
   let discrepancy = 0;
   let swap = 0;
@@ -708,6 +724,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
       if (!(REAL_COL in w.out)) w.out[REAL_COL] = "";
       passthrough++;
+      continue;
+    }
+    // Row that arrived with both times filled: keep it EXACTLY as it came in —
+    // no day rewrite, no plate rewrite, no times. Only stamp the two derived
+    // columns so the output has a full set.
+    if (w.kept) {
+      w.out[CONFIANCA_COL] = KEPT;
+      w.out[REAL_COL] = "";
+      kept++;
       continue;
     }
     // Rewrite the day cell as an unambiguous YYYY-MM-DD. On the way in the
@@ -746,9 +771,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + swap + swapOutOfWindow + plateTypo,
+      total: ok + review + kept + swap + swapOutOfWindow + plateTypo,
       ok,
       review,
+      kept,
       passthrough,
       discrepancy,
       swap,
