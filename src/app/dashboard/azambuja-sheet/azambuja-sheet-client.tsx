@@ -258,10 +258,14 @@ export function AzambujaSheetClient() {
             Serviço»), a ferramenta recusa em vez de misturar.
           </li>
           <li>
-            Ciclos que começam na véspera (CICLO «20:00-1 | …») ou acabam no dia
-            seguinte («… | 00:30+1»): a pesquisa de paragens estende-se ao{" "}
-            <strong>dia real do turno</strong> (+3h de folga), não só a uma
-            margem fixa à volta do dia da folha.
+            A janela de pesquisa de paragens é o <strong>dia da folha</strong>{" "}
+            (00:00–24:00). <strong>Só</strong> um CICLO com marca explícita{" "}
+            <code>-1</code> (começa na véspera, «20:00-1 | …») ou <code>+1</code>{" "}
+            (acaba no dia seguinte, «… | 00:30+1») é que alarga a janela para
+            esse dia vizinho (+3h de folga). Ciclos de mesmo dia («02:00 |
+            14:00») ou de texto livre («Crossdocking peixe») ficam presos ao dia
+            da folha — uma paragem já do dia seguinte não é atribuída a essas
+            linhas.
           </li>
           <li>
             Usa-se a <strong>MATRICULA</strong> já preenchida: para cada loja

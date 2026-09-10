@@ -19,9 +19,14 @@ import { existsSync } from "node:fs";
 import {
   cicloSpan,
   parseCiclo,
+  groupWindowMs,
   stopQueryWindowMs,
+  stopArrivalInWindow,
   findRotaDayConflicts,
   resolveColumns,
+  runMatch,
+  REVIEW,
+  type DayStop,
   type SheetRecord,
 } from "@/lib/azambuja-sheet/match";
 import { lisbonEpoch } from "@/lib/sheet-match/common";
@@ -92,66 +97,76 @@ ok('parseCiclo "20:00 | 08:00" -> 00:00..08:00', JSON.stringify(parseCiclo("20:0
 ok('parseCiclo "Noturno" -> "" ""', JSON.stringify(parseCiclo("Noturno")) === JSON.stringify({ ini: "", fim: "" }));
 
 // ---------------------------------------------------------------------------
-// stopQueryWindowMs
+// groupWindowMs — the per-CICLO day-aware window.
 // ---------------------------------------------------------------------------
-console.log("== stopQueryWindowMs (day = 2026-09-09) ==");
+console.log("== groupWindowMs (day = 2026-09-09) ==");
 const DAY = "2026-09-09";
 const H = 3_600_000;
 
-// Reference instants.
-const prev2000 = lisbonEpoch("2026-09-08", 20 * 60); // 08/09 20:00
-const prev1800 = lisbonEpoch("2026-09-08", 18 * 60);
-const next0130 = lisbonEpoch("2026-09-10", 90); // 10/09 01:30
-const skirtOnly = stopQueryWindowMs(DAY, []);
+const dayLo = lisbonEpoch(DAY, 0); // 09/09 00:00
+const dayHi = lisbonEpoch(DAY, 24 * 60); // 10/09 00:00
+const prev2000 = lisbonEpoch("2026-09-08", 20 * 60);
+const next0130 = lisbonEpoch("2026-09-10", 90);
 
+// The three real regression cases — free text and same-day windows must stay
+// strictly inside the service day (00:00–24:00), never touching 10/09.
+for (const c of ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", "Noturno", ""]) {
+  const w = groupWindowMs(DAY, c);
+  ok(
+    `groupWindowMs(${JSON.stringify(c)}) == strict service day [00:00, 24:00)`,
+    w.loMs === dayLo && w.hiMs === dayHi,
+    { lo: lisbon(w.loMs), hi: lisbon(w.hiMs) },
+  );
+}
+// …and a stop at 10/09 00:10 / 00:12 / 00:44 is OUTSIDE those windows.
+for (const [c, hhmm] of [
+  ["Crossdocking peixe", "00:10"],
+  ["02:00 | 14:00", "00:12"],
+  ["11:30 | 23:30", "00:44"],
+] as const) {
+  const w = groupWindowMs(DAY, c);
+  const stopMs = lisbonEpoch("2026-09-10", Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
+  ok(
+    `10/09 ${hhmm} stop is OUT of the ${JSON.stringify(c)} window`,
+    stopArrivalInWindow(new Date(stopMs).toISOString(), w.loMs, w.hiMs) === false,
+    lisbon(stopMs),
+  );
+}
+
+// Only an explicit -1 / +1 widens past the service day.
+const wm1 = groupWindowMs(DAY, "20:00-1 | 08:00");
 ok(
-  "no CICLOs: lo = 08/09 20:00 exactly (the 4h skirt = 4h before midnight)",
-  skirtOnly.loMs === prev2000,
-  lisbon(skirtOnly.loMs),
+  '"20:00-1 | 08:00": lo = 08/09 17:00 (start − 3h); hi stays at end of service day',
+  wm1.loMs === prev2000 - 3 * H && wm1.hiMs === dayHi,
+  { lo: lisbon(wm1.loMs), hi: lisbon(wm1.hiMs) },
 );
+const wm1b = groupWindowMs(DAY, "18:00-1 | 06:00");
+ok('"18:00-1 | 06:00": lo = 08/09 15:00', wm1b.loMs === lisbonEpoch("2026-09-08", 18 * 60) - 3 * H && wm1b.hiMs === dayHi);
+const wp1 = groupWindowMs(DAY, "13:30 | 01:30+1");
 ok(
-  "no CICLOs: hi = 10/09 04:00 exactly",
-  skirtOnly.hiMs === lisbonEpoch("2026-09-10", 4 * 60),
-  lisbon(skirtOnly.hiMs),
+  '"13:30 | 01:30+1": hi = 10/09 04:30 (end + 3h); lo stays at start of service day',
+  wp1.loMs === dayLo && wp1.hiMs === next0130 + 3 * H,
+  { lo: lisbon(wp1.loMs), hi: lisbon(wp1.hiMs) },
 );
 
-const w2000 = stopQueryWindowMs(DAY, ["20:00-1 | 08:00"]);
-ok(
-  '"20:00-1 | 08:00": search starts at/ before 08/09 20:00 (includes the evening start)',
-  w2000.loMs <= prev2000,
-  lisbon(w2000.loMs),
-);
-ok(
-  '"20:00-1 | 08:00": lo = 08/09 17:00 (shift start − 3h pad), 3h earlier than the bare skirt',
-  w2000.loMs === prev2000 - 3 * H,
-  lisbon(w2000.loMs),
-);
+// ---------------------------------------------------------------------------
+// stopQueryWindowMs — union of every row's groupWindowMs, NO blanket skirt.
+// ---------------------------------------------------------------------------
+console.log("== stopQueryWindowMs ==");
+const wEmpty = stopQueryWindowMs(DAY, []);
+ok("no CICLOs: window == strict service day (no ±skirt any more)", wEmpty.loMs === dayLo && wEmpty.hiMs === dayHi, { lo: lisbon(wEmpty.loMs), hi: lisbon(wEmpty.hiMs) });
 
-const w1800 = stopQueryWindowMs(DAY, ["18:00-1 | 06:00"]);
+const wFree = stopQueryWindowMs(DAY, ["08:00 | 20:00", "Noturno", "Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", ""]);
 ok(
-  '"18:00-1 | 06:00": lo = 08/09 15:00 — reaches the real shift day, NOT clipped by the 4h skirt',
-  w1800.loMs === prev1800 - 3 * H && w1800.loMs < skirtOnly.loMs,
-  { lo: lisbon(w1800.loMs), skirt: lisbon(skirtOnly.loMs) },
-);
-
-const wPlus1 = stopQueryWindowMs(DAY, ["13:30 | 01:30+1"]);
-ok(
-  '"13:30 | 01:30+1": hi reaches 10/09 01:30 + 3h pad',
-  wPlus1.hiMs === next0130 + 3 * H && wPlus1.hiMs > skirtOnly.hiMs,
-  lisbon(wPlus1.hiMs),
-);
-
-const wPlain = stopQueryWindowMs(DAY, ["08:00 | 20:00", "Noturno", "Crossdocking peixe", ""]);
-ok(
-  "plain / free-text CICLOs only: window == the bare ±4h skirt (no regression)",
-  wPlain.loMs === skirtOnly.loMs && wPlain.hiMs === skirtOnly.hiMs,
+  "REGRESSION: only same-day / free-text CICLOs -> window is EXACTLY the service day, never 10/09",
+  wFree.loMs === dayLo && wFree.hiMs === dayHi,
+  { lo: lisbon(wFree.loMs), hi: lisbon(wFree.hiMs) },
 );
 
 const wMixed = stopQueryWindowMs(DAY, ["08:00 | 20:00", "22:00-1 | 10:00", "13:30 | 01:30+1"]);
 ok(
-  "mixed file: lo from the earliest -1 start, hi from the latest +1 end",
-  wMixed.loMs === lisbonEpoch("2026-09-08", 22 * 60) - 3 * H &&
-    wMixed.hiMs === next0130 + 3 * H,
+  "mixed file: lo from the earliest -1, hi from the latest +1",
+  wMixed.loMs === lisbonEpoch("2026-09-08", 22 * 60) - 3 * H && wMixed.hiMs === next0130 + 3 * H,
   { lo: lisbon(wMixed.loMs), hi: lisbon(wMixed.hiMs) },
 );
 
@@ -211,21 +226,33 @@ if (!raw) {
   const cols = resolveColumns(raw.header);
   const ciclos = raw.rows.map((r) => r[cols.cicloCol!]);
   const win = stopQueryWindowMs("2026-09-09", ciclos);
-  console.log(`     window: ${lisbon(win.loMs)}  ..  ${lisbon(win.hiMs)}`);
-  console.log(
-    `     distinct overnight starts: ${[
-      ...new Set(
-        ciclos
-          .map((c) => cicloSpan(c))
-          .filter((s): s is NonNullable<typeof s> => !!s && s.startOffsetDays < 0)
-          .map((s) => `${Math.floor(s.startMin / 60)}:${String(s.startMin % 60).padStart(2, "0")}-1`),
-      ),
-    ].join(", ")}`,
-  );
+  console.log(`     file window: ${lisbon(win.loMs)}  ..  ${lisbon(win.hiMs)}`);
   ok(
-    "real: search window reaches back to at least 08/09 20:00 (covers the 20:00-1 shifts)",
+    "real: file window reaches back to ≤ 08/09 20:00 (has 20:00-1 shifts)",
     win.loMs <= prev2000,
     lisbon(win.loMs),
+  );
+  // Per-CICLO: the free-text / same-day rows stay strictly inside the service
+  // day even though the file as a whole has -1 / +1 rows widening the fetch.
+  const strictCiclos = ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30"];
+  const present = strictCiclos.filter((c) => ciclos.some((x) => String(x).trim() === c));
+  console.log(`     free-text / same-day CICLOs present in the file: ${present.join(" · ") || "(none)"}`);
+  ok(
+    "real: every free-text / same-day CICLO in the file -> group window is exactly the service day",
+    [...new Set(ciclos.map((c) => String(c).trim()))]
+      .filter((c) => !cicloSpan(c) || (cicloSpan(c)!.startOffsetDays === 0 && cicloSpan(c)!.endOffsetDays === 0))
+      .every((c) => {
+        const w = groupWindowMs("2026-09-09", c);
+        return w.loMs === dayLo && w.hiMs === dayHi;
+      }),
+  );
+  ok(
+    "real: the three reported cases — a 10/09 00:10/00:12/00:44 stop is out of window",
+    (["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30"] as const).every((c, i) => {
+      const w = groupWindowMs("2026-09-09", c);
+      const t = lisbonEpoch("2026-09-10", [10, 12, 44][i]);
+      return stopArrivalInWindow(new Date(t).toISOString(), w.loMs, w.hiMs) === false;
+    }),
   );
   ok(
     "real: raw file has no «Dia Serviço» column -> no ROTA/day conflict possible",
@@ -267,6 +294,41 @@ if (!conf) {
       conflicts.every((c) => c.days.join(",") === "2026-09-08,2026-09-09"),
     { got: conflicts.length, expected: affectedRotas.size, sample: conflicts.slice(0, 3) },
   );
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end: the matcher must not assign a next-day stop to a same-day /
+// free-text route, even when the stop is in the fetched pool.
+// ---------------------------------------------------------------------------
+console.log("== runMatch: next-day stop rejected for same-day / free-text route ==");
+{
+  const iso = (d: string, hhmm: string) => `2026-09-${d}T${hhmm}:00+01:00`;
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const mk = (rota: string, loja: string, ciclo: string): SheetRecord => ({
+    ROTA: rota, N_LOJA: loja, NOME: loja, MATRICULA: "AA-11-BB",
+    "Hora Chegada": "", "Hora Saida": "", CICLO: ciclo, TIPO: "C",
+  });
+  const records = [
+    mk("R-CROSS", "7003", "Crossdocking peixe"),   // free text
+    mk("R-SAMEDAY", "7005", "02:00 | 14:00"),      // same day
+    mk("R-PLUS1", "7009", "13:30 | 01:30+1"),      // +1 -> widens the fetch
+  ];
+  const cols = resolveColumns(azHeader);
+  const stops: DayStop[] = [
+    // plate AA11BB: a legit same-day stop at 7005, and next-day stops at 7003 & 7009
+    { id: "s1", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso("09", "13:00"), departedAt: iso("09", "13:20") },
+    { id: "s2", vehicleId: 1, plate: "AA11BB", code: "7003", arrivedAt: iso("10", "00:10"), departedAt: iso("10", "00:25") },
+    { id: "s3", vehicleId: 1, plate: "AA11BB", code: "7009", arrivedAt: iso("10", "00:50"), departedAt: iso("10", "01:15") },
+  ];
+  const res = runMatch({
+    day: "2026-09-09", records, header: azHeader, cols, stops,
+    platesWithGps: new Set(["AA11BB"]),
+    pingWindowByPlate: new Map([["AA11BB", { min: Date.parse(iso("09", "00:00")), max: Date.parse(iso("10", "02:00")) }]]),
+  });
+  const byLoja = Object.fromEntries(res.rows.map((r) => [String(r["N_LOJA"]), r]));
+  ok("Crossdocking peixe row: NOT matched to the 10/09 00:10 stop", byLoja["7003"]["Hora Chegada"] === "" && byLoja["7003"]["Confiança"] === REVIEW);
+  ok('"02:00 | 14:00" row: matched to the legit 09/09 13:00 stop', byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09/09/2026 13:00"));
+  ok('"13:30 | 01:30+1" row: DOES match its legit 10/09 00:50 stop (explicit +1)', byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Chegada"]).includes("10/09/2026 00:50"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);

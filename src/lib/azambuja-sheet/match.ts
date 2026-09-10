@@ -285,39 +285,73 @@ export function parseCiclo(raw: unknown): { ini: string; fim: string } {
 // Stop-query window
 // ---------------------------------------------------------------------------
 
-// Epoch-ms [lo, hi) bounds for the stops/pings query on a given service day.
+const DAY_MIN = 24 * 60;
+const CICLO_PAD_MS = 3 * 3_600_000;
+
+// Epoch-ms [lo, hi) bounds a single CICLO's real stops may fall in, on `day`.
 //
-// Base: the strict service day skirted by `skirtMs` on each side (evening
-// starts, past-midnight finishes). On top of that, any CICLO whose shift
-// *starts the previous calendar day* ("…-1 | …") or *ends the next one*
-// ("… | …+1") pushes the bound out to that real shift day + `padMs`, so an
-// early overnight start ("18:00-1 …", 6h before midnight) isn't clipped by a
-// fixed skirt. Free-text CICLOs contribute nothing (the base skirt still
-// applies).
+//   • free-text CICLO ("Crossdocking peixe", "Noturno") -> the strict service
+//     day, 00:00–24:00. NOTHING outside it.
+//   • same-day window ("02:00 | 14:00", "11:30 | 23:30") -> also the strict
+//     service day. The hours are informative but a same-day route's stops
+//     belong to that calendar day; they must not spill into the next.
+//   • "…-1 | …"  -> lo reaches the previous calendar day (shift start − pad);
+//     hi stays at end-of-service-day.
+//   • "… | …+1"  -> hi reaches the next calendar day (shift end + pad);
+//     lo stays at start-of-service-day.
+//
+// ONLY an explicit -1 / +1 marker widens the window past the service day.
+export function groupWindowMs(
+  day: string, // YYYY-MM-DD
+  rawCiclo: unknown,
+  opts: { padMs?: number } = {},
+): { loMs: number; hiMs: number } {
+  const padMs = opts.padMs ?? CICLO_PAD_MS;
+  const dayLo = lisbonEpoch(day, 0);
+  const dayHi = lisbonEpoch(day, DAY_MIN);
+
+  const sp = matchCiclo(rawCiclo);
+  if (!sp) return { loMs: dayLo, hiMs: dayHi };
+
+  const loMs =
+    sp.startOffsetDays < 0
+      ? lisbonEpoch(day, sp.startOffsetDays * DAY_MIN + sp.startMin) - padMs
+      : dayLo;
+  const hiMs =
+    sp.endOffsetDays > 0
+      ? lisbonEpoch(day, sp.endOffsetDays * DAY_MIN + sp.endMin) + padMs
+      : dayHi;
+  return { loMs, hiMs };
+}
+
+// Epoch-ms [lo, hi) bounds for the stops/pings query for the whole file: the
+// union of every row's groupWindowMs. With only same-day / free-text CICLOs
+// this is exactly the service day; a "…-1" pushes lo back, a "…+1" pushes hi
+// forward. (There is NO blanket ±skirt any more — that was pulling next-day
+// stops into every file.)
 export function stopQueryWindowMs(
   day: string, // YYYY-MM-DD
   ciclos: Iterable<unknown>,
-  opts: { skirtMs?: number; padMs?: number } = {},
+  opts: { padMs?: number } = {},
 ): { loMs: number; hiMs: number } {
-  const skirtMs = opts.skirtMs ?? 4 * 3_600_000;
-  const padMs = opts.padMs ?? 3 * 3_600_000;
-
-  let loMs = lisbonEpoch(day, 0) - skirtMs;
-  let hiMs = lisbonEpoch(day, 24 * 60) + skirtMs;
-
+  let loMs = lisbonEpoch(day, 0);
+  let hiMs = lisbonEpoch(day, DAY_MIN);
   for (const raw of ciclos) {
-    const sp = matchCiclo(raw);
-    if (!sp) continue;
-    if (sp.startOffsetDays < 0) {
-      const t = lisbonEpoch(day, sp.startOffsetDays * 24 * 60 + sp.startMin) - padMs;
-      if (t < loMs) loMs = t;
-    }
-    if (sp.endOffsetDays > 0) {
-      const t = lisbonEpoch(day, sp.endOffsetDays * 24 * 60 + sp.endMin) + padMs;
-      if (t > hiMs) hiMs = t;
-    }
+    const w = groupWindowMs(day, raw, opts);
+    if (w.loMs < loMs) loMs = w.loMs;
+    if (w.hiMs > hiMs) hiMs = w.hiMs;
   }
   return { loMs, hiMs };
+}
+
+// Is a stop's arrival inside [loMs, hiMs)?
+export function stopArrivalInWindow(
+  arrivedAt: string,
+  loMs: number,
+  hiMs: number,
+): boolean {
+  const t = new Date(arrivedAt).getTime();
+  return Number.isFinite(t) && t >= loMs && t < hiMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +431,8 @@ type Work = {
   plate: string | null;
   planIni: string;
   planFim: string;
+  /** the CICLO cell, verbatim (for the day-aware stop window) */
+  rawCiclo: string;
   /** the (ROTA, N_LOJA) store-group this row belongs to */
   groupKey: string;
   conf:
@@ -420,6 +456,10 @@ type StoreGroup = {
   plate: string | null;
   planIni: string;
   planFim: string;
+  rawCiclo: string;
+  /** [lo, hi) epoch-ms a real stop for this group may fall in (day-aware) */
+  winLoMs: number;
+  winHiMs: number;
   order: number; // first row index, for sheet order
   rows: Work[];
   assignedStop: WStop | null;
@@ -456,7 +496,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         ? npRaw
         : null;
 
-    const ciclo = cols.cicloCol ? parseCiclo(r[cols.cicloCol]) : { ini: "", fim: "" };
+    const rawCiclo = cols.cicloCol ? String(r[cols.cicloCol] ?? "").trim() : "";
+    const ciclo = parseCiclo(rawCiclo);
 
     // Row already carries BOTH times in the uploaded file -> resolved elsewhere;
     // keep it verbatim and skip grouping + every matching step.
@@ -477,6 +518,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       plate,
       planIni: ciclo.ini,
       planFim: ciclo.fim,
+      rawCiclo,
       groupKey: `${rota} ${codeKey(code)}`,
       conf: kept ? KEPT : "",
       real: "",
@@ -501,6 +543,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         plate: w.plate,
         planIni: w.planIni,
         planFim: w.planFim,
+        rawCiclo: w.rawCiclo,
+        winLoMs: 0,
+        winHiMs: 0,
         order: w.idx,
         rows: [],
         assignedStop: null,
@@ -513,9 +558,18 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (!g.plate && w.plate) g.plate = w.plate;
     if (!g.planIni && w.planIni) g.planIni = w.planIni;
     if (!g.planFim && w.planFim) g.planFim = w.planFim;
+    if (!g.rawCiclo && w.rawCiclo) g.rawCiclo = w.rawCiclo;
     if (!g.designacao && w.designacao) g.designacao = w.designacao;
   }
   const groups = [...groupMap.values()];
+
+  // Day-aware stop window per group: strict service day for same-day / free-text
+  // CICLOs; only an explicit "…-1" / "…+1" reaches a neighbouring calendar day.
+  for (const g of groups) {
+    const { loMs, hiMs } = groupWindowMs(day, g.rawCiclo);
+    g.winLoMs = loMs;
+    g.winHiMs = hiMs;
+  }
 
   // ----- group store-groups by ROTA, and let a plate-less group inherit its
   // route's plate (the sheet carries one MATRICULA per route) -----
@@ -595,12 +649,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         setGroup(g, REVIEW, null, describeReal(plate));
         continue;
       }
-      const hit = plateStops.find((s) => !s.assigned && codeEq(s.code, g.code));
+      const hit = plateStops.find(
+        (s) =>
+          !s.assigned &&
+          codeEq(s.code, g.code) &&
+          stopArrivalInWindow(s.arrivedAt, g.winLoMs, g.winHiMs),
+      );
       if (hit) {
         hit.assigned = true;
         setGroup(g, "OK", hit, "");
       }
-      // no code match -> leave conf === "" for step 3 (swap) / step 4 (review)
+      // no code match in window -> conf stays "" for step 3 (swap) / step 4
     }
   }
 
@@ -656,7 +715,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           stops,
           candidatePlates: platesWithDayStops,
         });
-        if (typo) {
+        if (
+          typo &&
+          stopArrivalInWindow(typo.suggStop.arrivedAt, g.winLoMs, g.winHiMs)
+        ) {
           typo.suggStop.assigned = true;
           setGroup(
             g,
@@ -686,6 +748,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     if (sw.kind === "no-gps-coverage") {
       setGroup(g, REVIEW, null, sw.note);
+      continue;
+    }
+
+    // The candidate stop must be on this route's calendar day(s) — a same-day /
+    // free-text CICLO never reaches into the next day (see groupWindowMs).
+    if (!stopArrivalInWindow(sw.suggStop.arrivedAt, g.winLoMs, g.winHiMs)) {
       continue;
     }
 
