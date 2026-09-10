@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:sheet-match": "tsx scripts/test-sheet-match.ts",
+    "test:tfs-workbook": "tsx scripts/test-tfs-workbook.ts",
     "import:locations": "tsx scripts/import-locations.ts",
     "import:fleet-trucks": "tsx scripts/import-fleet-trucks.ts",
     "backfill:azambuja-pings": "tsx --conditions=react-server scripts/backfill-azambuja-pings.ts"
@@ -15,6 +16,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.39.0",
     "next": "16.3.2",
     "react": "19.2.8",

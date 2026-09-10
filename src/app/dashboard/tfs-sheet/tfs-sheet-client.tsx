@@ -297,6 +297,23 @@ export function TfsSheetClient() {
           matrícula foi identificada — mesmo nas linhas a rever sem paragem
           correspondente.
         </p>
+        <p className="mt-3">
+          <strong>Cores no Excel</strong> (protótipo): linhas{" "}
+          <strong>⚠️ Rever manualmente</strong> ficam a{" "}
+          <span className="rounded bg-amber-200 px-1 dark:text-black">
+            amarelo
+          </span>{" "}
+          enquanto a Hora de Chegada estiver vazia — preenche-a e a cor
+          desaparece. Linhas de sugestão (troca, troca fora da janela, erro de
+          matrícula) ficam a{" "}
+          <span className="rounded bg-red-300 px-1 dark:text-black">
+            vermelho
+          </span>{" "}
+          até <em>ou</em> corrigires a matrícula <em>ou</em> escolheres{" "}
+          <strong>OK</strong> na lista suspensa da célula Confiança. A coluna
+          técnica <strong>ZZ</strong> (oculta) guarda a matrícula sugerida — não
+          a apagues.
+        </p>
 
         <h2 className="mt-5 mb-2 font-medium text-black/80 dark:text-white/80">
           Colunas esperadas

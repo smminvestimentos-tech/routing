@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildTfsWorkbook } from "@/lib/tfs-sheet/xlsx-out";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
@@ -247,10 +248,15 @@ export async function POST(request: NextRequest) {
     pingWindowByPlate,
   });
 
-  const outWs = XLSX.utils.json_to_sheet(rows, { header: outHeader });
-  const outWb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(outWb, outWs, "TFS");
-  const fileBase64 = XLSX.write(outWb, { type: "base64", bookType: "xlsx" });
+  // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"
+  // dropdown on suggestion rows). Input parsing above stays on SheetJS.
+  const fileBase64 = await buildTfsWorkbook({
+    rows,
+    header: outHeader,
+    plateColName: cols.plateCol ?? "",
+    chegadaColName: cols.chegadaCol,
+    sheetName: "TFS",
+  });
 
   return NextResponse.json({
     filename: `tfs-${day}-conferido.xlsx`,
