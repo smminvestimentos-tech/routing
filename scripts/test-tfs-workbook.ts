@@ -4,15 +4,23 @@
 //
 // Can't open Excel from CI, so this builds a workbook covering every Confiança
 // category, then re-opens it (with exceljs AND with SheetJS, the upload path)
-// and asserts: the hidden ZZ column + its values, the two conditional-format
-// rules and their formulae, the "OK" dropdown on exactly the suggestion rows,
-// and that kept / OK rows are byte-for-byte what went in.
+// and asserts: the hidden ZZ / YY / XX columns + their values, the three
+// conditional-format rules and their formulae (incl. the accidental-deletion
+// safety net), the "OK" dropdown on exactly the suggestion rows, and that
+// kept / OK rows are byte-for-byte what went in. Also simulates the amber
+// formulae per cell state so the "delete a resolved time -> goes amber" path
+// is proven without Excel.
 
 import ExcelJS from "exceljs";
 import * as XLSX from "xlsx";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildTfsWorkbook, ZZ_COL } from "@/lib/tfs-sheet/xlsx-out";
+import {
+  buildTfsWorkbook,
+  ZZ_COL,
+  YY_COL,
+  XX_COL,
+} from "@/lib/tfs-sheet/xlsx-out";
 import {
   CONFIANCA_COL,
   REAL_COL,
@@ -92,24 +100,38 @@ async function main() {
 
   const headerRow = ws.getRow(1).values as unknown[];
   const hdr = headerRow.slice(1).map((v) => String(v));
-  ok("ZZ column appended to header", hdr[hdr.length - 1] === ZZ_COL, hdr);
+  ok(
+    "ZZ / YY / XX columns appended to header, in order",
+    hdr.slice(-3).join(",") === `${ZZ_COL},${YY_COL},${XX_COL}`,
+    hdr,
+  );
 
-  const zzCol = ws.getColumn(hdr.indexOf(ZZ_COL) + 1);
-  ok("ZZ column is hidden", zzCol.hidden === true, zzCol.hidden);
+  const colIdx = (name: string) => hdr.indexOf(name) + 1;
+  for (const c of [ZZ_COL, YY_COL, XX_COL]) {
+    ok(`${c} column is hidden`, ws.getColumn(colIdx(c)).hidden === true);
+  }
 
   // ZZ values: suggested plate on suggestion rows, blank elsewhere.
-  const zzAt = (rowNum: number) => String(ws.getCell(rowNum, hdr.indexOf(ZZ_COL) + 1).value ?? "");
-  ok("ZZ blank on OK row", zzAt(2) === "");
-  ok("ZZ blank on KEPT row", zzAt(3) === "");
-  ok("ZZ blank on REVIEW row", zzAt(4) === "");
-  ok("ZZ = 44DD44 on SWAP row", zzAt(5) === "44DD44", zzAt(5));
-  ok("ZZ = 55EE55 on SWAP_OOW row", zzAt(6) === "55EE55", zzAt(6));
-  ok("ZZ = 32OG64 on PLATE_TYPO row", zzAt(7) === "32OG64", zzAt(7));
+  const cellAt = (rowNum: number, name: string) =>
+    String(ws.getCell(rowNum, colIdx(name)).value ?? "");
+  ok("ZZ blank on OK/KEPT/REVIEW rows", [2, 3, 4].every((r) => cellAt(r, ZZ_COL) === ""));
+  ok("ZZ = 44DD44 on SWAP row", cellAt(5, ZZ_COL) === "44DD44", cellAt(5, ZZ_COL));
+  ok("ZZ = 55EE55 on SWAP_OOW row", cellAt(6, ZZ_COL) === "55EE55", cellAt(6, ZZ_COL));
+  ok("ZZ = 32OG64 on PLATE_TYPO row", cellAt(7, ZZ_COL) === "32OG64", cellAt(7, ZZ_COL));
 
-  // kept / OK rows: untouched values.
-  ok("OK row keeps its times", String(ws.getCell(2, 5).value) === "08:00" && String(ws.getCell(2, 6).value) === "08:20");
-  ok("KEPT row keeps its times", String(ws.getCell(3, 5).value) === "07:00" && String(ws.getCell(3, 6).value) === "07:30");
-  ok("KEPT row Confiança text preserved", String(ws.getCell(3, 7).value) === KEPT);
+  // YY / XX = snapshot of the times WE wrote (blank only for the genuine
+  // no-data REVIEW row and the blank passthrough row).
+  ok("YY/XX snapshot the OK row's times", cellAt(2, YY_COL) === "08:00" && cellAt(2, XX_COL) === "08:20", [cellAt(2, YY_COL), cellAt(2, XX_COL)]);
+  ok("YY/XX snapshot the KEPT row's times", cellAt(3, YY_COL) === "07:00" && cellAt(3, XX_COL) === "07:30");
+  ok("YY/XX blank on the no-data REVIEW row", cellAt(4, YY_COL) === "" && cellAt(4, XX_COL) === "");
+  ok("YY/XX snapshot the SWAP row's times", cellAt(5, YY_COL) === "09:10" && cellAt(5, XX_COL) === "09:35");
+  ok("YY/XX snapshot the PLATE_TYPO row's times", cellAt(7, YY_COL) === "10:25" && cellAt(7, XX_COL) === "10:52");
+  ok("YY/XX blank on the passthrough row", cellAt(8, YY_COL) === "" && cellAt(8, XX_COL) === "");
+
+  // kept / OK rows: untouched visible values.
+  ok("OK row keeps its times", cellAt(2, "Hora de Chegada") === "08:00" && cellAt(2, "Hora de Saída") === "08:20");
+  ok("KEPT row keeps its times", cellAt(3, "Hora de Chegada") === "07:00" && cellAt(3, "Hora de Saída") === "07:30");
+  ok("KEPT row Confiança text preserved", cellAt(3, CONFIANCA_COL) === KEPT);
 
   // ---- conditional formatting ----
   type Cf = { ref: string; rules: { type?: string; formulae?: string[] }[] };
@@ -118,7 +140,8 @@ async function main() {
   const allRules = cfs.flatMap((c) => c.rules);
   ok("3 conditional-format rules present", allRules.length === 3, allRules.map((r) => r.type));
 
-  // Column layout here: C=Matrícula, E=Chegada, F=Saída, G=Confiança.
+  // Column layout here: C=Matrícula, E=Chegada, F=Saída, G=Confiança,
+  //                     I=ZZ, J=YY, K=XX.
   const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
   const amberChegada = cfFor("E2:E8");
   const amberSaida = cfFor("F2:F8");
@@ -126,17 +149,20 @@ async function main() {
   ok("amber Chegada rule: sqref E2:E8 only", !!amberChegada, cfs.map((c) => c.ref));
   ok("amber Saída rule: sqref F2:F8 only", !!amberSaida, cfs.map((c) => c.ref));
   ok("red rule: sqref C2:C8 G2:G8 only", !!redCf, cfs.map((c) => c.ref));
+
+  const fChe = amberChegada?.rules[0]?.formulae?.[0] ?? "";
+  const fSai = amberSaida?.rules[0]?.formulae?.[0] ?? "";
   ok(
-    "amber Chegada formula references its OWN column ($E2)",
-    amberChegada?.rules[0]?.formulae?.[0] ===
-      'AND(ISNUMBER(SEARCH("Rever",$G2)),$E2="")',
-    amberChegada?.rules[0]?.formulae?.[0],
+    "amber Chegada formula = OR(Rever+empty, snapshot YY set + empty)",
+    fChe ===
+      'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""))',
+    fChe,
   );
   ok(
-    "amber Saída formula references its OWN column ($F2)",
-    amberSaida?.rules[0]?.formulae?.[0] ===
-      'AND(ISNUMBER(SEARCH("Rever",$G2)),$F2="")',
-    amberSaida?.rules[0]?.formulae?.[0],
+    "amber Saída formula = OR(Rever+empty, snapshot XX set + empty)",
+    fSai ===
+      'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""))',
+    fSai,
   );
   ok(
     "no CF paints a whole-row range",
@@ -144,40 +170,62 @@ async function main() {
     cfs.map((c) => c.ref),
   );
 
-  // ---- behavioural sim: evaluate the actual amber formulae per row state ----
-  // Mirrors AND(ISNUMBER(SEARCH("Rever",conf)), cell="").
-  const amberOn = (formula: string, conf: string, chegada: string, saida: string) => {
-    const hasRever = /rever/i.test(conf);
-    const col = formula.includes("$E2") ? chegada : formula.includes("$F2") ? saida : "";
-    return hasRever && col === "";
+  // ---- behavioural sim: evaluate the actual amber formulae per cell state ----
+  // Mirrors OR(AND(ISNUMBER(SEARCH("Rever",conf)),cell=""), AND(snap<>"",cell=""))
+  //   == cell=="" AND (confHasRever OR snap!="")
+  const amberOn = (
+    formula: string,
+    st: { conf: string; chegada: string; saida: string; yy: string; xx: string },
+  ) => {
+    const isChegada = formula.includes("$E2");
+    const cell = isChegada ? st.chegada : st.saida;
+    const snap = isChegada ? st.yy : st.xx;
+    return cell === "" && (/rever/i.test(st.conf) || snap !== "");
   };
-  const fChe = amberChegada!.rules[0].formulae![0];
-  const fSai = amberSaida!.rules[0].formulae![0];
-  const REV = REVIEW;
 
+  // Genuine "Rever" row, no data of ours (YY/XX blank).
+  const rever = { conf: REVIEW, chegada: "", saida: "", yy: "", xx: "" };
   ok(
-    "Rever, both blank -> Chegada amber + Saída amber",
-    amberOn(fChe, REV, "", "") === true && amberOn(fSai, REV, "", "") === true,
+    "Rever, both blank -> Chegada + Saída amber",
+    amberOn(fChe, rever) && amberOn(fSai, rever),
   );
   ok(
-    "Rever, only Chegada filled -> Chegada white, Saída STILL amber",
-    amberOn(fChe, REV, "08:00", "") === false && amberOn(fSai, REV, "08:00", "") === true,
+    "Rever, only Chegada typed -> Chegada white, Saída STILL amber",
+    !amberOn(fChe, { ...rever, chegada: "08:00" }) &&
+      amberOn(fSai, { ...rever, chegada: "08:00" }),
   );
   ok(
-    "Rever, only Saída filled -> Saída white, Chegada STILL amber",
-    amberOn(fSai, REV, "", "08:20") === false && amberOn(fChe, REV, "", "08:20") === true,
+    "Rever, both typed -> both white",
+    !amberOn(fChe, { ...rever, chegada: "08:00", saida: "08:20" }) &&
+      !amberOn(fSai, { ...rever, chegada: "08:00", saida: "08:20" }),
+  );
+
+  // *** the headline case: a resolved "OK" row whose time is deleted ***
+  const okRow = { conf: "OK", chegada: "08:00", saida: "08:20", yy: "08:00", xx: "08:20" };
+  ok("OK row intact -> neither cell amber", !amberOn(fChe, okRow) && !amberOn(fSai, okRow));
+  ok(
+    "OK row, Chegada deleted by accident -> Chegada amber (Confiança still OK)",
+    amberOn(fChe, { ...okRow, chegada: "" }) === true &&
+      amberOn(fSai, { ...okRow, chegada: "" }) === false,
   );
   ok(
-    "Rever, both filled -> both white",
-    amberOn(fChe, REV, "08:00", "08:20") === false && amberOn(fSai, REV, "08:00", "08:20") === false,
+    "OK row, Saída deleted -> Saída amber",
+    amberOn(fSai, { ...okRow, saida: "" }) === true,
   );
   ok(
-    "not a Rever row -> neither amber, whatever the times",
-    amberOn(fChe, "OK", "", "") === false && amberOn(fSai, "OK", "", "") === false,
+    "OK row, both times deleted -> both amber",
+    amberOn(fChe, { ...okRow, chegada: "", saida: "" }) &&
+      amberOn(fSai, { ...okRow, chegada: "", saida: "" }),
   );
+
+  // KEPT and suggestion rows get the same protection.
+  const keptRow = { conf: KEPT, chegada: "07:00", saida: "07:30", yy: "07:00", xx: "07:30" };
+  ok("KEPT row, Saída deleted -> Saída amber", amberOn(fSai, { ...keptRow, saida: "" }));
+  const swapRow = { conf: SWAP, chegada: "09:10", saida: "09:35", yy: "09:10", xx: "09:35" };
+  ok("SWAP row, Chegada deleted -> Chegada amber", amberOn(fChe, { ...swapRow, chegada: "" }));
 
   // ---- data validation ("OK" dropdown) ----
-  const dvAt = (rowNum: number) => ws.getCell(rowNum, hdr.indexOf(CONFIANCA_COL) + 1).dataValidation;
+  const dvAt = (rowNum: number) => ws.getCell(rowNum, colIdx(CONFIANCA_COL)).dataValidation;
   for (const rn of suggestionRowNums) {
     const dv = dvAt(rn);
     ok(
@@ -205,7 +253,11 @@ async function main() {
       String(rr[1][CONFIANCA_COL]) === KEPT,
     rr[1],
   );
-  ok("SheetJS also sees the ZZ column", ZZ_COL in rr[0], Object.keys(rr[0]));
+  ok(
+    "SheetJS also sees the ZZ / YY / XX columns",
+    [ZZ_COL, YY_COL, XX_COL].every((c) => c in rr[0]),
+    Object.keys(rr[0]),
+  );
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

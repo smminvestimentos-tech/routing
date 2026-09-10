@@ -8,10 +8,17 @@
 //
 // What the produced file does, live in Excel:
 //
-//   • 🟡 âmbar on a "⚠️ Rever manualmente" row — on each of «Hora de Chegada»
-//     and «Hora de Saída», independently, while THAT cell is still empty. Fill
-//     Chegada and only its fill clears; Saída stays amber until it too is
-//     filled. Only those two cells are painted, never the whole row.
+//   • 🟡 âmbar on «Hora de Chegada» / «Hora de Saída», independently, when the
+//     cell is empty AND either (a) the row is "⚠️ Rever manualmente", or
+//     (b) we had written a value there and it has since been deleted. Case (b)
+//     is the safety net: an already-resolved row (OK / mantida / sugestão
+//     confirmada) whose time gets cleared by accident goes amber again even
+//     though Confiança still says "OK". Fill the cell back in and only its own
+//     fill clears. Only those two cells are painted, never the whole row.
+//
+//     Two more hidden technical columns back this: «YY» = the Chegada we wrote,
+//     «XX» = the Saída we wrote (blank only for genuine "Rever" rows with no
+//     data of ours). The rule compares the live cell against its snapshot.
 //
 //   • 🔴 vermelho on a suggestion row (troca / troca fora da janela / erro de
 //     matrícula) while the plate cell still equals the suggested value AND the
@@ -30,9 +37,16 @@ import {
   type SheetRecord,
 } from "@/lib/sheet-match/common";
 
-// Hidden helper column: the plate we suggested, frozen at build time, so the
-// conditional format can tell "user hasn't touched it" from "user corrected it".
+// Hidden helper columns, appended after the real data. Frozen at build time so
+// the conditional formats can tell "user hasn't touched it" from "user changed
+// / deleted it".
+//   ZZ — the plate we suggested (suggestion rows only)
+//   YY — the "Hora de Chegada" we wrote
+//   XX — the "Hora de Saída" we wrote
 export const ZZ_COL = "ZZ";
+export const YY_COL = "YY";
+export const XX_COL = "XX";
+const TECH_COLS = [ZZ_COL, YY_COL, XX_COL] as const;
 
 // Light tints — dark enough to read at a glance, light enough to keep the cell
 // text legible. ARGB (leading FF = opaque).
@@ -47,7 +61,7 @@ const SUGGESTION_CONFS: ReadonlySet<string> = new Set([
 
 export type BuildTfsWorkbookArgs = {
   rows: SheetRecord[];
-  /** header order for the output, WITHOUT the ZZ column (added here) */
+  /** header order for the output, WITHOUT the ZZ/YY/XX columns (added here) */
   header: string[];
   /** resolved "Matrícula da Viatura" header, or "" if the sheet has none */
   plateColName: string;
@@ -63,8 +77,10 @@ export async function buildTfsWorkbook(
 ): Promise<string> {
   const { rows, header, plateColName, chegadaColName, saidaColName } = args;
 
-  const outHeader = header.includes(ZZ_COL) ? [...header] : [...header, ZZ_COL];
-  const zzIdx = outHeader.indexOf(ZZ_COL) + 1; // 1-based
+  const outHeader = [
+    ...header,
+    ...TECH_COLS.filter((c) => !header.includes(c)),
+  ];
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "routing/tfs-sheet";
@@ -80,8 +96,15 @@ export async function buildTfsWorkbook(
   for (const r of rows) {
     const sugg = isSuggestion(r);
     const values = outHeader.map((h) => {
+      // Snapshots of what WE wrote, so a later edit/delete is detectable.
       if (h === ZZ_COL) {
         return sugg && plateColName ? String(r[plateColName] ?? "") : "";
+      }
+      if (h === YY_COL) {
+        return chegadaColName ? String(r[chegadaColName] ?? "") : "";
+      }
+      if (h === XX_COL) {
+        return saidaColName ? String(r[saidaColName] ?? "") : "";
       }
       const v = r[h];
       return v == null ? "" : v;
@@ -103,11 +126,18 @@ export async function buildTfsWorkbook(
   const chegadaL = letter(chegadaColName);
   const saidaL = saidaColName ? letter(saidaColName) : null;
   const plateL = plateColName ? letter(plateColName) : null;
-  const zzL = ws.getColumn(zzIdx).letter;
+  const zzL = letter(ZZ_COL)!;
+  const yyL = letter(YY_COL)!;
+  const xxL = letter(XX_COL)!;
 
-  // Hide the technical column.
-  ws.getColumn(zzIdx).hidden = true;
-  ws.getColumn(zzIdx).width = 14;
+  // Hide the technical columns.
+  for (const c of TECH_COLS) {
+    const i = outHeader.indexOf(c);
+    if (i >= 0) {
+      ws.getColumn(i + 1).hidden = true;
+      ws.getColumn(i + 1).width = 14;
+    }
+  }
   // Roomier Confiança / Real columns.
   for (const n of [CONFIANCA_COL, REAL_COL]) {
     const i = outHeader.indexOf(n);
@@ -132,22 +162,30 @@ export async function buildTfsWorkbook(
       .map((l) => `${l}2:${l}${lastRow}`)
       .join(" ");
 
-  // 🟡 "Rever manualmente" AND that cell still blank — ONE INDEPENDENT rule per
-  // time column, each keyed off ITS OWN emptiness. (A shared rule would clear
-  // both cells once Chegada is typed, hiding that Saída is still missing.)
-  // Keyed off the substring "Rever" (unique to the REVIEW label among all
-  // Confiança values) rather than the emoji-bearing literal, so it survives a
-  // copy/paste that mangles the ⚠️.
+  // 🟡 One INDEPENDENT rule per time column — each reacts to ITS OWN cell only
+  // (a shared rule would clear both once Chegada is typed, hiding that Saída is
+  // still missing). The cell goes amber when it is empty AND either:
+  //   • the row is "⚠️ Rever manualmente" (keyed off the substring "Rever",
+  //     unique to that label, so a mangled ⚠️ doesn't break it), or
+  //   • its snapshot column (YY / XX) is non-empty — i.e. we had put a value
+  //     there and it has since been deleted. This is the safety net for an
+  //     already-resolved row whose time gets wiped by accident.
   if (confL) {
-    [chegadaL, saidaL].forEach((L, i) => {
-      if (!L) return;
+    ([
+      [chegadaL, yyL],
+      [saidaL, xxL],
+    ] as const).forEach(([cellL, snapL], i) => {
+      if (!cellL) return;
       ws.addConditionalFormatting({
-        ref: `${L}2:${L}${lastRow}`,
+        ref: `${cellL}2:${cellL}${lastRow}`,
         rules: [
           {
             type: "expression",
             priority: i + 1,
-            formulae: [`AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${L}2="")`],
+            formulae: [
+              `OR(AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${cellL}2=""),` +
+                `AND($${snapL}2<>"",$${cellL}2=""))`,
+            ],
             style: solid(FILL_AMBER),
           },
         ],
