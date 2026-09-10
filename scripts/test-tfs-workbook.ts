@@ -75,6 +75,7 @@ async function main() {
     header,
     plateColName: "Matrícula da Viatura",
     chegadaColName: "Hora de Chegada",
+    saidaColName: "Hora de Saída",
     sheetName: "TFS",
   });
   const buf = Buffer.from(b64, "base64");
@@ -123,9 +124,15 @@ async function main() {
   const red = formulae.find((f) => f.includes('<>"OK"'));
   ok("amber rule keys off Rever + empty arrival", !!amber && amber.includes('="")'), amber);
   ok("red rule keys off ZZ match + not OK", !!red && red.includes("$I2") && red.includes('<>"OK"'), red);
+
+  // Column layout here: C=Matrícula, E=Chegada, F=Saída, G=Confiança.
+  const amberCf = cfs.find((c) => c.rules[0]?.formulae?.[0]?.includes('SEARCH("Rever"'));
+  const redCf = cfs.find((c) => c.rules[0]?.formulae?.[0]?.includes('<>"OK"'));
+  ok("amber sqref = time cells only (E+F, rows 2-8)", amberCf?.ref === "E2:E8 F2:F8", amberCf?.ref);
+  ok("red sqref = Matrícula + Confiança cells only (C+G, rows 2-8)", redCf?.ref === "C2:C8 G2:G8", redCf?.ref);
   ok(
-    "CF ref covers data rows",
-    cfs.some((c) => /^A2:[A-Z]+8$/.test(c.ref)),
+    "no CF paints a whole-row range",
+    cfs.every((c) => !/^A2:/.test(c.ref) && c.ref.includes(" ")),
     cfs.map((c) => c.ref),
   );
 

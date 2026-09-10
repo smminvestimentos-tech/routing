@@ -9,13 +9,15 @@
 // What the produced file does, live in Excel:
 //
 //   • 🟡 âmbar on a "⚠️ Rever manualmente" row — but only while «Hora de
-//     Chegada» is still empty. Type an arrival and the fill clears.
+//     Chegada» is still empty. Type an arrival and the fill clears. Only the two
+//     time cells (Chegada + Saída) are painted, not the whole row.
 //
 //   • 🔴 vermelho on a suggestion row (troca / troca fora da janela / erro de
 //     matrícula) while the plate cell still equals the suggested value AND the
 //     Confiança cell isn't "OK". A hidden technical column «ZZ» holds the
 //     originally-suggested plate; the Confiança cell gets a dropdown whose only
-//     option is "OK". Change the plate, or pick "OK", and the fill clears.
+//     option is "OK". Change the plate, or pick "OK", and the fill clears. Only
+//     the Matrícula + Confiança cells are painted, not the whole row.
 
 import ExcelJS from "exceljs";
 import {
@@ -50,13 +52,15 @@ export type BuildTfsWorkbookArgs = {
   plateColName: string;
   /** resolved "Hora de Chegada" header */
   chegadaColName: string;
+  /** resolved "Hora de Saída" header */
+  saidaColName: string;
   sheetName?: string;
 };
 
 export async function buildTfsWorkbook(
   args: BuildTfsWorkbookArgs,
 ): Promise<string> {
-  const { rows, header, plateColName, chegadaColName } = args;
+  const { rows, header, plateColName, chegadaColName, saidaColName } = args;
 
   const outHeader = header.includes(ZZ_COL) ? [...header] : [...header, ZZ_COL];
   const zzIdx = outHeader.indexOf(ZZ_COL) + 1; // 1-based
@@ -96,9 +100,9 @@ export async function buildTfsWorkbook(
   };
   const confL = letter(CONFIANCA_COL);
   const chegadaL = letter(chegadaColName);
+  const saidaL = saidaColName ? letter(saidaColName) : null;
   const plateL = plateColName ? letter(plateColName) : null;
   const zzL = ws.getColumn(zzIdx).letter;
-  const lastColL = ws.getColumn(outHeader.length).letter;
 
   // Hide the technical column.
   ws.getColumn(zzIdx).hidden = true;
@@ -109,7 +113,6 @@ export async function buildTfsWorkbook(
     if (i >= 0) ws.getColumn(i + 1).width = n === REAL_COL ? 60 : 26;
   }
 
-  const dataRef = `A2:${lastColL}${lastRow}`;
   const solid = (argb: string) => ({
     fill: {
       type: "pattern" as const,
@@ -119,36 +122,51 @@ export async function buildTfsWorkbook(
     },
   });
 
-  const rules: ExcelJS.ConditionalFormattingRule[] = [];
+  // A `sqref` that lists just the given columns' data rows, e.g. "E2:E8 F2:F8".
+  // OOXML allows a space-separated multi-range sqref; exceljs writes it through
+  // verbatim. The rule's formula stays anchored to row 2 (the top-left row).
+  const colsRef = (...letters: (string | null)[]) =>
+    letters
+      .filter((l): l is string => !!l)
+      .map((l) => `${l}2:${l}${lastRow}`)
+      .join(" ");
 
-  // 🟡 "Rever manualmente" AND arrival still blank. Keyed off the substring
-  // "Rever" (unique to the REVIEW label among all Confiança values) rather than
-  // the emoji-bearing literal, so it survives a copy/paste that mangles the ⚠️.
+  // 🟡 "Rever manualmente" AND arrival still blank — painted ONLY on the two
+  // time cells (Chegada + Saída). Keyed off the substring "Rever" (unique to
+  // the REVIEW label among all Confiança values) rather than the emoji-bearing
+  // literal, so it survives a copy/paste that mangles the ⚠️.
   if (confL && chegadaL) {
-    rules.push({
-      type: "expression",
-      priority: 1,
-      formulae: [
-        `AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${chegadaL}2="")`,
+    ws.addConditionalFormatting({
+      ref: colsRef(chegadaL, saidaL),
+      rules: [
+        {
+          type: "expression",
+          priority: 1,
+          formulae: [
+            `AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${chegadaL}2="")`,
+          ],
+          style: solid(FILL_AMBER),
+        },
       ],
-      style: solid(FILL_AMBER),
     });
   }
 
-  // 🔴 suggestion still pending: plate untouched (== ZZ) and Confiança <> "OK".
+  // 🔴 suggestion still pending: plate untouched (== ZZ) and Confiança <> "OK"
+  // — painted ONLY on the Matrícula + Confiança cells.
   if (confL && plateL) {
-    rules.push({
-      type: "expression",
-      priority: 2,
-      formulae: [
-        `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`,
+    ws.addConditionalFormatting({
+      ref: colsRef(plateL, confL),
+      rules: [
+        {
+          type: "expression",
+          priority: 2,
+          formulae: [
+            `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`,
+          ],
+          style: solid(FILL_RED),
+        },
       ],
-      style: solid(FILL_RED),
     });
-  }
-
-  if (rules.length > 0) {
-    ws.addConditionalFormatting({ ref: dataRef, rules });
   }
 
   // Dropdown ("OK") on the Confiança cell of every suggestion row.

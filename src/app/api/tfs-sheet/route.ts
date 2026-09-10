@@ -255,6 +255,7 @@ export async function POST(request: NextRequest) {
     header: outHeader,
     plateColName: cols.plateCol ?? "",
     chegadaColName: cols.chegadaCol,
+    saidaColName: cols.saidaCol,
     sheetName: "TFS",
   });
 
