@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:sheet-match": "tsx scripts/test-sheet-match.ts",
     "test:tfs-workbook": "tsx scripts/test-tfs-workbook.ts",
+    "test:azambuja-window": "tsx scripts/test-azambuja-window.ts",
     "import:locations": "tsx scripts/import-locations.ts",
     "import:fleet-trucks": "tsx scripts/import-fleet-trucks.ts",
     "backfill:azambuja-pings": "tsx --conditions=react-server scripts/backfill-azambuja-pings.ts"

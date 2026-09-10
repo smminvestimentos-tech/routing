@@ -253,7 +253,15 @@ export function AzambujaSheetClient() {
             As restantes linhas são agrupadas por <strong>(ROTA, N_LOJA)</strong>.
             A mesma loja repetida na rota (C + D, ou duas linhas C) é a{" "}
             <strong>mesma paragem física</strong> — as duas linhas ficam com a
-            mesma Chegada/Saída.
+            mesma Chegada/Saída. Uma ROTA pertence a <strong>um só dia</strong>;
+            se o ficheiro trouxer a mesma ROTA em datas diferentes (coluna «Dia
+            Serviço»), a ferramenta recusa em vez de misturar.
+          </li>
+          <li>
+            Ciclos que começam na véspera (CICLO «20:00-1 | …») ou acabam no dia
+            seguinte («… | 00:30+1»): a pesquisa de paragens estende-se ao{" "}
+            <strong>dia real do turno</strong> (+3h de folga), não só a uma
+            margem fixa à volta do dia da folha.
           </li>
           <li>
             Usa-se a <strong>MATRICULA</strong> já preenchida: para cada loja

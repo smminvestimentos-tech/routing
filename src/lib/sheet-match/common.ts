@@ -281,7 +281,8 @@ function lisbonOffsetMin(at: Date): number {
 }
 
 // Epoch ms for "YYYY-MM-DD" + minutes-since-midnight, read as Lisbon wall-clock.
-function lisbonEpoch(day: string, minOfDay: number): number {
+// `minOfDay` may be negative or ≥ 1440 to reach into the previous / next day.
+export function lisbonEpoch(day: string, minOfDay: number): number {
   const [y, mo, d] = day.split("-").map(Number);
   const guess = Date.UTC(y, mo - 1, d, 0, 0, 0) + minOfDay * 60000;
   return guess - lisbonOffsetMin(new Date(guess)) * 60000;

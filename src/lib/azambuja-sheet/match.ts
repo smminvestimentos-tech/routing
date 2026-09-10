@@ -45,6 +45,7 @@ import {
   fmtDuration,
   fmtHM,
   KEPT,
+  lisbonEpoch,
   noGpsCoverageNote,
   normalizePlate,
   parseClockMin,
@@ -216,31 +217,140 @@ export function resolveColumns(header: string[]): ResolvedColumns {
 // CICLO looks like "20:00-1 | 08:00" (start 20:00 the day before, end 08:00),
 // "08:00 | 20:00" (same day), "12:30 | 00:30+1" (ends after midnight), or a
 // free-text label ("Noturno", "Crossdocking peixe") we can't use.
-//
-// Our stops are queried for the service day only (00:00–24:00 Lisbon), so we
-// collapse a cross-midnight cycle to the part we can actually observe:
+
+const CICLO_RE =
+  /^(\d{1,2}:\d{2})\s*([+-]\d)?\s*\|\s*(\d{1,2}:\d{2})\s*([+-]\d)?$/;
+
+// Shared parse of a time-window CICLO. Returns the two ends as minutes since
+// midnight plus which calendar day each falls on relative to the SERVICE day
+// (0 = service day, -1 = the day before, +1 = the day after). null for a
+// free-text CICLO. A wrap with no explicit marker ("20:00 | 08:00") is read as
+// starting the previous day, same as an explicit "-1".
+function matchCiclo(raw: unknown): {
+  startOffsetDays: number;
+  startMin: number;
+  endOffsetDays: number;
+  endMin: number;
+} | null {
+  const m = String(raw ?? "").trim().match(CICLO_RE);
+  if (!m) return null;
+  const [, iniHM, iniOff, fimHM, fimOff] = m;
+  const startMin = parseClockMin(iniHM);
+  const endMin = parseClockMin(fimHM);
+  if (startMin == null || endMin == null) return null;
+
+  const startsPrevDay = iniOff === "-1";
+  const endsNextDay = fimOff === "+1";
+  const wrapsWithoutMarker =
+    !startsPrevDay && !endsNextDay && startMin > endMin;
+
+  return {
+    startOffsetDays: startsPrevDay || wrapsWithoutMarker ? -1 : 0,
+    startMin,
+    endOffsetDays: endsNextDay ? 1 : 0,
+    endMin,
+  };
+}
+
+// The absolute bounds of a CICLO shift relative to the service day — used to
+// size the stop-query window (see stopQueryWindowMs). null for a free-text
+// CICLO. parseCiclo() throws this day info away; this keeps it.
+export function cicloSpan(raw: unknown): {
+  startOffsetDays: number;
+  startMin: number;
+  endOffsetDays: number;
+  endMin: number;
+} | null {
+  return matchCiclo(raw);
+}
+
+// The service-day slice of a CICLO, for matching. Our stops are queried per
+// service day (00:00–24:00 Lisbon), so a cross-midnight cycle is collapsed to
+// the part we can actually observe:
 //   "…-1 | HH:MM"  -> 00:00 .. HH:MM   (overnight tail on the service day)
 //   "HH:MM | …+1"  -> HH:MM .. 23:59   (daytime head on the service day)
 // The ±3h swap pad (SWAP_WINDOW_PAD_MIN) absorbs the rest of the slop. Returns
 // two "HH:MM" strings, or "" when CICLO isn't a time window.
 export function parseCiclo(raw: unknown): { ini: string; fim: string } {
-  const s = String(raw ?? "").trim();
-  const m = s.match(
-    /^(\d{1,2}:\d{2})\s*([+-]\d)?\s*\|\s*(\d{1,2}:\d{2})\s*([+-]\d)?$/,
-  );
-  if (!m) return { ini: "", fim: "" };
-  const [, iniHM, iniOff, fimHM, fimOff] = m;
-  const iniMin = parseClockMin(iniHM);
-  const fimMin = parseClockMin(fimHM);
-  if (iniMin == null || fimMin == null) return { ini: "", fim: "" };
+  const sp = matchCiclo(raw);
+  if (!sp) return { ini: "", fim: "" };
+  const hm = (min: number) =>
+    `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  if (sp.startOffsetDays < 0) return { ini: "00:00", fim: hm(sp.endMin) };
+  if (sp.endOffsetDays > 0) return { ini: hm(sp.startMin), fim: "23:59" };
+  return { ini: hm(sp.startMin), fim: hm(sp.endMin) };
+}
 
-  const startsPrevDay = iniOff === "-1";
-  const endsNextDay = fimOff === "+1";
-  const wrapsWithoutMarker = !startsPrevDay && !endsNextDay && iniMin > fimMin;
+// ---------------------------------------------------------------------------
+// Stop-query window
+// ---------------------------------------------------------------------------
 
-  if (startsPrevDay || wrapsWithoutMarker) return { ini: "00:00", fim: fimHM };
-  if (endsNextDay) return { ini: iniHM, fim: "23:59" };
-  return { ini: iniHM, fim: fimHM };
+// Epoch-ms [lo, hi) bounds for the stops/pings query on a given service day.
+//
+// Base: the strict service day skirted by `skirtMs` on each side (evening
+// starts, past-midnight finishes). On top of that, any CICLO whose shift
+// *starts the previous calendar day* ("…-1 | …") or *ends the next one*
+// ("… | …+1") pushes the bound out to that real shift day + `padMs`, so an
+// early overnight start ("18:00-1 …", 6h before midnight) isn't clipped by a
+// fixed skirt. Free-text CICLOs contribute nothing (the base skirt still
+// applies).
+export function stopQueryWindowMs(
+  day: string, // YYYY-MM-DD
+  ciclos: Iterable<unknown>,
+  opts: { skirtMs?: number; padMs?: number } = {},
+): { loMs: number; hiMs: number } {
+  const skirtMs = opts.skirtMs ?? 4 * 3_600_000;
+  const padMs = opts.padMs ?? 3 * 3_600_000;
+
+  let loMs = lisbonEpoch(day, 0) - skirtMs;
+  let hiMs = lisbonEpoch(day, 24 * 60) + skirtMs;
+
+  for (const raw of ciclos) {
+    const sp = matchCiclo(raw);
+    if (!sp) continue;
+    if (sp.startOffsetDays < 0) {
+      const t = lisbonEpoch(day, sp.startOffsetDays * 24 * 60 + sp.startMin) - padMs;
+      if (t < loMs) loMs = t;
+    }
+    if (sp.endOffsetDays > 0) {
+      const t = lisbonEpoch(day, sp.endOffsetDays * 24 * 60 + sp.endMin) + padMs;
+      if (t > hiMs) hiMs = t;
+    }
+  }
+  return { loMs, hiMs };
+}
+
+// ---------------------------------------------------------------------------
+// Safety check: one ROTA, one service day
+// ---------------------------------------------------------------------------
+
+// The matcher groups rows by (ROTA, N_LOJA) and assumes a route belongs to
+// exactly one service day. ROTA is a global, monotonically-increasing id from
+// the transporter's planner (observed disjoint per day: 05/08 ids ≈ 1.855e8,
+// 09/09 ≈ 1.858e8), so this should never fire in practice — it catches a file
+// that mixed two days (e.g. two "conferido" outputs pasted together), which
+// would otherwise be matched silently against whichever day won resolution.
+//
+// Only meaningful when the file carries our per-row «Dia Serviço» column (a
+// raw transporter export has no per-row date and is one day by construction).
+export function findRotaDayConflicts(
+  records: SheetRecord[],
+  rotaCol: string,
+  diaCol: string | null,
+): { rota: string; days: string[] }[] {
+  if (!diaCol || !rotaCol) return [];
+  const byRota = new Map<string, Set<string>>();
+  for (const r of records) {
+    const rota = String(r[rotaCol] ?? "").trim();
+    const d = parseServiceDay(r[diaCol]);
+    if (!rota || !d) continue;
+    let set = byRota.get(rota);
+    if (!set) byRota.set(rota, (set = new Set<string>()));
+    set.add(d);
+  }
+  return [...byRota.entries()]
+    .filter(([, days]) => days.size > 1)
+    .map(([rota, days]) => ({ rota, days: [...days].sort() }));
 }
 
 // ---------------------------------------------------------------------------

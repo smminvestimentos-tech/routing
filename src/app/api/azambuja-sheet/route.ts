@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllRows } from "@/lib/supabase/paginate";
-import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
 import {
   dedupeStops,
+  findRotaDayConflicts,
   parseServiceDay,
   resolveColumns,
   resolveDay,
   runMatch,
+  stopQueryWindowMs,
   type DayStop,
   type SheetRecord,
 } from "@/lib/azambuja-sheet/match";
@@ -138,18 +139,40 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Safety check: the same ROTA on two different service days inside one file
+  // would corrupt the (ROTA, N_LOJA) grouping (see findRotaDayConflicts). Only
+  // fires on a re-uploaded file carrying our per-row «Dia Serviço» column.
+  const rotaConflicts = findRotaDayConflicts(records, cols.rotaCol, cols.diaCol);
+  if (rotaConflicts.length > 0) {
+    const detail = rotaConflicts
+      .slice(0, 5)
+      .map((c) => `ROTA ${c.rota} → ${c.days.join(" e ")}`)
+      .join("; ");
+    return NextResponse.json(
+      {
+        error:
+          `Este ficheiro tem a mesma ROTA em dias de serviço diferentes ` +
+          `(${detail}${rotaConflicts.length > 5 ? "; …" : ""}). O emparelhamento ` +
+          `agrupa por (ROTA, N_LOJA) e assume uma rota por dia — carrega um dia ` +
+          `de cada vez.`,
+        rotaConflicts,
+      },
+      { status: 422 },
+    );
+  }
+
   const supabase = createAdminClient();
   // Azambuja delivery cycles run heavily overnight (CICLO "20:00-1 | 08:00"),
-  // so a route's stops straddle the calendar boundary of its service day.
-  // Skirt the strict day by 4h on each side to catch an evening start / a
-  // past-midnight finish without pulling in a whole neighbouring day.
-  const SKIRT_MS = 4 * 60 * 60 * 1000;
-  const dayStart = new Date(
-    new Date(lisbonDayStartISO(day)).getTime() - SKIRT_MS,
-  ).toISOString();
-  const dayEnd = new Date(
-    new Date(lisbonDayStartISO(addDaysYmd(day, 1))).getTime() + SKIRT_MS,
-  ).toISOString();
+  // so a route's stops straddle the calendar boundary of its service day. The
+  // query window is the strict day skirted by 4h each side AND stretched to
+  // reach the real shift day of any "…-1 | …" / "… | …+1" CICLO in the file
+  // (a fixed skirt clips an early start like "18:00-1 …").
+  const { loMs, hiMs } = stopQueryWindowMs(
+    day,
+    cols.cicloCol ? records.map((r) => r[cols.cicloCol!]) : [],
+  );
+  const dayStart = new Date(loMs).toISOString();
+  const dayEnd = new Date(hiMs).toISOString();
 
   // PostgREST caps every response at 1000 rows regardless of .limit(), so both
   // of these must be paged — a full backfilled day is well over 1000 stops and
