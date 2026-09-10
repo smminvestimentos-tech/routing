@@ -11,6 +11,7 @@ type Summary = {
   review: number;
   swap: number;
   swapOutOfWindow: number;
+  plateTypo: number;
   passthrough: number;
   routes: number;
   routesOk: number;
@@ -194,6 +195,15 @@ export function AzambujaSheetClient() {
                   confirmar com cuidado)
                 </li>
               )}
+              {result.summary.plateTypo > 0 && (
+                <li>
+                  <span className="font-medium text-violet-700 dark:text-violet-400">
+                    🔤 Possível erro de matrícula:
+                  </span>{" "}
+                  {result.summary.plateTypo} (matrícula corrigida a 1 caractere +
+                  horas; erro de transcrição, não troca — confirmar)
+                </li>
+              )}
               <li>
                 <span className="font-medium text-amber-700 dark:text-amber-400">
                   ⚠️ Rever manualmente:
@@ -249,6 +259,15 @@ export function AzambujaSheetClient() {
             janela da entrega (o caso da frota nova sem histórico), não se
             sugere nada — fica <strong>⚠️ Rever manualmente</strong> com nota de{" "}
             <em>sem cobertura GPS</em>.
+          </li>
+          <li>
+            <strong>🔤 Possível erro de matrícula</strong>: se a MATRICULA da
+            folha não tiver <em>nenhum</em> dado GPS nosso e existir{" "}
+            <strong>exatamente uma</strong> matrícula com GPS real a{" "}
+            <strong>1 caractere de diferença</strong> que fez mesmo a rota (pelo
+            menos 2–3 lojas seguidas conferem no código e na hora), sugere-se
+            essa matrícula corrigida + horas — erro de transcrição, não troca de
+            viatura.
           </li>
           <li>
             Sem correspondência clara: <strong>⚠️ Rever manualmente</strong>, com

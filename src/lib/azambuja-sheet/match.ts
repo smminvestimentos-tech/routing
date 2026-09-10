@@ -39,6 +39,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
+  findPlateTypo,
   findVehicleSwap,
   fmtDateTimeLisbon,
   fmtDuration,
@@ -48,9 +49,12 @@ import {
   parseClockMin,
   parseServiceDay,
   pick,
+  PLATE_TYPO,
   plannedPlateHasCoverage,
+  plateTypoNote,
   REAL_COL,
   REVIEW,
+  type RouteStore,
   type SheetRecord,
   SWAP,
   SWAP_OUT_OF_WINDOW,
@@ -65,6 +69,7 @@ export {
   REVIEW,
   SWAP,
   SWAP_OUT_OF_WINDOW,
+  PLATE_TYPO,
   dedupeStops,
   parseServiceDay,
 };
@@ -117,6 +122,8 @@ export type MatchSummary = {
   swap: number;
   /** rows flagged "🔄❗ Possível troca (fora da janela)" */
   swapOutOfWindow: number;
+  /** rows flagged "🔤 Possível erro de matrícula" (one-char plate slip) */
+  plateTypo: number;
   /** distinct (ROTA) count and how many matched cleanly */
   routes: number;
   routesOk: number;
@@ -276,7 +283,13 @@ type Work = {
   planFim: string;
   /** the (ROTA, N_LOJA) store-group this row belongs to */
   groupKey: string;
-  conf: "" | "OK" | typeof REVIEW | typeof SWAP | typeof SWAP_OUT_OF_WINDOW;
+  conf:
+    | ""
+    | "OK"
+    | typeof REVIEW
+    | typeof SWAP
+    | typeof SWAP_OUT_OF_WINDOW
+    | typeof PLATE_TYPO;
   real: string;
   swapPlate: string | null;
   assignedStop: WStop | null;
@@ -300,6 +313,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, header, cols, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
+
+  // Candidate pool for the plate-typo check: plates with real GPS stops today.
+  const platesWithDayStops = new Set<string>();
+  for (const s of stops) if (s.plate) platesWithDayStops.add(s.plate);
 
   const diaCol = cols.diaCol ?? DIA_COL;
   const outHeader = [...header];
@@ -473,6 +490,19 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const storeLabel = (g: StoreGroup) =>
     g.designacao ? `${g.code} (${g.designacao})` : g.code;
 
+  // Each ROTA's planned stores, in sheet order — the run a look-alike plate has
+  // to corroborate for a "🔤 Possível erro de matrícula".
+  const routeStoresByRota = new Map<string, RouteStore[]>();
+  for (const [rota, rg] of routeMap) {
+    routeStoresByRota.set(
+      rota,
+      [...rg]
+        .sort((a, b) => a.order - b.order)
+        .filter((x) => x.code)
+        .map((x) => ({ code: x.code, planIni: x.planIni, planFim: x.planFim })),
+    );
+  }
+
   for (const g of groups) {
     if (g.conf !== "" || !g.plate || !g.code || g.assignedStop) continue;
 
@@ -487,6 +517,30 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         SWAP_WINDOW_PAD_MIN,
       )
     ) {
+      // Plate not in our GPS feed at all — maybe a one-character transcription
+      // slip for a look-alike plate that really drove this route today.
+      if (!platesWithGps.has(g.plate)) {
+        const typo = findPlateTypo({
+          plate: g.plate,
+          code: g.code,
+          planIni: g.planIni,
+          planFim: g.planFim,
+          routeStores: routeStoresByRota.get(g.rota) ?? [],
+          stops,
+          candidatePlates: platesWithDayStops,
+        });
+        if (typo) {
+          typo.suggStop.assigned = true;
+          setGroup(
+            g,
+            PLATE_TYPO,
+            typo.suggStop,
+            plateTypoNote(g.plate, typo.suggPlate, typo.run, "MATRICULA da folha"),
+            typo.suggPlate,
+          );
+          continue;
+        }
+      }
       setGroup(g, REVIEW, null, noGpsCoverageNote(g.plate, platesWithGps.has(g.plate)));
       continue;
     }
@@ -554,6 +608,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let passthrough = 0;
   let swap = 0;
   let swapOutOfWindow = 0;
+  let plateTypo = 0;
   for (const w of works) {
     // Stamp the service day on every row (blank ones included) so a
     // re-uploaded output is never ambiguous about which day it is.
@@ -578,11 +633,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       w.out[cols.chegadaCol] = "";
       w.out[cols.saidaCol] = "";
     }
-    // On a swap suggestion, replace the sheet's plate with the suggested one
-    // (same as the TFS sheet). Otherwise leave MATRICULA as the transporter
-    // wrote it.
+    // On a swap suggestion, or a one-character plate-typo correction, replace
+    // the sheet's plate with the suggested one (same as the TFS sheet).
+    // Otherwise leave MATRICULA as the transporter wrote it.
     if (
-      (w.conf === SWAP || w.conf === SWAP_OUT_OF_WINDOW) &&
+      (w.conf === SWAP ||
+        w.conf === SWAP_OUT_OF_WINDOW ||
+        w.conf === PLATE_TYPO) &&
       w.swapPlate &&
       cols.plateCol
     ) {
@@ -594,6 +651,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;
     else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;
+    else if (w.conf === PLATE_TYPO) plateTypo++;
     else review++;
   }
 
@@ -605,12 +663,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + swap + swapOutOfWindow,
+      total: ok + review + swap + swapOutOfWindow + plateTypo,
       ok,
       review,
       passthrough,
       swap,
       swapOutOfWindow,
+      plateTypo,
       routes: routeMap.size,
       routesOk,
     },

@@ -11,6 +11,7 @@ type Summary = {
   review: number;
   swap: number;
   swapOutOfWindow: number;
+  plateTypo: number;
   passthrough: number;
   discrepancy: number;
   dayStops: number;
@@ -172,6 +173,15 @@ export function TfsSheetClient() {
                   confirmar com cuidado)
                 </li>
               )}
+              {result.summary.plateTypo > 0 && (
+                <li>
+                  <span className="font-medium text-violet-700 dark:text-violet-400">
+                    🔤 Possível erro de matrícula:
+                  </span>{" "}
+                  {result.summary.plateTypo} (matrícula corrigida a 1 caractere +
+                  horas; erro de transcrição, não troca — confirmar)
+                </li>
+              )}
               <li>
                 <span className="font-medium text-amber-700 dark:text-amber-400">
                   ⚠️ Rever manualmente:
@@ -245,6 +255,16 @@ export function TfsSheetClient() {
             essa entrega, não se arrisca sugestão nenhuma — a linha fica{" "}
             <strong>⚠️ Rever manualmente</strong> com nota de{" "}
             <em>sem cobertura GPS</em>.
+          </li>
+          <li>
+            <strong>🔤 Possível erro de matrícula</strong>: se a matrícula
+            extraída não tiver <em>nenhum</em> dado GPS nosso e existir{" "}
+            <strong>exatamente uma</strong> matrícula com GPS real a{" "}
+            <strong>1 caractere de diferença</strong> (uma letra/número trocado,
+            a mais ou a menos) que fez mesmo a rota — pelo menos 2–3 lojas
+            seguidas conferem no código e na hora —, sugere-se essa matrícula
+            corrigida + horas. É um erro de transcrição na folha, não uma troca
+            de camião.
           </li>
           <li>
             Sem correspondência clara: a linha fica{" "}

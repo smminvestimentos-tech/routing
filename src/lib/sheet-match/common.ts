@@ -12,6 +12,10 @@ import { normalizePlate } from "@/lib/fleet/validate";
 export const REVIEW = "⚠️ Rever manualmente";
 export const SWAP = "🔄 Possível troca de viatura";
 export const SWAP_OUT_OF_WINDOW = "🔄❗ Possível troca (fora da janela)";
+// A distinct category from a swap: the sheet's plate has no GPS of ours at all
+// and a single look-alike plate (one character off) actually drove the route.
+// The story is "escreveram a matrícula mal", not "trocaram o camião".
+export const PLATE_TYPO = "🔤 Possível erro de matrícula";
 export const CONFIANCA_COL = "Confiança";
 export const REAL_COL = "Real";
 
@@ -548,6 +552,179 @@ export function findVehicleSwap(params: {
     outsideBy: outOfWindow && win ? minutesOutside(arrivalMin(suggStop), win) : 0,
     ghost: ghostRow?.plate ? { label: ghostRow.label, plate: ghostRow.plate } : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Plate-transcription-error detection
+// ---------------------------------------------------------------------------
+//
+// Shared step, tried only when a row's extracted plate has NO GPS of ours
+// anywhere (a plate we've never tracked — so it can't be a real vehicle that
+// simply wasn't followed that day). Distinct from findVehicleSwap: here we
+// believe the planned vehicle IS the one that drove, only its plate was
+// mistyped by a single character on the sheet.
+
+// How many of a route's planned stores, back to back, a look-alike plate must
+// actually have visited (right store code + a plausible arrival) before we call
+// the sheet's plate a one-character slip rather than a real vehicle.
+export const PLATE_TYPO_MIN_RUN = 3;
+
+/** One planned store of the route under test, in delivery order. */
+export type RouteStore = {
+  code: string;
+  planIni: string | number;
+  planFim: string | number;
+};
+
+export type PlateTypoResult = {
+  kind: "plate-typo";
+  /** the look-alike plate that does have GPS and drove the route */
+  suggPlate: string;
+  /** that plate's stop corroborating THIS row's store (arrival/departure) */
+  suggStop: WStop;
+  /** how many of the route's stores in a row `suggPlate` covered */
+  run: number;
+};
+
+// True when `a` and `b` are exactly one edit apart — one substitution, one
+// insertion, or one deletion. Zero edits (equal strings) is false. Inputs are
+// already normalised plates (upper, no hyphens/spaces).
+export function isEditDistance1(a: string, b: string): boolean {
+  if (a === b) return false;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+
+  if (la === lb) {
+    let diff = 0;
+    for (let i = 0; i < la; i++) {
+      if (a[i] !== b[i] && ++diff > 1) return false;
+    }
+    return diff === 1;
+  }
+
+  // Lengths differ by one: the shorter must sit inside the longer with a single
+  // gap (the one inserted / deleted character).
+  const short = la < lb ? a : b;
+  const long = la < lb ? b : a;
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i++;
+      j++;
+    } else if (skipped) {
+      return false;
+    } else {
+      skipped = true;
+      j++;
+    }
+  }
+  return true;
+}
+
+/**
+ * The row's extracted plate has no GPS of ours at all. Before giving up: is
+ * there exactly one GPS-tracked plate a single character away from it that also
+ * *drove this route* that day — a run of at least `minRun` of the route's
+ * planned stores, back to back, each with a real stop of that plate at the
+ * matching code and a plausible arrival, in delivery order? If so it's almost
+ * certainly a transcription slip on the sheet, not a swapped truck.
+ *
+ * `code`/`planIni`/`planFim` are THIS row's store; it must itself be one of the
+ * corroborated stores, so the row gets real arrival/departure times. Pure — the
+ * caller marks `suggStop.assigned` once it commits.
+ */
+export function findPlateTypo(params: {
+  /** the row's extracted plate (normalised); has no GPS of ours anywhere */
+  plate: string;
+  /** this row's store code + planned window */
+  code: string;
+  planIni: string | number;
+  planFim: string | number;
+  /** the whole route's planned stores, in delivery order */
+  routeStores: RouteStore[];
+  /** all of the day's stops */
+  stops: WStop[];
+  /** plates that have real GPS stops on the service day (the candidate pool) */
+  candidatePlates: Set<string>;
+  padMin?: number;
+  minRun?: number;
+}): PlateTypoResult | null {
+  const { plate, code, planIni, planFim, routeStores, stops, candidatePlates } =
+    params;
+  const padMin = params.padMin ?? SWAP_WINDOW_PAD_MIN;
+  const minRun = params.minRun ?? PLATE_TYPO_MIN_RUN;
+
+  if (plate.length < 4) return null;
+  // Need a run of stores to lean on — a one-store "route" can't corroborate.
+  const route = routeStores.filter((r) => r.code);
+  if (route.length < 2) return null;
+
+  // Candidate pool: plates with real GPS this day, exactly one character off.
+  const near = [...candidatePlates].filter(
+    (p) => p !== plate && isEditDistance1(p, plate),
+  );
+  if (near.length !== 1) return null;
+  const suggPlate = near[0];
+
+  const suggStops = stops
+    .filter((s) => s.plate === suggPlate)
+    .sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
+  if (suggStops.length === 0) return null;
+
+  // Longest back-to-back run of route stores that `suggPlate` covered, walking
+  // both lists forward so the corroboration also respects delivery order.
+  const used = new Set<WStop>();
+  let bestRun = 0;
+  let run = 0;
+  let cursorT = -Infinity;
+  for (const rs of route) {
+    const win = widenWindow(rs.planIni, rs.planFim, padMin);
+    const hit = suggStops.find(
+      (s) =>
+        !used.has(s) &&
+        codeEq(s.code, rs.code) &&
+        inWindow(arrivalMin(s), win) &&
+        new Date(s.arrivedAt).getTime() >= cursorT,
+    );
+    if (hit) {
+      used.add(hit);
+      cursorT = new Date(hit.arrivedAt).getTime();
+      run += 1;
+      if (run > bestRun) bestRun = run;
+    } else {
+      run = 0;
+    }
+  }
+  if (bestRun < 2 || bestRun < Math.min(minRun, route.length)) return null;
+
+  // This row's own store must be corroborated too, so the row gets real times.
+  const win = widenWindow(planIni, planFim, padMin);
+  const suggStop = suggStops.find(
+    (s) => codeEq(s.code, code) && inWindow(arrivalMin(s), win),
+  );
+  if (!suggStop) return null;
+
+  return { kind: "plate-typo", suggPlate, suggStop, run: bestRun };
+}
+
+// Caption stamped on the "Real" column of a 🔤 row. `origin` says where the
+// mistyped plate was read from ("coluna ID", "MATRICULA da folha", …).
+export function plateTypoNote(
+  extractedPlate: string,
+  suggPlate: string,
+  run: number,
+  origin: string,
+): string {
+  return (
+    `Matrícula ${extractedPlate}${origin ? ` (${origin})` : ""} não tem dados ` +
+    `GPS nossos. ${suggPlate} — a 1 caractere de diferença — fez esta rota ` +
+    `(${run} lojas seguidas conferem: código de loja + hora plausível). ` +
+    `Provável erro de transcrição na matrícula, não troca de viatura. ` +
+    `Confirma antes de aceitar.`
+  );
 }
 
 // Re-exported so matchers can normalise plates without a second import.

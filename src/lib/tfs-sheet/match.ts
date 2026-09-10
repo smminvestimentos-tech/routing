@@ -38,6 +38,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
+  findPlateTypo,
   findVehicleSwap,
   fmtDuration,
   fmtHM,
@@ -46,9 +47,12 @@ import {
   parseClockMin,
   parseServiceDay,
   pick,
+  PLATE_TYPO,
   plannedPlateHasCoverage,
+  plateTypoNote,
   REAL_COL,
   REVIEW,
+  type RouteStore,
   type SheetRecord,
   SWAP,
   SWAP_OUT_OF_WINDOW,
@@ -63,6 +67,7 @@ export {
   REVIEW,
   SWAP,
   SWAP_OUT_OF_WINDOW,
+  PLATE_TYPO,
   codeEq,
   dedupeStops,
   fmtHM,
@@ -120,6 +125,8 @@ export type MatchSummary = {
   swap: number;
   /** rows flagged "🔄❗ Possível troca (fora da janela)" */
   swapOutOfWindow: number;
+  /** rows flagged "🔤 Possível erro de matrícula" (one-char plate slip) */
+  plateTypo: number;
 };
 
 export type RunMatchArgs = {
@@ -340,9 +347,15 @@ type Work = {
   /** set when source === "discrepancy" */
   idPlate: string | null;
   fleetPlate: string | null;
-  /** suggested plate when conf === SWAP or SWAP_OUT_OF_WINDOW */
+  /** suggested plate when conf === SWAP / SWAP_OUT_OF_WINDOW / PLATE_TYPO */
   swapPlate: string | null;
-  conf: "" | "OK" | typeof REVIEW | typeof SWAP | typeof SWAP_OUT_OF_WINDOW;
+  conf:
+    | ""
+    | "OK"
+    | typeof REVIEW
+    | typeof SWAP
+    | typeof SWAP_OUT_OF_WINDOW
+    | typeof PLATE_TYPO;
   real: string;
   assignedStop: WStop | null;
 };
@@ -521,6 +534,31 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const storeLabel = (w: Work) =>
     w.designacao ? `${w.code} (${w.designacao})` : w.code;
 
+  // Candidate pool for the plate-typo check: plates with real GPS stops today.
+  const platesWithDayStops = new Set<string>();
+  for (const s of stops) if (s.plate) platesWithDayStops.add(s.plate);
+
+  // Each truck's planned stores, in delivery order — the run a look-alike plate
+  // has to corroborate for a "🔤 Possível erro de matrícula".
+  const routeStoresByTruck = new Map<string, RouteStore[]>();
+  {
+    const acc = new Map<string, { s: RouteStore; ordem: number; idx: number }[]>();
+    for (const w of works) {
+      if (w.empty || !w.rawTruck || !w.code) continue;
+      const arr = acc.get(w.rawTruck) ?? [];
+      arr.push({
+        s: { code: w.code, planIni: w.planIni, planFim: w.planFim },
+        ordem: w.ordem,
+        idx: w.idx,
+      });
+      acc.set(w.rawTruck, arr);
+    }
+    for (const [truck, arr] of acc) {
+      arr.sort((a, b) => a.ordem - b.ordem || a.idx - b.idx);
+      routeStoresByTruck.set(truck, arr.map((x) => x.s));
+    }
+  }
+
   for (const w of works) {
     if (
       w.empty ||
@@ -544,6 +582,37 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         SWAP_WINDOW_PAD_MIN,
       )
     ) {
+      // The extracted plate isn't in our GPS feed at all — not a real vehicle
+      // we just failed to follow. Try a one-character transcription slip: a
+      // single look-alike plate that genuinely drove this route today.
+      if (!platesWithGps.has(w.plate)) {
+        const typo = findPlateTypo({
+          plate: w.plate,
+          code: w.code,
+          planIni: w.planIni,
+          planFim: w.planFim,
+          routeStores: routeStoresByTruck.get(w.rawTruck) ?? [],
+          stops,
+          candidatePlates: platesWithDayStops,
+        });
+        if (typo) {
+          w.conf = PLATE_TYPO;
+          w.swapPlate = typo.suggPlate;
+          typo.suggStop.assigned = true;
+          w.assignedStop = typo.suggStop;
+          w.real = plateTypoNote(
+            w.plate,
+            typo.suggPlate,
+            typo.run,
+            w.source === "id"
+              ? "coluna ID"
+              : w.source === "fleet"
+                ? "fleet_trucks"
+                : "folha",
+          );
+          continue;
+        }
+      }
       w.conf = REVIEW;
       w.real = noGpsCoverageNote(w.plate, platesWithGps.has(w.plate));
       continue;
@@ -633,6 +702,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let discrepancy = 0;
   let swap = 0;
   let swapOutOfWindow = 0;
+  let plateTypo = 0;
   for (const w of works) {
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
@@ -651,7 +721,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // matched no stop. On a swap suggestion, write the SUGGESTED plate instead.
     // Not on "discrepancy" (w.plate is null there on purpose) or "none".
     const plateOut =
-      (w.conf === SWAP || w.conf === SWAP_OUT_OF_WINDOW) && w.swapPlate
+      (w.conf === SWAP ||
+        w.conf === SWAP_OUT_OF_WINDOW ||
+        w.conf === PLATE_TYPO) &&
+      w.swapPlate
         ? w.swapPlate
         : w.plate;
     if (cols.plateCol && plateOut) w.out[cols.plateCol] = plateOut;
@@ -664,6 +737,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;
     else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;
+    else if (w.conf === PLATE_TYPO) plateTypo++;
     else review++;
     if (w.source === "discrepancy") discrepancy++;
   }
@@ -672,13 +746,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + swap + swapOutOfWindow,
+      total: ok + review + swap + swapOutOfWindow + plateTypo,
       ok,
       review,
       passthrough,
       discrepancy,
       swap,
       swapOutOfWindow,
+      plateTypo,
     },
   };
 }
