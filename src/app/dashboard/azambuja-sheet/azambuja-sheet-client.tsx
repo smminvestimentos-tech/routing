@@ -245,9 +245,11 @@ export function AzambujaSheetClient() {
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>
             Linhas que já vêm com <strong>Hora Chegada e Hora Saida</strong>{" "}
-            preenchidas passam <strong>intactas</strong> — não se lhes toca nem se
-            faz matching. Ficam <strong>✅ Já preenchido (mantido)</strong>,
-            distinto de <strong>OK</strong> (valor calculado por nós).
+            preenchidas não são re-emparelhadas — os valores do utilizador são
+            mantidos (só re-formatados para <strong>DD/MM/AAAA HH:MM</strong>,
+            para a folha ficar toda igual). Ficam{" "}
+            <strong>✅ Já preenchido (mantido)</strong>, distinto de{" "}
+            <strong>OK</strong> (valor calculado por nós).
           </li>
           <li>
             As restantes linhas são agrupadas por <strong>(ROTA, N_LOJA)</strong>.
@@ -263,9 +265,10 @@ export function AzambujaSheetClient() {
             <code>-1</code> (começa na véspera, «20:00-1 | …») ou <code>+1</code>{" "}
             (acaba no dia seguinte, «… | 00:30+1») é que alarga a janela para
             esse dia vizinho (+3h de folga). Ciclos de mesmo dia («02:00 |
-            14:00») ou de texto livre («Crossdocking peixe») ficam presos ao dia
-            da folha — uma paragem já do dia seguinte não é atribuída a essas
-            linhas.
+            14:00») ou de texto livre («Crossdocking peixe», «Noturno») ficam
+            presos ao dia da folha — uma paragem cuja chegada <em>ou</em> saída
+            já seja do dia seguinte não é atribuída a essas linhas (fica em
+            Rever).
           </li>
           <li>
             Usa-se a <strong>MATRICULA</strong> já preenchida: para cada loja

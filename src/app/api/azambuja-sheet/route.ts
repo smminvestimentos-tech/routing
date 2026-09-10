@@ -100,6 +100,14 @@ export async function POST(request: NextRequest) {
     defval: "",
     blankrows: false,
   });
+  // A raw pass too: a hand-filled Chegada/Saída cell on a "kept" row comes in as
+  // an Excel date serial; the display string ("9/8/26 0:12") is locale- and
+  // format-dependent and can't be re-parsed reliably. Aligned to `records`.
+  const recordsRaw = XLSX.utils.sheet_to_json<SheetRecord>(ws, {
+    raw: true,
+    defval: "",
+    blankrows: false,
+  });
 
   const cols = resolveColumns(header);
   if (cols.errors.length > 0) {
@@ -287,6 +295,7 @@ export async function POST(request: NextRequest) {
   const { rows, header: outHeader, summary } = runMatch({
     day,
     records,
+    rawRecords: recordsRaw,
     header,
     cols,
     stops,

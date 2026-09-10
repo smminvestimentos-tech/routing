@@ -137,6 +137,9 @@ export type MatchSummary = {
 export type RunMatchArgs = {
   day: string; // YYYY-MM-DD
   records: SheetRecord[];
+  /** same rows, read with raw:true — Excel serials as numbers (for kept-row
+   *  date normalisation). Optional; aligned to `records` by index. */
+  rawRecords?: SheetRecord[];
   header: string[];
   cols: ResolvedColumns;
   stops: DayStop[];
@@ -344,14 +347,84 @@ export function stopQueryWindowMs(
   return { loMs, hiMs };
 }
 
-// Is a stop's arrival inside [loMs, hiMs)?
-export function stopArrivalInWindow(
+// Does a stop fit ENTIRELY inside [loMs, hiMs)? Its arrival must be in range
+// AND its departure must not cross hiMs. So a same-day / free-text route (whose
+// window is the strict service day) can't claim a stop that spills past
+// midnight — a 09/09 23:04 → 10/09 00:10 visit goes to manual review, not "OK"
+// with a 10/09 departure. A stop with no departure recorded is judged on its
+// arrival alone.
+export function stopInWindow(
   arrivedAt: string,
+  departedAt: string | null,
   loMs: number,
   hiMs: number,
 ): boolean {
-  const t = new Date(arrivedAt).getTime();
-  return Number.isFinite(t) && t >= loMs && t < hiMs;
+  const a = new Date(arrivedAt).getTime();
+  if (!Number.isFinite(a) || a < loMs || a >= hiMs) return false;
+  if (departedAt == null) return true;
+  const d = new Date(departedAt).getTime();
+  return !Number.isFinite(d) || d < hiMs;
+}
+
+// Render a Chegada/Saída cell as "DD/MM/YYYY HH:MM" (wall-clock — NO timezone
+// shift). Prefers the Excel serial from the workbook's raw pass (unambiguous);
+// falls back to parsing our own "DD/MM/YYYY HH:MM", a "DD/MM/YY[YY] [HH:MM]"
+// string, or "HH:MM" alone (attached to `serviceDay`). Unparseable input is
+// returned unchanged.
+export function normalizeDateTimeCell(
+  display: string,
+  raw: unknown,
+  serviceDay: string, // YYYY-MM-DD
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmt = (y: number, mo: number, d: number, h: number, mi: number) =>
+    `${pad(d)}/${pad(mo)}/${y} ${pad(h)}:${pad(mi)}`;
+
+  const serial =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? raw
+      : typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))
+        ? Number(raw)
+        : null;
+  if (serial != null && serial > 1 && serial < 200_000) {
+    const dt = new Date(
+      Date.UTC(1899, 11, 30) + Math.round(serial * 86_400_000),
+    );
+    return fmt(
+      dt.getUTCFullYear(),
+      dt.getUTCMonth() + 1,
+      dt.getUTCDate(),
+      dt.getUTCHours(),
+      dt.getUTCMinutes(),
+    );
+  }
+
+  const s = display.trim();
+  if (!s) return "";
+
+  const dmy = s.match(
+    /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2}))?\s*(AM|PM)?/i,
+  );
+  if (dmy) {
+    const [, dd, mm, yy, hh, mi, ap] = dmy;
+    let year = Number(yy);
+    if (year < 100) year += 2000;
+    let hour = hh ? Number(hh) : 0;
+    if (ap) {
+      const up = ap.toUpperCase();
+      if (up === "PM" && hour < 12) hour += 12;
+      if (up === "AM" && hour === 12) hour = 0;
+    }
+    return fmt(year, Number(mm), Number(dd), hour, mi ? Number(mi) : 0);
+  }
+
+  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hm) {
+    const [y, mo, d] = serviceDay.split("-").map(Number);
+    return fmt(y, mo, d, Number(hm[1]), Number(hm[2]));
+  }
+
+  return display;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +540,7 @@ type StoreGroup = {
 };
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
-  const { day, records, header, cols, platesWithGps } = args;
+  const { day, records, rawRecords, header, cols, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
@@ -653,7 +726,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         (s) =>
           !s.assigned &&
           codeEq(s.code, g.code) &&
-          stopArrivalInWindow(s.arrivedAt, g.winLoMs, g.winHiMs),
+          stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
       );
       if (hit) {
         hit.assigned = true;
@@ -717,7 +790,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         });
         if (
           typo &&
-          stopArrivalInWindow(typo.suggStop.arrivedAt, g.winLoMs, g.winHiMs)
+          stopInWindow(
+            typo.suggStop.arrivedAt,
+            typo.suggStop.departedAt,
+            g.winLoMs,
+            g.winHiMs,
+          )
         ) {
           typo.suggStop.assigned = true;
           setGroup(
@@ -751,9 +829,16 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
 
-    // The candidate stop must be on this route's calendar day(s) — a same-day /
+    // The candidate stop must fit this route's calendar day(s) — a same-day /
     // free-text CICLO never reaches into the next day (see groupWindowMs).
-    if (!stopArrivalInWindow(sw.suggStop.arrivedAt, g.winLoMs, g.winHiMs)) {
+    if (
+      !stopInWindow(
+        sw.suggStop.arrivedAt,
+        sw.suggStop.departedAt,
+        g.winLoMs,
+        g.winHiMs,
+      )
+    ) {
       continue;
     }
 
@@ -815,10 +900,23 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       passthrough++;
       continue;
     }
-    // Row that arrived with both times filled: keep Chegada/Saída/MATRICULA
-    // exactly as they came in. Only «Dia Serviço» (stamped above) and the two
-    // derived columns are written.
+    // Row that arrived with both times filled: keep the VALUES the user gave,
+    // but re-render Chegada/Saída in our "DD/MM/YYYY HH:MM" format so the whole
+    // sheet is visually consistent (the transporter / Excel may hand us
+    // "9/8/26", 2-digit year, M/D order, an Excel serial…). MATRICULA is left
+    // untouched. Only «Dia Serviço» + the two derived columns are also written.
     if (w.kept) {
+      const raw = rawRecords?.[w.idx];
+      w.out[cols.chegadaCol] = normalizeDateTimeCell(
+        String(w.out[cols.chegadaCol] ?? ""),
+        raw?.[cols.chegadaCol],
+        day,
+      );
+      w.out[cols.saidaCol] = normalizeDateTimeCell(
+        String(w.out[cols.saidaCol] ?? ""),
+        raw?.[cols.saidaCol],
+        day,
+      );
       w.out[CONFIANCA_COL] = KEPT;
       w.out[REAL_COL] = "";
       kept++;

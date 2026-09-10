@@ -21,7 +21,8 @@ import {
   parseCiclo,
   groupWindowMs,
   stopQueryWindowMs,
-  stopArrivalInWindow,
+  stopInWindow,
+  normalizeDateTimeCell,
   findRotaDayConflicts,
   resolveColumns,
   runMatch,
@@ -119,17 +120,41 @@ for (const c of ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", "Noturn
   );
 }
 // …and a stop at 10/09 00:10 / 00:12 / 00:44 is OUTSIDE those windows.
+const toIso = (d: string, hhmm: string) =>
+  new Date(lisbonEpoch(d, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)))).toISOString();
 for (const [c, hhmm] of [
   ["Crossdocking peixe", "00:10"],
   ["02:00 | 14:00", "00:12"],
   ["11:30 | 23:30", "00:44"],
 ] as const) {
   const w = groupWindowMs(DAY, c);
-  const stopMs = lisbonEpoch("2026-09-10", Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
   ok(
-    `10/09 ${hhmm} stop is OUT of the ${JSON.stringify(c)} window`,
-    stopArrivalInWindow(new Date(stopMs).toISOString(), w.loMs, w.hiMs) === false,
-    lisbon(stopMs),
+    `10/09 ${hhmm} ARRIVAL is OUT of the ${JSON.stringify(c)} window`,
+    stopInWindow(toIso("2026-09-10", hhmm), null, w.loMs, w.hiMs) === false,
+  );
+}
+
+// stopInWindow — a stop that ARRIVES in-day but DEPARTS past midnight (the
+// real "…OK with Hora Saída em 10/09" bug) must be rejected for a same-day /
+// free-text route.
+{
+  const w = groupWindowMs(DAY, "Crossdocking peixe"); // strict service day
+  ok(
+    "stop 09/09 23:04 -> 10/09 00:10 : rejected (departure crosses midnight)",
+    stopInWindow(toIso("2026-09-09", "23:04"), toIso("2026-09-10", "00:10"), w.loMs, w.hiMs) === false,
+  );
+  ok(
+    "stop 09/09 23:04 -> 09/09 23:40 : accepted (both ends in-day)",
+    stopInWindow(toIso("2026-09-09", "23:04"), toIso("2026-09-09", "23:40"), w.loMs, w.hiMs) === true,
+  );
+  ok(
+    "stop 09/09 23:04 -> (no departure) : accepted on arrival alone",
+    stopInWindow(toIso("2026-09-09", "23:04"), null, w.loMs, w.hiMs) === true,
+  );
+  const wp1 = groupWindowMs(DAY, "13:30 | 01:30+1");
+  ok(
+    "+1 route: stop 09/09 23:04 -> 10/09 01:00 : accepted (window reaches next day)",
+    stopInWindow(toIso("2026-09-09", "23:04"), toIso("2026-09-10", "01:00"), wp1.loMs, wp1.hiMs) === true,
   );
 }
 
@@ -247,11 +272,12 @@ if (!raw) {
       }),
   );
   ok(
-    "real: the three reported cases — a 10/09 00:10/00:12/00:44 stop is out of window",
+    "real: the reported cases — a stop arriving 09/09 23:0x and departing 10/09 00:1x is rejected",
     (["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30"] as const).every((c, i) => {
       const w = groupWindowMs("2026-09-09", c);
-      const t = lisbonEpoch("2026-09-10", [10, 12, 44][i]);
-      return stopArrivalInWindow(new Date(t).toISOString(), w.loMs, w.hiMs) === false;
+      const arr = new Date(lisbonEpoch("2026-09-09", 23 * 60 + 4)).toISOString();
+      const dep = new Date(lisbonEpoch("2026-09-10", [10, 12, 44][i])).toISOString();
+      return stopInWindow(arr, dep, w.loMs, w.hiMs) === false;
     }),
   );
   ok(
@@ -311,14 +337,17 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
   const records = [
     mk("R-CROSS", "7003", "Crossdocking peixe"),   // free text
     mk("R-SAMEDAY", "7005", "02:00 | 14:00"),      // same day
-    mk("R-PLUS1", "7009", "13:30 | 01:30+1"),      // +1 -> widens the fetch
+    mk("R-PLUS1", "7009", "13:30 | 01:30+1"),      // +1 -> reaches next day
   ];
   const cols = resolveColumns(azHeader);
   const stops: DayStop[] = [
-    // plate AA11BB: a legit same-day stop at 7005, and next-day stops at 7003 & 7009
-    { id: "s1", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso("09", "13:00"), departedAt: iso("09", "13:20") },
-    { id: "s2", vehicleId: 1, plate: "AA11BB", code: "7003", arrivedAt: iso("10", "00:10"), departedAt: iso("10", "00:25") },
-    { id: "s3", vehicleId: 1, plate: "AA11BB", code: "7009", arrivedAt: iso("10", "00:50"), departedAt: iso("10", "01:15") },
+    // The real bug shape: arrives IN-DAY, departs after midnight.
+    { id: "s1", vehicleId: 1, plate: "AA11BB", code: "7003", arrivedAt: iso("09", "23:04"), departedAt: iso("10", "00:10") },
+    { id: "s2", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso("09", "23:24"), departedAt: iso("10", "00:12") },
+    // a legit fully-in-day stop for the same-day route, later in the sort order
+    { id: "s2b", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso("09", "23:59"), departedAt: iso("09", "23:59") },
+    // legit next-day stop for the +1 route
+    { id: "s3", vehicleId: 1, plate: "AA11BB", code: "7009", arrivedAt: iso("09", "23:50"), departedAt: iso("10", "01:00") },
   ];
   const res = runMatch({
     day: "2026-09-09", records, header: azHeader, cols, stops,
@@ -326,9 +355,61 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
     pingWindowByPlate: new Map([["AA11BB", { min: Date.parse(iso("09", "00:00")), max: Date.parse(iso("10", "02:00")) }]]),
   });
   const byLoja = Object.fromEntries(res.rows.map((r) => [String(r["N_LOJA"]), r]));
-  ok("Crossdocking peixe row: NOT matched to the 10/09 00:10 stop", byLoja["7003"]["Hora Chegada"] === "" && byLoja["7003"]["Confiança"] === REVIEW);
-  ok('"02:00 | 14:00" row: matched to the legit 09/09 13:00 stop', byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09/09/2026 13:00"));
-  ok('"13:30 | 01:30+1" row: DOES match its legit 10/09 00:50 stop (explicit +1)', byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Chegada"]).includes("10/09/2026 00:50"));
+  ok(
+    "Crossdocking peixe row: 23:04->00:10 stop NOT matched (departs 10/09) -> Rever",
+    byLoja["7003"]["Hora Saida"] === "" && byLoja["7003"]["Confiança"] === REVIEW,
+    { ch: byLoja["7003"]["Hora Chegada"], sa: byLoja["7003"]["Hora Saida"], conf: byLoja["7003"]["Confiança"] },
+  );
+  ok(
+    '"02:00 | 14:00" row: skips the midnight-crossing stop, takes the 23:59 in-day one',
+    byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09/09/2026 23:59"),
+    byLoja["7005"]["Hora Chegada"],
+  );
+  ok(
+    '"13:30 | 01:30+1" row: DOES match its 23:50 -> 10/09 01:00 stop (explicit +1)',
+    byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Saida"]).includes("10/09/2026 01:00"),
+    byLoja["7009"]["Hora Saida"],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// normalizeDateTimeCell — kept rows re-rendered as DD/MM/YYYY HH:MM.
+// ---------------------------------------------------------------------------
+console.log("== normalizeDateTimeCell ==");
+const SVC = "2026-09-09";
+// Excel serial for 2026-09-08 00:12 (days since 1899-12-30).
+const serial0812 = (Date.UTC(2026, 8, 8, 0, 12) - Date.UTC(1899, 11, 30)) / 86_400_000;
+ok("Excel serial -> DD/MM/YYYY HH:MM", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC) === "08/09/2026 00:12", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC));
+ok("our own format is left as-is", normalizeDateTimeCell("09/09/2026 06:26", "09/09/2026 06:26", SVC) === "09/09/2026 06:26");
+ok("DD/MM/YY string (no serial) -> full year", normalizeDateTimeCell("08/09/26 07:09", "08/09/26 07:09", SVC) === "08/09/2026 07:09");
+ok("D/M/YYYY without time -> 00:00", normalizeDateTimeCell("8/9/2026", "8/9/2026", SVC) === "08/09/2026 00:00");
+ok("HH:MM alone -> attach service day", normalizeDateTimeCell("06:26", "06:26", SVC) === "09/09/2026 06:26");
+ok("12h clock with PM", normalizeDateTimeCell("09/09/2026 1:05 PM", "09/09/2026 1:05 PM", SVC) === "09/09/2026 13:05");
+ok("empty -> empty", normalizeDateTimeCell("", "", SVC) === "");
+ok("unparseable -> unchanged", normalizeDateTimeCell("mais ou menos agora", "mais ou menos agora", SVC) === "mais ou menos agora");
+
+// End-to-end: a kept row's messy date is uniformised.
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO", "Dia Serviço"];
+  const records: SheetRecord[] = [
+    { ROTA: "R1", N_LOJA: "7001", NOME: "x", MATRICULA: "AA-11-BB", "Hora Chegada": "9/8/26 0:12", "Hora Saida": "9/8/26 1:30", CICLO: "Noturno", TIPO: "C", "Dia Serviço": "" },
+  ];
+  const rawRecords: SheetRecord[] = [
+    { ROTA: "R1", N_LOJA: "7001", NOME: "x", MATRICULA: "AA-11-BB",
+      "Hora Chegada": (Date.UTC(2026, 8, 8, 0, 12) - Date.UTC(1899, 11, 30)) / 86_400_000,
+      "Hora Saida": (Date.UTC(2026, 8, 8, 1, 30) - Date.UTC(1899, 11, 30)) / 86_400_000,
+      CICLO: "Noturno", TIPO: "C", "Dia Serviço": "" },
+  ];
+  const cols = resolveColumns(azHeader);
+  const res = runMatch({
+    day: "2026-09-09", records, rawRecords, header: azHeader, cols, stops: [],
+    platesWithGps: new Set(), pingWindowByPlate: new Map(),
+  });
+  const r = res.rows[0];
+  ok("kept row: Confiança = mantido", String(r["Confiança"]).includes("mantido"));
+  ok("kept row: Chegada re-rendered DD/MM/YYYY", r["Hora Chegada"] === "08/09/2026 00:12", r["Hora Chegada"]);
+  ok("kept row: Saida re-rendered DD/MM/YYYY", r["Hora Saida"] === "08/09/2026 01:30", r["Hora Saida"]);
+  ok("kept row: MATRICULA untouched", r["MATRICULA"] === "AA-11-BB");
 }
 
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
