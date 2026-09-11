@@ -306,16 +306,24 @@ const CICLO_PAD_MS = 3 * 3_600_000;
 // Epoch-ms [lo, hi) bounds a single CICLO's real stops may fall in, on `day`.
 //
 //   • free-text CICLO ("Crossdocking peixe", "Noturno") -> the strict service
-//     day, 00:00–24:00. NOTHING outside it.
+//     day, 00:00–24:00. NOTHING outside it — there's no HH:MM at all to bound
+//     by, so the calendar day is the only signal we have.
 //   • same-day window ("02:00 | 14:00", "11:30 | 23:30") -> also the strict
 //     service day. The hours are informative but a same-day route's stops
 //     belong to that calendar day; they must not spill into the next.
 //   • "…-1 | …"  -> lo reaches the previous calendar day (shift start − pad);
-//     hi stays at end-of-service-day.
+//     hi is bounded by the shift's own end time + pad (NOT end-of-day — a
+//     shift documented as ending ~08:00 doesn't get to claim a 13:34 stop
+//     just because it's still technically the same service day; 2026-09-11
+//     ROTA 185798003 / código 7001 / AD-49-DH: CICLO "20:00-1 | 08:00" wrongly
+//     accepted a 10/09 13:34 stop before this fix, 5.5h past end+pad).
 //   • "… | …+1"  -> hi reaches the next calendar day (shift end + pad);
 //     lo stays at start-of-service-day.
 //
-// ONLY an explicit -1 / +1 marker widens the window past the service day.
+// Only a genuinely SAME-day window (no day-crossing marker on EITHER end)
+// treats its hours as informative-only and spans the full service day; any
+// window that reaches past a calendar boundary has both ends bounded by the
+// CICLO's own times (± pad).
 export function groupWindowMs(
   day: string, // YYYY-MM-DD
   rawCiclo: unknown,
@@ -328,14 +336,15 @@ export function groupWindowMs(
   const sp = matchCiclo(rawCiclo);
   if (!sp) return { loMs: dayLo, hiMs: dayHi };
 
+  const sameDay = sp.startOffsetDays === 0 && sp.endOffsetDays === 0;
+
   const loMs =
     sp.startOffsetDays < 0
       ? lisbonEpoch(day, sp.startOffsetDays * DAY_MIN + sp.startMin) - padMs
       : dayLo;
-  const hiMs =
-    sp.endOffsetDays > 0
-      ? lisbonEpoch(day, sp.endOffsetDays * DAY_MIN + sp.endMin) + padMs
-      : dayHi;
+  const hiMs = sameDay
+    ? dayHi
+    : lisbonEpoch(day, sp.endOffsetDays * DAY_MIN + sp.endMin) + padMs;
   return { loMs, hiMs };
 }
 
@@ -752,17 +761,45 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         setGroup(g, REVIEW, null, describeReal(plate));
         continue;
       }
-      const hit = plateStops.find(
+      // Every unassigned real stop at this code, in window, in time order —
+      // not just the first. A group can hold >1 row (the same store listed
+      // twice: a C + D pair sharing one physical visit, OR a code the route
+      // genuinely revisits, e.g. a platform passed through twice). Each
+      // candidate is independently windowed here — none of this skips or
+      // reuses a sibling row's result unvalidated.
+      const candidates = plateStops.filter(
         (s) =>
           !s.assigned &&
           codeEq(s.code, g.code, coLocatedGroups) &&
           stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
       );
-      if (hit) {
+      if (candidates.length === 0) {
+        // no code match in window -> conf stays "" for step 3 (swap) / step 4
+        continue;
+      }
+      if (candidates.length >= g.rows.length) {
+        // Enough distinct real stops for every row in the group to get its
+        // OWN visit (sheet order) instead of all rows inheriting the first
+        // row's Chegada/Saída — a route that genuinely revisits this code
+        // must not have the 2nd+ occurrence silently copy the 1st's stop.
+        const rowsInSheetOrder = [...g.rows].sort((a, b) => a.idx - b.idx);
+        rowsInSheetOrder.forEach((w, i) => {
+          const stop = candidates[i];
+          stop.assigned = true;
+          w.conf = "OK";
+          w.assignedStop = stop;
+          w.real = "";
+        });
+        g.conf = "OK";
+        g.assignedStop = candidates[0];
+      } else {
+        // Fewer real stops than rows in the group (the common C+D-pair case:
+        // one physical visit, two sheet lines) — every row shares that one
+        // stop, as before.
+        const hit = candidates[0];
         hit.assigned = true;
         setGroup(g, "OK", hit, "");
       }
-      // no code match in window -> conf stays "" for step 3 (swap) / step 4
     }
   }
 

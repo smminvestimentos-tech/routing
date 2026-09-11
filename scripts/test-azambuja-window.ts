@@ -158,21 +158,49 @@ for (const [c, hhmm] of [
   );
 }
 
-// Only an explicit -1 / +1 widens past the service day.
+// Only an explicit -1 / +1 widens past the service day. An overnight shift's
+// END is bounded by its OWN documented end time (± pad), never dayHi — dayHi
+// (informative-hours, full-service-day) is reserved for a genuinely SAME-day
+// window (no day-crossing marker on either end); see groupWindowMs's comment.
+const day0800 = lisbonEpoch(DAY, 8 * 60);
 const wm1 = groupWindowMs(DAY, "20:00-1 | 08:00");
 ok(
-  '"20:00-1 | 08:00": lo = 08/09 17:00 (start − 3h); hi stays at end of service day',
-  wm1.loMs === prev2000 - 3 * H && wm1.hiMs === dayHi,
+  '"20:00-1 | 08:00": lo = 08/09 17:00 (start − 3h); hi = 09/09 11:00 (end + 3h, NOT end of service day)',
+  wm1.loMs === prev2000 - 3 * H && wm1.hiMs === day0800 + 3 * H,
   { lo: lisbon(wm1.loMs), hi: lisbon(wm1.hiMs) },
 );
 const wm1b = groupWindowMs(DAY, "18:00-1 | 06:00");
-ok('"18:00-1 | 06:00": lo = 08/09 15:00', wm1b.loMs === lisbonEpoch("2026-09-08", 18 * 60) - 3 * H && wm1b.hiMs === dayHi);
+ok(
+  '"18:00-1 | 06:00": lo = 08/09 15:00; hi = 09/09 09:00 (end + 3h)',
+  wm1b.loMs === lisbonEpoch("2026-09-08", 18 * 60) - 3 * H &&
+    wm1b.hiMs === lisbonEpoch(DAY, 6 * 60) + 3 * H,
+);
 const wp1 = groupWindowMs(DAY, "13:30 | 01:30+1");
 ok(
   '"13:30 | 01:30+1": hi = 10/09 04:30 (end + 3h); lo stays at start of service day',
   wp1.loMs === dayLo && wp1.hiMs === next0130 + 3 * H,
   { lo: lisbon(wp1.loMs), hi: lisbon(wp1.hiMs) },
 );
+
+// Real bug, 2026-09-11: ROTA 185798003 / código 7001 / AD-49-DH, CICLO
+// "20:00-1 | 08:00" (service day 2026-09-10) wrongly accepted a 13:34 stop —
+// 2.5h past end+pad — because hi used to fall back to end-of-service-day.
+{
+  const REAL_DAY = "2026-09-10";
+  const w = groupWindowMs(REAL_DAY, "20:00-1 | 08:00");
+  ok(
+    "real bug: 10/09 13:34->13:44 stop is OUTSIDE the window (was wrongly OK)",
+    stopInWindow(toIso(REAL_DAY, "13:34"), toIso(REAL_DAY, "13:44"), w.loMs, w.hiMs) === false,
+  );
+  ok(
+    "real bug: 10/09 09:00->09:10 stop (inside end+3h pad) IS in the window",
+    stopInWindow(toIso(REAL_DAY, "09:00"), toIso(REAL_DAY, "09:10"), w.loMs, w.hiMs) === true,
+  );
+  ok(
+    "real bug: 09/09 22:30->22:30 stop (the rejected implausible placeholder) IS in the window",
+    stopInWindow(toIso("2026-09-09", "22:30"), toIso("2026-09-09", "22:30"), w.loMs, w.hiMs) === true,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // stopQueryWindowMs — union of every row's groupWindowMs, NO blanket skirt.
@@ -370,6 +398,99 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
     byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Saida"]).includes("10/09/2026 01:00"),
     byLoja["7009"]["Hora Saida"],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Real bug, 2026-09-11: ROTA 185798003 / código 7001 / AD-49-DH, CICLO
+// "20:00-1 | 08:00", serviço 2026-09-10 — a linha ficou "OK" com um stop de
+// 13:34-13:44, 2.5h além de end+pad (08:00+3h=11:00). Root cause was
+// groupWindowMs's hi falling back to end-of-service-day for this CICLO shape.
+// ---------------------------------------------------------------------------
+console.log("== runMatch: real bug — ROTA 185798003 / 7001 / AD-49-DH ==");
+{
+  const isoReal = (d: string, hhmm: string) => `2026-09-${d}T${hhmm}:00+01:00`;
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const cols = resolveColumns(azHeader);
+
+  // A) the window bug on its own: one row, one real stop far outside the
+  // corrected window — must NOT be accepted as OK.
+  {
+    const records: SheetRecord[] = [
+      { ROTA: "185798003", N_LOJA: "7001", NOME: "Auchan Azambuja", MATRICULA: "AD-49-DH",
+        "Hora Chegada": "", "Hora Saida": "", CICLO: "20:00-1 | 08:00", TIPO: "C" },
+    ];
+    const stops: DayStop[] = [
+      // the real (wrongly matched) stop: 13:34-13:44 on the service day
+      { id: "real-bug-1", vehicleId: 1, plate: "AD49DH", code: "7001", arrivedAt: isoReal("10", "13:34"), departedAt: isoReal("10", "13:44") },
+    ];
+    const res = runMatch({
+      day: "2026-09-10", records, header: azHeader, cols, stops,
+      platesWithGps: new Set(["AD49DH"]),
+      pingWindowByPlate: new Map([["AD49DH", { min: Date.parse(isoReal("09", "18:00")), max: Date.parse(isoReal("10", "20:00")) }]]),
+    });
+    const row = res.rows[0];
+    ok(
+      "real bug: 7001/AD-49-DH does NOT go OK with the 13:34 stop (was the reported bug)",
+      !(row["Confiança"] === "OK" && String(row["Hora Chegada"]).includes("13:34")),
+      { conf: row["Confiança"], chegada: row["Hora Chegada"] },
+    );
+  }
+
+  // B) repeated code in the same ROTA: two rows, two DISTINCT real stops in
+  // window — each row must get its OWN Chegada/Saída, not both copying the
+  // first occurrence's result unrevalidated.
+  {
+    const mkRow = (): SheetRecord => ({
+      ROTA: "185798003", N_LOJA: "7001", NOME: "Auchan Azambuja", MATRICULA: "AD-49-DH",
+      "Hora Chegada": "", "Hora Saida": "", CICLO: "20:00-1 | 08:00", TIPO: "C",
+    });
+    const records: SheetRecord[] = [mkRow(), mkRow()];
+    const stops: DayStop[] = [
+      { id: "real-bug-2a", vehicleId: 1, plate: "AD49DH", code: "7001", arrivedAt: isoReal("09", "22:30"), departedAt: isoReal("09", "22:40") },
+      { id: "real-bug-2b", vehicleId: 1, plate: "AD49DH", code: "7001", arrivedAt: isoReal("10", "05:00"), departedAt: isoReal("10", "05:10") },
+    ];
+    const res = runMatch({
+      day: "2026-09-10", records, header: azHeader, cols, stops,
+      platesWithGps: new Set(["AD49DH"]),
+      pingWindowByPlate: new Map([["AD49DH", { min: Date.parse(isoReal("09", "18:00")), max: Date.parse(isoReal("10", "20:00")) }]]),
+    });
+    const [r1, r2] = res.rows;
+    ok(
+      "real bug (repeated code): both rows OK",
+      r1["Confiança"] === "OK" && r2["Confiança"] === "OK",
+      { c1: r1["Confiança"], c2: r2["Confiança"] },
+    );
+    ok(
+      "real bug (repeated code): row 1 gets the 22:30 stop, row 2 gets the DISTINCT 05:00 stop (not copied)",
+      String(r1["Hora Chegada"]).includes("22:30") && String(r2["Hora Chegada"]).includes("05:00"),
+      { r1: r1["Hora Chegada"], r2: r2["Hora Chegada"] },
+    );
+  }
+
+  // C) repeated code, only ONE real stop for two rows (the ordinary C+D pair
+  // sharing one physical visit) — both rows share that one stop, as before.
+  {
+    const mkRow = (): SheetRecord => ({
+      ROTA: "185798003", N_LOJA: "7001", NOME: "Auchan Azambuja", MATRICULA: "AD-49-DH",
+      "Hora Chegada": "", "Hora Saida": "", CICLO: "20:00-1 | 08:00", TIPO: "C",
+    });
+    const records: SheetRecord[] = [mkRow(), mkRow()];
+    const stops: DayStop[] = [
+      { id: "real-bug-3a", vehicleId: 1, plate: "AD49DH", code: "7001", arrivedAt: isoReal("09", "22:30"), departedAt: isoReal("09", "22:40") },
+    ];
+    const res = runMatch({
+      day: "2026-09-10", records, header: azHeader, cols, stops,
+      platesWithGps: new Set(["AD49DH"]),
+      pingWindowByPlate: new Map([["AD49DH", { min: Date.parse(isoReal("09", "18:00")), max: Date.parse(isoReal("10", "20:00")) }]]),
+    });
+    const [r1, r2] = res.rows;
+    ok(
+      "C+D pair, single real stop: both rows share it (unchanged behaviour)",
+      r1["Confiança"] === "OK" && r2["Confiança"] === "OK" &&
+        String(r1["Hora Chegada"]).includes("22:30") && String(r2["Hora Chegada"]).includes("22:30"),
+      { c1: r1["Confiança"], c2: r2["Confiança"], h1: r1["Hora Chegada"], h2: r2["Hora Chegada"] },
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
