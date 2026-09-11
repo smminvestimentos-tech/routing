@@ -52,7 +52,9 @@ import {
   plannedPlateHasCoverage,
   plateTypoNote,
   REAL_COL,
+  resolveMergedCode,
   REVIEW,
+  type MergedCodeEntry,
   type RouteStore,
   type SheetRecord,
   SWAP,
@@ -76,7 +78,7 @@ export {
   parseClockMin,
   parseServiceDay,
 };
-export type { DayStop, SheetRecord };
+export type { DayStop, MergedCodeEntry, SheetRecord };
 
 // The columns the TFS sheet is expected to carry, in its own order. Shown in
 // the UI as a reference; matching itself is accent/spacing tolerant.
@@ -153,6 +155,10 @@ export type RunMatchArgs = {
    * stop -> "sem cobertura GPS", not a guess.
    */
   pingWindowByPlate: Map<string, { min: number; max: number }>;
+  /** every currently active location's code — resolveMergedCode's live set */
+  activeCodes?: readonly string[];
+  /** inactive, merged location code -> canonical code (locations.merged_into_id) */
+  mergedCodes?: readonly MergedCodeEntry[];
 };
 
 export type RunMatchResult = {
@@ -370,6 +376,8 @@ type Work = {
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, header, cols, fleetByTruck, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
+  const activeCodes = args.activeCodes ?? [];
+  const mergedCodes = args.mergedCodes ?? [];
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   const outHeader = [...header];
@@ -385,7 +393,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const rawTruck = cols.truckCol
       ? String(r[cols.truckCol] ?? "").trim()
       : "";
-    const code = String(r[cols.codeCol] ?? "").trim();
+    const rawCode = String(r[cols.codeCol] ?? "").trim();
+    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
     const designacao = cols.designacaoCol
       ? String(r[cols.designacaoCol] ?? "").trim()
       : "";

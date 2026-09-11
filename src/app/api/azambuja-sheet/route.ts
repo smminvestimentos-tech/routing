@@ -12,6 +12,7 @@ import {
   runMatch,
   stopQueryWindowMs,
   type DayStop,
+  type MergedCodeEntry,
   type SheetRecord,
 } from "@/lib/azambuja-sheet/match";
 import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest) {
   // of these must be paged — a full backfilled day is well over 1000 stops and
   // tens of thousands of pings, and truncation shows up as silent "Rever
   // manualmente" for whichever vehicles fall past the cut.
-  const [stopsRes, pingsRes, allPlatesRes] = await Promise.all([
+  const [stopsRes, pingsRes, allPlatesRes, locationsRes] = await Promise.all([
     fetchAllRows<StopEmbedRow>((from, to) =>
       supabase
         .from("stops")
@@ -216,6 +217,9 @@ export async function POST(request: NextRequest) {
     // Every plate our GPS feed has ever seen (one row per vehicle/account).
     // Used by the swap-suggestion logic to tell a real rival from a ghost.
     supabase.from("latest_vehicle_plate").select("plate"),
+    // Every location's code/active/merged_into_id — resolves a sheet code that
+    // still names a merged-away location (0019, 0030) to its canonical code.
+    supabase.from("locations").select("id, code, active, merged_into_id"),
   ]);
 
   if (stopsRes.error) {
@@ -292,6 +296,24 @@ export async function POST(request: NextRequest) {
   }
   for (const pl of plateByVehicle.values()) platesWithGps.add(pl);
 
+  // A sheet code that still names a merged-away location (0019, 0030) resolves
+  // to its canonical code before matching. Degrades to no resolution (today's
+  // behaviour) if the query failed, same stance as platesWithGps above.
+  const activeCodes: string[] = [];
+  const mergedCodes: MergedCodeEntry[] = [];
+  if (!locationsRes.error) {
+    const codeById = new Map<string, string>();
+    for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
+    for (const l of locationsRes.data ?? []) {
+      if (l.active) {
+        activeCodes.push(l.code);
+      } else if (l.merged_into_id) {
+        const canonicalCode = codeById.get(l.merged_into_id);
+        if (canonicalCode) mergedCodes.push({ code: l.code, canonicalCode });
+      }
+    }
+  }
+
   const { rows, header: outHeader, summary } = runMatch({
     day,
     records,
@@ -301,6 +323,8 @@ export async function POST(request: NextRequest) {
     stops,
     platesWithGps,
     pingWindowByPlate,
+    activeCodes,
+    mergedCodes,
   });
 
   // Keep the transporter's original sheet name when it's a valid one (it

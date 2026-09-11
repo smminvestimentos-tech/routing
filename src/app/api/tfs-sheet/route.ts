@@ -12,6 +12,7 @@ import {
   resolveColumns,
   runMatch,
   type DayStop,
+  type MergedCodeEntry,
   type SheetRecord,
 } from "@/lib/tfs-sheet/match";
 
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
   // stops and pings are paged — a busy day is well over 1000 of each, and a
   // truncated read shows up as silent "Rever manualmente" for the vehicles
   // past the cut.
-  const [stopsRes, pingsRes, fleetRes, allPlatesRes] = await Promise.all([
+  const [stopsRes, pingsRes, fleetRes, allPlatesRes, locationsRes] = await Promise.all([
     fetchAllRows<StopEmbedRow>((from, to) =>
       supabase
         .from("stops")
@@ -153,6 +154,9 @@ export async function POST(request: NextRequest) {
     // Every plate our GPS feed has ever seen (one row per vehicle). Used by the
     // swap-suggestion logic to tell a real rival vehicle from a GPS-less ghost.
     supabase.from("latest_vehicle_plate").select("plate"),
+    // Every location's code/active/merged_into_id — resolves a sheet code that
+    // still names a merged-away location (0019, 0030) to its canonical code.
+    supabase.from("locations").select("id, code, active, merged_into_id"),
   ]);
 
   if (stopsRes.error) {
@@ -237,6 +241,24 @@ export async function POST(request: NextRequest) {
   }
   for (const pl of plateByVehicle.values()) platesWithGps.add(pl);
 
+  // A sheet code that still names a merged-away location (0019, 0030) resolves
+  // to its canonical code before matching. Degrades to no resolution (today's
+  // behaviour) if the query failed, same stance as platesWithGps above.
+  const activeCodes: string[] = [];
+  const mergedCodes: MergedCodeEntry[] = [];
+  if (!locationsRes.error) {
+    const codeById = new Map<string, string>();
+    for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
+    for (const l of locationsRes.data ?? []) {
+      if (l.active) {
+        activeCodes.push(l.code);
+      } else if (l.merged_into_id) {
+        const canonicalCode = codeById.get(l.merged_into_id);
+        if (canonicalCode) mergedCodes.push({ code: l.code, canonicalCode });
+      }
+    }
+  }
+
   const { rows, header: outHeader, summary } = runMatch({
     day,
     records,
@@ -246,6 +268,8 @@ export async function POST(request: NextRequest) {
     fleetByTruck,
     platesWithGps,
     pingWindowByPlate,
+    activeCodes,
+    mergedCodes,
   });
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"

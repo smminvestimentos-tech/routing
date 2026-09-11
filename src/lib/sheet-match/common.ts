@@ -147,6 +147,28 @@ export function codeKey(code: string): string {
   return k || "(sem código)";
 }
 
+// One inactive, merged location's code -> its canonical (merged_into_id)
+// location's code. Built by the caller from `locations` (active, merged_into_id).
+export type MergedCodeEntry = { code: string; canonicalCode: string };
+
+// Sheets sometimes still carry a store code we've since merged into a
+// canonical location (0019, 0030) — the planning system that generates them
+// lags behind our locations table. Resolve it to the canonical code before any
+// codeEq comparison against stops, so a visit now attributed to the canonical
+// location still matches the sheet's row for the old code. Only kicks in when
+// the raw code doesn't already match a currently active location — this never
+// overrides a genuine live code, even a coincidental one.
+export function resolveMergedCode(
+  raw: string,
+  activeCodes: readonly string[],
+  merged: readonly MergedCodeEntry[],
+): string {
+  if (!raw) return raw;
+  if (activeCodes.some((c) => codeEq(c, raw))) return raw;
+  const hit = merged.find((m) => codeEq(m.code, raw));
+  return hit ? hit.canonicalCode : raw;
+}
+
 const HM = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Lisbon",
   hour: "2-digit",

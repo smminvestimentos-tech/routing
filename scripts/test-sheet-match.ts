@@ -23,7 +23,11 @@ import {
   resolveColumns as resolveAzColumns,
   runMatch as runAzMatch,
 } from "@/lib/azambuja-sheet/match";
-import { findPlateTypo, isEditDistance1 } from "@/lib/sheet-match/common";
+import {
+  findPlateTypo,
+  isEditDistance1,
+  resolveMergedCode,
+} from "@/lib/sheet-match/common";
 
 let pass = 0;
 let fail = 0;
@@ -314,6 +318,95 @@ ok(
     r.rows[1]["Hora Chegada"] === "05/09/2026 07:00" && r.rows[1]["Hora Saida"] === "05/09/2026 07:20",
   );
   ok("Azambuja kept: E16 + B77 matched OK", r.rows[0]["Confiança"] === "OK" && r.rows[2]["Confiança"] === "OK", [r.rows[0]["Confiança"], r.rows[2]["Confiança"]]);
+}
+
+// ---------------------------------------------------------------------------
+// resolveMergedCode — 0030: sheet still names a merged-away location.
+// ---------------------------------------------------------------------------
+{
+  const activeCodes = ["206", "01", "7091"];
+  const merged = [
+    { code: "AUCHAN-4", canonicalCode: "206" },
+    { code: "7092", canonicalCode: "206" },
+    { code: "7001", canonicalCode: "01" },
+    { code: "AUCHAN-03", canonicalCode: "7091" },
+    { code: "201", canonicalCode: "7091" },
+  ];
+  ok(
+    "resolveMergedCode: merged code -> canonical",
+    resolveMergedCode("AUCHAN-4", activeCodes, merged) === "206",
+  );
+  ok(
+    "resolveMergedCode: another merged code, same canonical",
+    resolveMergedCode("7092", activeCodes, merged) === "206",
+  );
+  ok(
+    "resolveMergedCode: already-active code -> unchanged",
+    resolveMergedCode("206", activeCodes, merged) === "206",
+  );
+  ok(
+    "resolveMergedCode: unknown code -> unchanged",
+    resolveMergedCode("Z999", activeCodes, merged) === "Z999",
+  );
+  ok(
+    "resolveMergedCode: empty -> unchanged",
+    resolveMergedCode("", activeCodes, merged) === "",
+  );
+}
+
+// End-to-end: the TFS sheet's "Código de Loja" still says "AUCHAN-4", but the
+// stop is recorded against the now-canonical "206" (post-0030 merge). Without
+// resolution this would fall to review; with it, it matches cleanly. Plate
+// comes straight from the sheet's own column — no ID-parsing noise.
+{
+  const rows: SheetRecord[] = [
+    {
+      "Dia do Serviço": day,
+      "Nº Camião": "",
+      "Matrícula da Viatura": "32OG64",
+      "Ordem de Entrega": "1",
+      "Código de Loja": "AUCHAN-4",
+      "Designação da Loja": "Armazém Torres Novas",
+      "Janela Início": "08:00",
+      "Janela Fim": "10:00",
+      "Hora de Chegada": "",
+      "Hora de Saída": "",
+      ID: "",
+    },
+  ];
+  const stops: DayStop[] = [
+    { id: "m1", vehicleId: 1, plate: "32OG64", code: "206", arrivedAt: iso("08:12"), departedAt: iso("08:40") },
+  ];
+  const withoutResolution = runTfsMatch({
+    day, records: rows, header: tfsHeader, cols: tfsCols, stops,
+    fleetByTruck: new Map(),
+    platesWithGps: new Set(["32OG64"]),
+    pingWindowByPlate: new Map([["32OG64", { min: Date.parse(iso("06:00")), max: Date.parse(iso("20:00")) }]]),
+  });
+  ok(
+    "merge resolution OFF: AUCHAN-4 vs 206 -> does not match",
+    withoutResolution.summary.ok === 0,
+    withoutResolution.summary,
+  );
+
+  const withResolution = runTfsMatch({
+    day, records: rows, header: tfsHeader, cols: tfsCols, stops,
+    fleetByTruck: new Map(),
+    platesWithGps: new Set(["32OG64"]),
+    pingWindowByPlate: new Map([["32OG64", { min: Date.parse(iso("06:00")), max: Date.parse(iso("20:00")) }]]),
+    activeCodes: ["206"],
+    mergedCodes: [{ code: "AUCHAN-4", canonicalCode: "206" }],
+  });
+  ok(
+    "merge resolution ON: AUCHAN-4 resolves to 206 -> matches OK",
+    withResolution.summary.ok === 1,
+    withResolution.summary,
+  );
+  ok(
+    "merge resolution ON: original sheet cell stays 'AUCHAN-4' (not overwritten)",
+    withResolution.rows[0]["Código de Loja"] === "AUCHAN-4",
+    withResolution.rows[0]["Código de Loja"],
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

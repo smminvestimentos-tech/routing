@@ -55,7 +55,9 @@ import {
   plannedPlateHasCoverage,
   plateTypoNote,
   REAL_COL,
+  resolveMergedCode,
   REVIEW,
+  type MergedCodeEntry,
   type RouteStore,
   type SheetRecord,
   SWAP,
@@ -76,7 +78,7 @@ export {
   dedupeStops,
   parseServiceDay,
 };
-export type { DayStop, SheetRecord };
+export type { DayStop, MergedCodeEntry, SheetRecord };
 
 // Written into every output row so a re-uploaded (already conferido) file
 // still carries its service day unambiguously — the sheet name and file name
@@ -151,6 +153,10 @@ export type RunMatchArgs = {
    * around a candidate stop gets "sem cobertura GPS", not a guessed swap.
    */
   pingWindowByPlate: Map<string, { min: number; max: number }>;
+  /** every currently active location's code — resolveMergedCode's live set */
+  activeCodes?: readonly string[];
+  /** inactive, merged location code -> canonical code (locations.merged_into_id) */
+  mergedCodes?: readonly MergedCodeEntry[];
 };
 
 export type RunMatchResult = {
@@ -542,6 +548,8 @@ type StoreGroup = {
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, rawRecords, header, cols, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
+  const activeCodes = args.activeCodes ?? [];
+  const mergedCodes = args.mergedCodes ?? [];
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   // Candidate pool for the plate-typo check: plates with real GPS stops today.
@@ -556,7 +564,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
   const works: Work[] = records.map((r, idx) => {
     const rota = String(r[cols.rotaCol] ?? "").trim();
-    const code = String(r[cols.codeCol] ?? "").trim();
+    const rawCode = String(r[cols.codeCol] ?? "").trim();
+    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
     const designacao = cols.nomeCol
       ? String(r[cols.nomeCol] ?? "").trim()
       : "";
