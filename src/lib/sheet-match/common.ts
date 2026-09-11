@@ -112,6 +112,8 @@ export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Store code equality. Store codes here are "{optional letter prefix}{digits}"
+// ("E25", "B97", "133") or a merged/composite code ("B97-E72", "H96-B37").
 // Normalise a store code: handles string, number (e.g. 94), strips Excel float
 // suffixes (".0"), trims whitespace.
 export function normalizeStoreCode(v: unknown): string {
@@ -230,7 +232,9 @@ export type MergedCodeEntry = { code: string; canonicalCode: string };
 // canonical location (0019, 0030, 0031) — the planning system that generates them
 // lags behind our locations table. Resolve it to the canonical code before any
 // codeEq comparison against stops, so a visit now attributed to the canonical
-// location still matches the sheet's row for the old code.
+// location still matches the sheet's row for the old code. Only kicks in when
+// the raw code doesn't already match a currently active location — this never
+// overrides a genuine live code, even a coincidental one.
 export function resolveMergedCode(
   raw: unknown,
   activeCodes: readonly string[],
