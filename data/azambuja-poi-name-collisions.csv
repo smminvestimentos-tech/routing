@@ -1,0 +1,15 @@
+code,our_name,poi_name,norm_our_name,norm_poi_name,similarity,our_lat,our_lng,poi_lat,poi_lng,distance_m,our_radius_m,poi_radius_m,active
+238,"Sup. Laranjeiro - Poceirão","Águas de Moura","sup laranjeiro poceirao","aguas moura",0.00,38.633578,-8.742042,38.58706,-8.69214,6749,300,200,true
+254,"Super Laranjeiro Águas Moura","Poceirão","super laranjeiro aguas moura","poceirao",0.00,38.583697,-8.689539,38.63275,-8.742,7108,250,200,true
+416,"MA FNamora Odivelas","My Auchan Colinas do Cruzeiro","fnamora odivelas","colinas cruzeiro",0.00,38.789379,-9.192287,38.789103651558,-9.1924999454037,36,150,50,true
+419,"MA Comb GrandeGue-Al","My Auchan Algés","comb grandegue al","alges",0.00,38.7004537,-9.2297558,38.700538366846,-9.2296366944774,14,150,66,true
+421,"MA Alm Reis 203","My Auchan Av Almirante Reis II","alm reis 203","av almirante reis ii",0.33,38.7361568,-9.1339771,38.736115007211,-9.1341299834323,14,150,67,true
+424,"MA L Pastor Macedo","My Auchan Lumiar","l pastor macedo","lumiar",0.00,38.767808,-9.157017,38.767814780482,-9.1570816055225,6,250,85,true
+432,"MA P NS Navegantes","My Auchan Caparica","p ns navegantes","caparica",0.00,38.638871,-9.230882,38.63879321791,-9.230828608633,10,250,86,true
+446,"MA BJ Caraça (Porto)","My Auchan Bento Jesus Caraça","bj caraca porto","bento jesus caraca",0.33,41.163561,-8.598026,41.163436286447,-8.5979508325559,15,160,50,true
+447,"MA Exercito Li Porto","My Auchan Praça do Exército Libertador","exercito li porto","praca exercito libertador",0.33,41.1666016,-8.6250936,41.166624363369,-8.6249272917252,14,191,50,true
+96,"UPA Venda Pinheiro","UPA - Unidade Produção Alimentar","upa venda pinheiro","upa unidade producao alimentar",0.33,38.9275535347715,-9.22426464993854,38.92853839581,-9.2247142045554,116,250,50,true
+A554,"Riberalves","Ribeiralves | Torres Vedras","riberalves","ribeiralves torres vedras",0.00,39.050285,-9.268234,39.055851937973,-9.2545038184547,1337,300,100,true
+B85,"SU Av Novas_MercadoS","Mercado Santos","su av novas mercados","mercado santos",0.00,38.7435544997498,-9.15845841889006,38.743185249166,-9.1584972330701,41,150,63,true
+B86,"SU Ág Livres_Camões","Buraca","su ag livres camoes","buraca",0.00,38.7408968,-9.212557,38.74081,-9.21161,83,247,50,true
+M018,"José Maria Fonseca","J M Fonseca","jose maria fonseca","j m fonseca",0.33,38.519392,-9.014051,38.52192,-9.01031,430,300,400,true

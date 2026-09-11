@@ -1,0 +1,166 @@
+code,our_name,poi_name,norm_our_name,norm_poi_name,similarity,our_lat,our_lng,poi_lat,poi_lng,distance_m,our_radius_m,poi_radius_m,active
+I104,"Caves Avelar","Caves Avelar","caves avelar","caves avelar",1.00,39.9955212,-8.7549925,39.914009842724,-8.3680381184547,34205,300,50,true
+243A,"Amaral e Filhos Ambiente (Armazém Cliente Porto)","Amaral e Filhos - Ambiente","amaral e filhos ambiente armazem cliente porto","amaral e filhos ambiente",1.00,41.160885,-8.628367,41.396693360286,-8.7415379877663,27874,200,50,true
+M065,"Propet","Propet","propet","propet",1.00,41.0539987,-8.5694271,41.230113793046,-8.5367191267233,19774,300,50,true
+I958,"MMPET","MMpet","mmpet","mmpet",1.00,40.1209447,-8.8508231,40.05892091925,-8.6448995718277,18826,300,50,true
+729,"AF Penacova","AF Penacova","af penacova","af penacova",1.00,40.2021364,-8.4566756,40.30477975323,-8.3203723668995,16250,250,50,true
+B100,"Ovos CAC","Ovos CAC","ovos cac","ovos cac",1.00,39.729725,-8.792518,39.829790997108,-8.7294635853195,12363,300,150,true
+I402,"Ovos do Caramulo","Ovos Caramulo","ovos caramulo","ovos caramulo",1.00,40.565199,-8.168803,40.48542,-8.08911,11138,300,190,true
+63,"Lagoa","Auchan Lagoa","lagoa","lagoa",1.00,37.138341,-8.565812,37.13675,-8.4655833333333,8886,250,130,true
+I691,"Brioxa","Brioxa","brioxa","brioxa",1.00,41.3404643,-8.4792388,41.273877495877,-8.4631467455974,7525,150,50,true
+I534,"Zeltica","Zeltica","zeltica","zeltica",1.00,38.711985,-9.339556,38.756766130532,-9.3803599055573,6109,150,50,true
+368,"Florcash Lajes","Florcash","florcash lajes","florcash",1.00,38.8435155011784,-9.17680628010037,38.888666122054,-9.1926324443392,5204,300,50,true
+711,"AF Sabugal","AF Sabugal","af sabugal","af sabugal",1.00,40.379639,-7.049818,40.349854205428,-7.082665219574,4326,250,50,true
+703,"AF Barcelos – Rio Covo","AF Barcelos","af barcelos rio covo","af barcelos",1.00,41.490456,-8.578477,41.528510660304,-8.5792258895493,4232,250,50,true
+B12,"MA Pinhal Novo","Pinhal Novo","pinhal novo","pinhal novo",1.00,38.66026,-8.89455,38.631438223236,-8.9166820051332,3737,250,50,true
+283,"Sinal Mágico Supermercados Braga","Sinal Mágico - Braga","sinal magico supermercados braga","sinal magico braga",1.00,41.546805,-8.418419,41.52628,-8.44908,3424,150,50,true
+N126,"Nestlé","Nestlé Portugal SA","nestle","nestle portugal sa",1.00,40.804479,-8.618529,40.806256176547,-8.5783424219513,3388,300,140,true
+327,"Preço Baixo Balazar","Balazar","preco baixo balazar","balazar",1.00,41.40107,-8.620707,41.41436,-8.65167,2975,300,100,true
+708,"AF Pataias","AF Pataias","af pataias","af pataias",1.00,39.688267,-9.000672,39.680408818785,-8.9739055122684,2451,250,70,true
+244,"Rui Dinorá Vila Nova Poiares","Rui Dinorá","rui dinora vila nova poiares","rui dinora",1.00,40.21121,-8.259193,40.20156,-8.23739,2140,300,100,true
+461,"MA Liber,Bx Banheira","My Auchan Baixa da Banheira","liber bx banheira","baixa banheira",0.50,38.6578521,-9.0698818,38.65383,-9.04667,2065,150,50,true
+C763,"Cordeiro e Filhos","Cordeiro e Filhos","cordeiro e filhos","cordeiro e filhos",1.00,37.081099,-7.963979,37.065157831372,-7.9641806322734,1773,300,70,true
+724,"AF Beja","AF Beja","af beja","af beja",1.00,38.013944,-7.871142,38.008127149687,-7.8542114055225,1618,250,79,true
+K009,"GFS","GFS-Arruda dos Vinhos","gfs","gfs arruda vinhos",1.00,38.9682743,-9.04611,38.969504873697,-9.0291524203867,1472,300,50,true
+A91,"MA Venda Pinheiro","Venda do Pinheiro","venda pinheiro","venda pinheiro",1.00,38.92386,-9.2159,38.923075845517,-9.2324085678018,1431,250,50,true
+C015,"Renova","Renova","renova","renova",1.00,39.5027349160358,-8.61255974102602,39.492159302576,-8.6070891687632,1266,300,190,true
+133,"Preço Baixo Porto","Preço Baixo Porto","preco baixo porto","preco baixo porto",1.00,41.170172,-8.590584,41.18003,-8.58353,1245,300,50,true
+P371A,"Decante A","Decante","decante a","decante",1.00,38.736887,-9.216879,38.740638452388,-9.228092431523,1058,291,50,true
+C671B,"Sovena Barreiro","Sovena Barreiro","sovena barreiro","sovena barreiro",1.00,38.67763108,-9.0717389,38.669953566465,-9.0680363521149,912,300,50,true
+256R,"Fayal Kompras Frutas e Refrigerados (Bitralis STEF)","Fayal Kompras - FRV & REF","fayal kompras frutas e refrigerados bitralis stef","fayal kompras frv ref",0.50,38.824307,-9.096561,38.817547173625,-9.0928637737975,817,100,50,true
+256A,"Fayal Kompras Ambiente (Marfrete São João da Talha)","Fayal Kompras - Ambiente","fayal kompras ambiente marfrete sao joao talha","fayal kompras ambiente",1.00,38.824307,-9.096561,38.817698070429,-9.092971499271,798,150,50,true
+351A,"Hipercais Ambiente (E.T.E. São João Talha)","Hipercais - Ambiente","hipercais ambiente e t e sao joao talha","hipercais ambiente",1.00,38.824307,-9.096561,38.817708414549,-9.093061353273,794,150,50,true
+I990,"Nutre","Nutre","nutre","nutre",1.00,40.5443193,-8.7204768,40.550709428433,-8.7191278556518,720,300,384,true
+245,"Rui Dinorá Vila Nova Poiares II","Rui e Dinora ||","rui dinora vila nova poiares ii","rui e dinora",0.67,40.201526,-8.237503,40.1965,-8.24269,712,300,400,true
+710,"AF Penamacor","AF Penamacor","af penamacor","af penamacor",1.00,40.169755,-7.171522,40.16392,-7.17303,661,250,50,true
+160,"Neomáquinas Benedita","Neomáquinas Benedita","neomaquinas benedita","neomaquinas benedita",1.00,39.423499,-8.985873,39.421955192294,-8.9793714074028,584,300,80,true
+M028,"Viticale","Viticale","viticale","viticale",1.00,38.211502,-7.800801,38.206434435407,-7.7997020734491,572,300,50,true
+350,"Preço Baixo Viatodos","Preço Baixo Viatodos","preco baixo viatodos","preco baixo viatodos",1.00,41.45145,-8.56346,41.45602176804,-8.5648783506352,522,300,50,true
+727,"AF Miranda do Corvo","AF Miranda do Corvo","af miranda corvo","af miranda corvo",1.00,40.092381,-8.330118,40.089180978027,-8.3270418289596,442,250,63,true
+402,"MA João XXI","My Auchan João XXI","joao xxi","joao xxi",1.00,38.742387,-9.139655,38.74211198073,-9.1345890666892,440,150,100,true
+B029,"Mendes & Gonçalves","Mendes & Gonçalves","mendes goncalves","mendes goncalves",1.00,39.4120104,-8.4866763,39.415449564126,-8.4887480918885,422,300,100,true
+712,"AF Maceira do Lis","AF Maceira do Lis","af maceira lis","af maceira lis",1.00,39.688184,-8.883077,39.685383424171,-8.8863139929401,417,250,80,true
+442,"MA Morais Soares","My Auchan Morais Soares","morais soares","morais soares",1.00,38.7326781,-9.1342827,38.732559021471,-9.1300146800415,370,150,50,true
+440,"MA Alvares Cabral","My Auchan Alvares Cabral","alvares cabral","alvares cabral",1.00,38.7182581,-9.1610958,38.718263261584,-9.1568478266176,369,150,50,true
+I163P,"Sumol P","Sumol Pombal","sumol p","sumol pombal",1.00,39.917817,-8.634549,39.9195,-8.63761,321,150,150,true
+353,"Positivo & Genuíno, Lda","Positivo e Genuino","positivo genuino lda","positivo e genuino",0.67,41.830898,-7.009258,41.833570788765,-7.0097417922531,300,300,73,true
+423,"MA P Bento Goncalves","My Auchan Bento Gonçalves","p bento goncalves","bento goncalves",1.00,38.671115,-9.166278,38.668465846586,-9.1662065337295,295,250,50,true
+434,"MA A Joao II Setubal","My Auchan D João II","a joao ii setubal","d joao ii",0.67,38.530009,-8.8812016,38.530217852643,-8.8779306122684,285,152,69,true
+M071,"Wine Concept","Wine Concept","wine concept","wine concept",1.00,38.7554649,-9.2226825,38.755101355193,-9.2195018001568,279,164,50,true
+459,"MA A.L.Torres,Lumiar","My Auchan A.  Linha das Torres","a l torres lumiar","a linha torres",0.67,38.7739021,-9.1644639,38.772651204733,-9.161739479299,274,150,50,true
+B34,"MA Vale Amoreira","Vale da Amoreira","vale amoreira","vale amoreira",1.00,38.6455943,-9.040156,38.64561,-9.03703,271,250,50,true
+9,"Coimbra","Auchan Coimbra","coimbra","coimbra",1.00,40.205656,-8.407166,40.203415016899,-8.4081687314774,263,250,140,true
+I463R,"Monte D'Alva (Refrigerados)","Monte D´Alva - Montijo - Refrigerado","monte d alva refrigerados","monte d alva montijo refrigerado",0.75,38.713912,-8.968848,38.714337103655,-8.9716784257603,250,155,50,true
+I443,"Longa Vida","Longa Vida","longa vida","longa vida",1.00,41.23191,-8.704853,41.22972,-8.70553,250,300,400,true
+A605,"Águas de Monchique","Águas Monchique","aguas monchique","aguas monchique",1.00,37.1626272,-8.635953,37.161464305667,-8.6336677334649,240,300,50,true
+169,"Preço Baixo Angeiras","Angeiras","preco baixo angeiras","angeiras",1.00,41.266616,-8.721942,41.265754927626,-8.7244065238106,227,300,60,true
+I301,"Sanguinhal","Sanguinhal","sanguinhal","sanguinhal",1.00,39.2671947,-9.156457,39.26723984451,-9.1538221335605,227,300,50,true
+458,"MA Rinchoa, R.Mouro","My Auchan Rinchoa","rinchoa r mouro","rinchoa",1.00,38.7864505,-9.3248028,38.786138251365,-9.322255253085,224,150,50,true
+439,"MA Calçada da Ajuda","My Auchan Calçada da Ajuda","calcada ajuda","calcada ajuda",1.00,38.7010338,-9.2027559,38.701123563952,-9.2002695161429,216,158,50,true
+450,"MA C. Alegre (Porto)","My Auchan Campo Alegre - Porto","c alegre porto","campo alegre porto",0.67,41.1528584,-8.6394458,41.152788709035,-8.6368758174923,215,250,50,true
+38,"Sintra","Auchan Sintra","sintra","sintra",1.00,38.778947,-9.346779,38.77844,-9.34917,215,211,400,true
+N095,"Ferbar","Ferbar Maia","ferbar","ferbar maia",1.00,41.2598873,-8.6361824,41.260072932931,-8.6336777202318,210,300,50,true
+I622,"Colreis","ColReis","colreis","colreis",1.00,40.965307,-8.489805,40.96708,-8.49025,201,300,150,true
+M904,"Zoopan","Zoopan","zoopan","zoopan",1.00,39.1145687,-8.8654001,39.114593374851,-8.8631479893165,194,300,50,true
+I685,"Cruz Caliços","Cruz Caliços","cruz calicos","cruz calicos",1.00,37.101148,-8.270675,37.09942,-8.27078,192,300,150,true
+427,"MA Est Benfica 418","My Auchan Estrada de Benfica","est benfica 418","estrada benfica",0.50,38.7472775,-9.1901766,38.747278545946,-9.1879731478505,191,150,65,true
+31,"Famalicão","Auchan Famalicão","famalicao","famalicao",1.00,41.411321,-8.511765,41.412743856545,-8.5128897817399,184,170,150,true
+166,"Preço Baixo Leça Palmeira","Leça I","preco baixo leca palmeira","leca i",0.50,41.196303,-8.69679,41.194707591887,-8.6969227681923,178,300,52,true
+26,"Maia","Auchan Maia","maia","maia",1.00,41.249225,-8.621099,41.2494994408,-8.62316250801,175,150,150,true
+425,"MA Luis Queiroz","My Auchan Luiz Queiroz","luis queiroz","luiz queiroz",0.50,38.6788693,-9.1576185,38.679435674083,-9.1557713475024,172,150,70,true
+25,"Alfragide","Auchan Alfragide","alfragide","alfragide",1.00,38.728676045133,-9.22077216300728,38.727488715346,-9.219696521759,162,250,200,true
+54,"Guarda","Auchan Guarda","guarda","guarda",1.00,40.541591,-7.266578,40.540315508634,-7.2661948769887,145,250,120,true
+36,"Vila Real","Auchan Vila Real","vila real","vila real",1.00,41.296453,-7.734366,41.297085938434,-7.7358858055538,145,250,100,true
+142,"Maia Comércio Eletrónico","Maia Comercio Electronico","maia comercio eletronico","maia comercio electronico",0.67,41.249225,-8.621099,41.249081088483,-8.6227177897575,136,150,198,true
+28,"Castelo Branco","Auchan Castelo Branco","castelo branco","castelo branco",1.00,39.815722,-7.520939,39.816101105249,-7.5194794074165,132,250,150,true
+32,"Aveiro","Auchan Aveiro","aveiro","aveiro",1.00,40.626868,-8.644656,40.627631671785,-8.6436009682527,123,150,150,true
+53,"Olhão","Auchan Olhão","olhao","olhao",1.00,37.034402,-7.840272,37.035444444444,-7.8407222222222,123,250,130,true
+I472,"Adega Cooperativa Cantanhede","Adega Coop. de Cantanhede","adega cooperativa cantanhede","adega coop cantanhede",0.67,40.358408,-8.596503,40.35811,-8.59789,122,300,80,true
+35,"Gondomar","Auchan Gondomar","gondomar","gondomar",1.00,41.175149,-8.565262,41.176039217576,-8.5644543170929,120,250,60,true
+8,"Gaia","Auchan Gaia","gaia","gaia",1.00,41.141307,-8.636677,41.141194444444,-8.6380277777778,114,250,150,true
+354,"PB Póvoa de Varzim","PB Póvoa de Varzim","povoa varzim","povoa varzim",1.00,41.3780364,-8.7590951,41.377125150583,-8.7585879214611,110,150,50,true
+403,"MA Pascoal Melo","My Auchan Pascoal de Melo","pascoal melo","pascoal melo",1.00,38.731661,-9.137118,38.731529970781,-9.1383455092621,107,150,0,true
+24,"Amoreiras","Auchan Amoreiras","amoreiras","amoreiras",1.00,38.723212,-9.162244,38.722338317285,-9.1617841293019,105,239,80,true
+57,"Campera","Auchan Campera","campera","campera",1.00,39.027952,-8.967014,39.0275979883,-8.96588981152,105,250,80,true
+I163A,"Sumol A","Sumol Almeirim","sumol a","sumol almeirim",1.00,39.217559,-8.618155,39.21667,-8.61842,101,300,150,true
+23,"Portimão","Auchan Portimão","portimao","portimao",1.00,37.146539575829,-8.54242363526468,37.147256827129,-8.5430472394256,97,250,130,true
+I463,"Monte D'Alva (Ambiente)","Monte D´Alva","monte d alva ambiente","monte d alva",1.00,38.713853,-8.972435,38.71447,-8.97172,92,155,100,true
+430,"MA E Garcia Amadora","My Auchan Elias Garcia","e garcia amadora","elias garcia",0.50,38.758236,-9.234536,38.758120598887,-9.2355874343586,92,150,50,true
+B68,"Peniche","Peniche","peniche","peniche",1.00,39.35832222,-9.375027778,39.359083,-9.375361,89,170,50,true
+422,"MA R Beneficiencia","My Auchan Beneficiência","r beneficiencia","beneficiencia",1.00,38.743245,-9.1567,38.742473451512,-9.156902430515,88,150,70,true
+7001,"Armazém-Azambuja","Auchan Azambuja","armazem azambuja","azambuja",1.00,39.0427014,-8.9214547,39.043191355535,-8.9206650853157,87,150,0,false
+19,"Coina","Auchan Coina","coina","coina",1.00,38.583063,-9.043518,38.582935579721,-9.0445028042263,87,250,130,true
+161,"Neomáquinas Pombal","Neomáquinas Pombal","neomaquinas pombal","neomaquinas pombal",1.00,39.893162,-8.657837,39.893225434855,-8.6568605251313,84,300,180,true
+444,"MA C.G.Guerra (VFX)","My Auchan C.G. Guerra (VFX)","c g guerra vfx","c g guerra vfx",1.00,38.95472558,-8.98834715,38.955125772131,-8.9890960277232,79,150,50,true
+65,"Canidelo","Auchan Canidelo","canidelo","canidelo",1.00,41.131535,-8.647068,41.131944444444,-8.6463611111111,75,250,150,true
+414,"MA C Bord Pinheiro","My Auchan Bordalo Pinheiro","c bord pinheiro","bordalo pinheiro",0.50,38.738487,-9.163332,38.738515353925,-9.1641759368053,73,250,59,true
+34,"Figueira da Foz","Auchan Figueira da Foz","figueira foz","figueira foz",1.00,40.16615,-8.860315,40.166424731591,-8.861095905304,73,250,100,true
+18,"Paço de Arcos","Auchan Paço de Arcos","paco arcos","paco arcos",1.00,38.70564,-9.295018,38.705558899551,-9.2941859165668,73,250,0,true
+A136,"S.I.A.","S&A - Soc Ind Aperitivos","s i a","s a soc ind aperitivos",0.67,40.220576,-8.599602,40.21994,-8.5995,71,300,150,true
+33,"Faro","Auchan Faro","faro","faro",1.00,37.028835,-7.94471,37.029033897578,-7.9439973492092,67,150,100,true
+B67,"SU Cascais_CasalQuei","Cascais","su cascais casalquei","cascais",1.00,38.7191154882463,-9.44088528291679,38.71961,-9.44058,61,250,50,true
+10,"Viseu - Pálacio do Gelo","Auchan Viseu","viseu palacio gelo","viseu",1.00,40.643343344759,-7.9128432933843,40.643151864988,-7.9121732711792,60,250,150,true
+39,"Vila do Conde","Auchan Vila do Conde","vila conde","vila conde",1.00,41.3608024,-8.7449984,41.361114907266,-8.7444400417913,58,250,116,true
+356,"PB Santo Tirso","Preços Baixos Sto Tirso","santo tirso","precos baixos santo tirso",1.00,41.3403718,-8.4762168,41.340300746313,-8.4755425535495,57,150,50,true
+417,"MA DNAlvaresP Almada","My Auchan Almada II","dnalvaresp almada","almada ii",0.50,38.676738,-9.164291,38.677064345012,-9.1638169067112,55,167,50,true
+429,"MA A Cabete Carnide","My Auchan Adelaide Cabete","a cabete carnide","adelaide cabete",0.50,38.758095,-9.186208,38.757936162629,-9.1867295656414,49,250,67,true
+13,"Torres Vedras","Auchan Torres Vedras","torres vedras","torres vedras",1.00,39.101525,-9.25326,39.101567400204,-9.2538174249331,48,250,50,true
+C756,"Cerealis","Cerealis","cerealis","cerealis",1.00,41.201578,-8.593861,41.2015,-8.59442,48,300,110,true
+62,"Eiras","Auchan Eiras","eiras","eiras",1.00,40.254172,-8.43026,40.2537461197,-8.43031167984,48,250,150,true
+433,"MA Oscar M Torres","My Auchan Oscar Monteiro Torres","oscar m torres","oscar monteiro torres",0.67,38.743957,-9.140078,38.743602346484,-9.1403229288708,45,150,80,true
+12,"Almada","Auchan Almada","almada","almada",1.00,38.659912,-9.174984,38.659677196838,-9.1754025220871,45,150,200,true
+21,"Evora","Auchan Évora","evora","evora",1.00,38.549669,-7.90556,38.54992264113,-7.9051980285852,42,250,130,true
+168,"Preço Baixo Leça Palmeira II","Leça II","preco baixo leca palmeira ii","leca ii",1.00,41.191168,-8.701783,41.19081,-8.70192,41,300,400,true
+190,"Mercados Couto Estarreja","Mercados Couto","mercados couto estarreja","mercados couto",1.00,40.75467,-8.573739,40.754731684395,-8.5742151312828,41,300,50,true
+420,"MA JFontana Bobadela","My Auchan Bobadela","jfontana bobadela","bobadela",1.00,38.80696,-9.100687,38.806787225371,-9.1010648834324,38,150,64,true
+52,"Caldas Rainha","Auchan Caldas da Rainha","caldas rainha","caldas rainha",1.00,39.401216,-9.136873,39.400880550514,-9.1367944255935,38,250,80,true
+410,"MA Penha França","My Auchan Penha de Fança","penha franca","penha fanca",0.50,38.725068,-9.12952,38.724738231383,-9.1295285190143,37,170,64,true
+718,"AF Ariz","MAF Ariz","af ariz","maf ariz",1.00,41.1159611,-8.2164352,41.115777815551,-8.2167984545231,37,250,0,true
+7005,"Aucham Congelados","Auchan Congelados","aucham congelados","congelados",1.00,39.0426553099647,-8.92098614211129,39.042644000954,-8.920619584043,32,150,50,true
+A70,"Poveiros","Poveiros","poveiros","poveiros",1.00,41.1459851,-8.6046334,41.146188874385,-8.6043836542571,31,189,50,true
+30,"Santo Tirso","Auchan Sto Tirso","santo tirso","santo tirso",1.00,41.330678,-8.477016,41.330861111111,-8.47675,30,250,150,true
+404,"MA Duque Avila","My Auchan Duque de Ávila","duque avila","duque avila",1.00,38.735394,-9.149791,38.735134208524,-9.1498203067459,29,165,64,true
+409,"MA Almirante Reis","My Auchan Av Almirante Reis","almirante reis","av almirante reis",1.00,38.727381,-9.134754,38.727130780886,-9.1346638748341,29,150,71,true
+M036,"Sogevinus","Sogevinus","sogevinus","sogevinus",1.00,41.1316626931247,-8.61811662342474,41.13151318022,-8.6183935726601,29,300,50,true
+411,"MA M NAbreu Benfica","My Auchan Benfica","m nabreu benfica","benfica",1.00,38.747105,-9.181041,38.746855113575,-9.1810449656414,28,150,70,true
+B75,"Ericeira","Ericeira","ericeira","ericeira",1.00,38.96676111,-9.406613889,38.966712546576,-9.4069018988068,25,250,50,true
+29,"Alverca","Auchan Alverca","alverca","alverca",1.00,38.88831,-9.043897,38.8882102347,-9.04363632202,25,250,210,true
+141,"Amadora Comercio Electrónico","Comercio Electronico","amadora comercio electronico","comercio electronico",1.00,38.77677,-9.219259,38.776566121583,-9.2193792134918,25,150,351,true
+441,"MA Fabrica 1921","My Auchan Fabrica 1921","fabrica 1921","fabrica 1921",1.00,38.74968,-9.19705,38.749762258332,-9.1973111724161,24,150,50,true
+357A,"ANGELO C.BRAGA","Angelo Chaves Braga","angelo c braga","angelo chaves braga",0.67,41.1993,-8.62602,41.199179428423,-8.6262606166598,24,300,50,true
+C956,"Águas da Penacova","Águas Penacova","aguas penacova","aguas penacova",1.00,40.27902,-8.27154,40.278838372128,-8.2716781650471,23,300,56,true
+14,"Amadora","Auchan Amadora","amadora","amadora",1.00,38.77677,-9.219259,38.776963709814,-9.2192513253954,22,150,270,true
+717,"AF Mértola","AF Mértola","af mertola","af mertola",1.00,38.020406,-7.852328,38.020215673947,-7.8523062558197,21,250,144,true
+406,"MA D Monteiro Graça","My Auchan Graça","d monteiro graca","graca",1.00,38.722906,-9.132297,38.722723346306,-9.1322528723873,21,150,50,true
+730,"AF Vila Velha Rodão","AF Vila Velha de Rodão","af vila velha rodao","af vila velha rodao",1.00,39.657474,-7.67638,39.657293489152,-7.6764169890938,20,250,50,true
+17,"Guimarães","Auchan Guimarães","guimaraes","guimaraes",1.00,41.449096,-8.342499,41.448964829899,-8.3426676223543,20,250,150,true
+B82,"SU Rio Mouro_MáximoS (Paiões)","Paiões","su rio mouro maximos paioes","paioes",1.00,38.7670884614828,-9.31949248460154,38.76692,-9.31947,19,250,50,true
+739,"AF Quinta do Janeiro, Almada","AF Q.Janeiro","af quinta janeiro almada","af q janeiro",0.67,38.6652234364153,-9.15630891386632,38.66536308951,-9.1561868348604,19,150,50,true
+16,"Matosinhos","Auchan Matosinhos","matosinhos","matosinhos",1.00,41.207976,-8.687452,41.2078149862,-8.6873960495,19,250,150,true
+443,"MA C Reis (Cacilhas)","My Auchan Cacilhas (Almada)","c reis cacilhas","cacilhas almada",0.50,38.6856321,-9.1497719,38.685752383275,-9.1499175699406,18,228,50,true
+B63,"Torres Vedras P","Torres Vedras P","torres vedras p","torres vedras p",1.00,39.09564722,-9.259941667,39.09579338746,-9.26003,18,250,50,true
+451,"MA C Leitao Almada","My Auchan Capitão Leitão","c leitao almada","capitao leitao",0.50,38.679591706308,-9.1606421182113,38.679735783031,-9.1605567690966,18,150,50,true
+408,"MA C Quint Campolide","My Auchan Campolide","c quint campolide","campolide",1.00,38.726576,-9.165685,38.726499178768,-9.1655156368054,17,202,54,true
+407,"MA D PedroIV Queluz","My Auchan Queluz","d pedroiv queluz","queluz",1.00,38.7565023179609,-9.25278555694618,38.756361449292,-9.2527470183853,16,150,92,true
+460,"Tires, São D. Rana","My Auchan Tires","tires sao d rana","tires",1.00,38.711275838161,-9.33764277423444,38.711399364509,-9.3377097374344,15,150,50,true
+357C,"ANGELO C.BRAGA","Angelo Chaves Braga","angelo c braga","angelo chaves braga",0.67,38.9857447632756,-8.96636076475308,38.985626504555,-8.9662874071712,15,150,50,true
+445,"MA Conde Redondo","My Auchan Conde Redondo","conde redondo","conde redondo",1.00,38.724841753,-9.14586794,38.724850651059,-9.1460322567552,14,150,50,true
+C744,"Jacquot","Jacquot","jacquot","jacquot",1.00,38.9095692,-9.0284605,38.909515074663,-9.0283108369793,14,300,50,true
+256C,"Fayal Kompras Congelados (Bitralis STEF)","Fayal Compras - Congelados","fayal kompras congelados bitralis stef","fayal compras congelados",0.67,38.9857447632756,-8.96636076475308,38.985624419664,-8.9663678734416,13,150,50,true
+171,"Preço Baixo Póvoa Varzim","Povoa do Varzim","preco baixo povoa varzim","povoa varzim",1.00,41.38689,-8.76995,41.38678,-8.76989,13,300,400,true
+412,"MA G Vicente Almada","My Auchan Gil Vicente","g vicente almada","gil vicente",0.50,38.682266,-9.152797,38.682223215888,-9.1529303656414,13,150,50,true
+453,"MA M. Saldanha Porto","My Auchan Saldanha Porto","m saldanha porto","saldanha porto",1.00,41.1572748524422,-8.67922851920981,41.157187572144,-8.6792905877058,11,178,54,true
+462,"MA L.Graça,S.Vicente","My Auchan Largo da Graça","l graca s vicente","largo graca",0.50,38.7174873,-9.1300433,38.71748889,-9.130161111,10,150,50,true
+413,"MA Av Republica","My Auchan Av da Republica","av republica","av republica",1.00,38.739681,-9.146553,38.739621630293,-9.1466387478504,10,204,74,true
+B53,"MA SDBenfica_EBen212","Benfica","sdbenfica eben212","benfica",1.00,38.74342,-9.17512,38.743506704002,-9.1750967506687,10,232,50,true
+454,"MA AV Boavista Porto","My Auchan Avenida Boavista","av boavista porto","avenida boavista",0.50,41.1570139306721,-8.62447313191966,41.156937842799,-8.6245248891942,10,150,50,true
+351R,"Hipercais Refrigerados (Logislink)","Hipercais - Fruta e Refrigerados","hipercais refrigerados logislink","hipercais fruta e refrigerados",0.67,38.9857447632756,-8.96636076475308,38.985676541929,-8.96642688204,9,150,50,true
+351C,"Hipercais Congelados (Logislink)","Hipercais - Congelados","hipercais congelados logislink","hipercais congelados",1.00,38.9857447632756,-8.96636076475308,38.985732833931,-8.9664601641948,9,150,50,true
+436,"MA Ferreira Borges","My Auchan Ferreira Borges","ferreira borges","ferreira borges",1.00,38.71848,-9.1642,38.718496791377,-9.1641241024815,7,150,50,true
+437,"MA Pedro Nunes","My Auchan Pedro Nunes","pedro nunes","pedro nunes",1.00,38.7326954686804,-9.14817080651759,38.732640215449,-9.148141578014,7,150,50,true
+243C,"Amaral e Filhos Congelado (Bitralis STEF)","Amaral e Filhos - Congelados","amaral e filhos congelado bitralis stef","amaral e filhos congelados",0.75,39.035054,-8.969912,39.035014365117,-8.9698608219624,6,300,50,true
+27,"Setúbal","Auchan Setubal","setubal","setubal",1.00,38.537693,-8.875801,38.53770545902,-8.8757461309433,5,250,110,true
+435,"MA Jose Ricardo","My Auchan José Ricardo","jose ricardo","jose ricardo",1.00,38.734642,-9.131891,38.734637015185,-9.1319367478504,4,150,56,true
+449,"MA R Camões (Porto)","My Auchan Rua de Camões - Porto","r camoes porto","rua camoes porto",0.67,41.15285,-8.61019,41.152842800318,-8.6101619954022,2,150,50,true
+452,"MA R Venezuela Porto","My Auchan R Venezuela Porto","r venezuela porto","r venezuela porto",1.00,41.157453,-8.641853,41.157449567782,-8.6418355776112,2,250,50,true
+455,"MA D. Manuel II Maia","My Auchan Manuel II (Maia)","d manuel ii maia","manuel ii maia",1.00,41.2333660096095,-8.6206696887231,41.233357363226,-8.620679958706,1,185,50,true
