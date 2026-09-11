@@ -36,6 +36,7 @@
 import {
   codeEq,
   codeKey,
+  type CoLocatedGroups,
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
@@ -81,7 +82,7 @@ export {
   dedupeStops,
   parseServiceDay,
 };
-export type { DayStop, MergedCodeEntry, SheetRecord };
+export type { CoLocatedGroups, DayStop, MergedCodeEntry, SheetRecord };
 
 // Written into every output row so a re-uploaded (already conferido) file
 // still carries its service day unambiguously — the sheet name and file name
@@ -160,6 +161,8 @@ export type RunMatchArgs = {
   activeCodes?: readonly string[];
   /** inactive, merged location code -> canonical code (locations.merged_into_id) */
   mergedCodes?: readonly MergedCodeEntry[];
+  /** same-site co-location groups (locations.colocated_with_id) */
+  coLocatedGroups?: CoLocatedGroups;
 };
 
 export type RunMatchResult = {
@@ -555,6 +558,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
+  const coLocatedGroups = args.coLocatedGroups ?? [];
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   // Candidate pool for the plate-typo check: plates with real GPS stops today.
@@ -570,7 +574,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const works: Work[] = records.map((r, idx) => {
     const rota = String(r[cols.rotaCol] ?? "").trim();
     const rawCode = normalizeStoreCode(r[cols.codeCol]);
-    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
+    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes, coLocatedGroups);
     const designacao = cols.nomeCol
       ? String(r[cols.nomeCol] ?? "").trim()
       : "";
@@ -617,7 +621,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       planIni: ciclo.ini,
       planFim: ciclo.fim,
       rawCiclo,
-      groupKey: `${rota} ${codeKey(code)}`,
+      groupKey: `${rota} ${codeKey(code, coLocatedGroups)}`,
       conf: kept ? KEPT : "",
       real: "",
       placeholderNote,
@@ -751,7 +755,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       const hit = plateStops.find(
         (s) =>
           !s.assigned &&
-          codeEq(s.code, g.code) &&
+          codeEq(s.code, g.code, coLocatedGroups) &&
           stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
       );
       if (hit) {
@@ -813,6 +817,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           routeStores: routeStoresByRota.get(g.rota) ?? [],
           stops,
           candidatePlates: platesWithDayStops,
+          coLocatedGroups,
         });
         if (
           typo &&
@@ -847,6 +852,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       rivals: rivalRows.filter((r) => r.label !== `rota ${g.rota}`),
       platesWithGps,
       plannedPlateGpsSpan: pingWindowByPlate.get(g.plate) ?? null,
+      coLocatedGroups,
     });
     if (!sw) continue;
 

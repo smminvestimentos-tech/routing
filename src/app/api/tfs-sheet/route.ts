@@ -5,6 +5,7 @@ import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
+import { coLocatedGroupsFromLocations } from "@/lib/sheet-match/common";
 import {
   collectServiceDay,
   dedupeStops,
@@ -154,9 +155,10 @@ export async function POST(request: NextRequest) {
     // Every plate our GPS feed has ever seen (one row per vehicle). Used by the
     // swap-suggestion logic to tell a real rival vehicle from a GPS-less ghost.
     supabase.from("latest_vehicle_plate").select("plate"),
-    // Every location's code/active/merged_into_id — resolves a sheet code that
-    // still names a merged-away location (0019, 0030) to its canonical code.
-    supabase.from("locations").select("id, code, active, merged_into_id"),
+    // Every location's code/active/merged_into_id/colocated_with_id — resolves
+    // a sheet code that still names a merged-away location (0019, 0030) to its
+    // canonical code, and feeds the same-site co-location groups (0034).
+    supabase.from("locations").select("id, code, active, merged_into_id, colocated_with_id"),
   ]);
 
   if (stopsRes.error) {
@@ -246,6 +248,11 @@ export async function POST(request: NextRequest) {
   // behaviour) if the query failed, same stance as platesWithGps above.
   const activeCodes: string[] = [];
   const mergedCodes: MergedCodeEntry[] = [];
+  // Same-site co-location groups (0034) — degrades to [] (today's behaviour)
+  // if the query failed, same stance as activeCodes/mergedCodes above.
+  const coLocatedGroups = locationsRes.error
+    ? []
+    : coLocatedGroupsFromLocations(locationsRes.data ?? []);
   if (!locationsRes.error) {
     const codeById = new Map<string, string>();
     for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
@@ -270,6 +277,7 @@ export async function POST(request: NextRequest) {
     pingWindowByPlate,
     activeCodes,
     mergedCodes,
+    coLocatedGroups,
   });
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"

@@ -124,17 +124,44 @@ export function normalizeStoreCode(v: unknown): string {
 }
 
 // Co-located / same-site equivalence groups.
-// Physical sites that house multiple logical locations / codes (e.g. store + warehouse
-// sharing the same address/coordinates, or legacy codes used in planning sheets).
-// Any code in a group is considered an exact same-site match for any other code in the group.
+// Physical sites that house multiple logical, INDEPENDENT, active locations
+// (e.g. a store + its attached cross-dock platform, close enough that GPS
+// proximity stop-detection can't reliably tell them apart). Any code in a
+// group is considered an exact same-site match for any other code in the
+// group. Unlike a merge (locations.merged_into_id), no location here is
+// deactivated or absorbed — both keep their own identity; only matching
+// treats them as interchangeable.
 //
-// Group 1 — Albufeira:
-//   - 'B78': Loja Albufeira (GPS proximity stop detection tags visits under this code)
-//   - 'AUCHAN-06': Armazém Albufeira / Plataforma Albufeira (same physical site & coords)
-//   - '94': Legacy code for Armazém Albufeira still used in transport planning sheets
-export const SAME_SITE_GROUPS: ReadonlyArray<ReadonlySet<string>> = [
-  new Set(["B78", "94", "AUCHAN-06"]),
-];
+// Sourced from locations.colocated_with_id (see migration 0034) — configurable
+// from /dashboard/locations, not a code deploy. Built once per request by the
+// API route (see coLocatedGroupsFromLocations in each route.ts) and threaded
+// through runMatch. Empty groups list = no co-location active (e.g. in a test
+// that doesn't care).
+export type CoLocatedGroups = ReadonlyArray<ReadonlySet<string>>;
+
+// Builds CoLocatedGroups from the `locations` table's own
+// (id, code, colocated_with_id) rows — one hop only, star topology (see
+// migration 0034): a location's group is itself + whatever hub it points to
+// (colocated_with_id) + every other location pointing at that same hub. A row
+// with no colocated_with_id and nothing pointing at it forms no group at all
+// (dropped — codeEq/codeKey treat "no group" the same as "group of one").
+// Shared by both /api/tfs-sheet and /api/azambuja-sheet so the two routes
+// can't drift on how they read the same column.
+export function coLocatedGroupsFromLocations(
+  rows: readonly { id: string; code: string; colocated_with_id: string | null }[],
+): CoLocatedGroups {
+  const byId = new Map(rows.map((l) => [l.id, l]));
+  const membersByHub = new Map<string, Set<string>>();
+  for (const l of rows) {
+    const hubId = l.colocated_with_id ?? l.id;
+    const hub = byId.get(hubId);
+    if (!hub) continue; // dangling FK — ignore defensively
+    let set = membersByHub.get(hubId);
+    if (!set) membersByHub.set(hubId, (set = new Set([hub.code])));
+    set.add(l.code);
+  }
+  return [...membersByHub.values()].filter((s) => s.size > 1);
+}
 
 // Check whether code a and code b are equal under standard base rules:
 // - case-insensitive
@@ -163,10 +190,11 @@ export function codeBaseEq(
 
 export function findSameSiteGroup(
   code: string | null | undefined,
+  groups: CoLocatedGroups,
 ): ReadonlySet<string> | null {
   if (!code) return null;
   const s = normalizeStoreCode(code).toUpperCase();
-  for (const group of SAME_SITE_GROUPS) {
+  for (const group of groups) {
     for (const member of group) {
       if (codeBaseEq(member, s)) return group;
     }
@@ -177,9 +205,10 @@ export function findSameSiteGroup(
 export function areSameSite(
   a: string | null | undefined,
   b: string | null | undefined,
+  groups: CoLocatedGroups,
 ): boolean {
   if (!a || !b) return false;
-  const groupA = findSameSiteGroup(a);
+  const groupA = findSameSiteGroup(a, groups);
   if (!groupA) return false;
   const sB = normalizeStoreCode(b).toUpperCase();
   for (const member of groupA) {
@@ -188,21 +217,29 @@ export function areSameSite(
   return false;
 }
 
-export function canonicalSiteCode(code: string | null | undefined): string {
+export function canonicalSiteCode(
+  code: string | null | undefined,
+  groups: CoLocatedGroups,
+): string {
   if (!code) return "";
   const norm = normalizeStoreCode(code);
-  const group = findSameSiteGroup(norm);
+  const group = findSameSiteGroup(norm, groups);
   if (group) {
-    // Return the primary/first representative of the group (e.g. "B78" for Albufeira)
+    // Return the primary/first representative of the group (its hub — see
+    // coLocatedGroupsFromLocations, which always inserts the hub's own code
+    // first into the Set).
     return [...group][0];
   }
   return norm;
 }
 
-// Store code equality with same-site / co-location support.
+// Store code equality with same-site / co-location support. `groups` comes
+// from the DB (locations.colocated_with_id) via coLocatedGroupsFromLocations
+// — pass [] where co-location doesn't apply (e.g. a test that doesn't care).
 export function codeEq(
   a: string | null | undefined,
   b: string | null | undefined,
+  groups: CoLocatedGroups,
 ): boolean {
   if (a == null || b == null) return false;
   const x = normalizeStoreCode(a).toUpperCase();
@@ -210,16 +247,16 @@ export function codeEq(
   if (!x || !y) return false;
   if (x === y) return true;
 
-  // 1. Same-site co-location group match (e.g. B78 <=> 94 <=> AUCHAN-06)
-  if (areSameSite(x, y)) return true;
+  // 1. Same-site co-location group match (e.g. store <=> its platform)
+  if (areSameSite(x, y, groups)) return true;
 
   // 2. Base code equality (same prefix + digits, or composite code segment)
   return codeBaseEq(x, y);
 }
 
-export function codeKey(code: string): string {
+export function codeKey(code: string, groups: CoLocatedGroups): string {
   const norm = normalizeStoreCode(code);
-  const canonical = canonicalSiteCode(norm);
+  const canonical = canonicalSiteCode(norm, groups);
   const k = canonical.trim().replace(/^0+(?=.)/, "").toLowerCase();
   return k || "(sem código)";
 }
@@ -239,6 +276,7 @@ export function resolveMergedCode(
   raw: unknown,
   activeCodes: readonly string[],
   merged: readonly MergedCodeEntry[],
+  groups: CoLocatedGroups,
 ): string {
   const norm = normalizeStoreCode(raw);
   if (!norm) return norm;
@@ -248,7 +286,7 @@ export function resolveMergedCode(
   if (activeCodes.some((c) => codeBaseEq(c, norm))) return norm;
 
   // Check merged/alias list (handles string/int and codeBaseEq)
-  const hit = merged.find((m) => codeBaseEq(m.code, norm) || codeEq(m.code, norm));
+  const hit = merged.find((m) => codeBaseEq(m.code, norm) || codeEq(m.code, norm, groups));
   return hit ? hit.canonicalCode : norm;
 }
 
@@ -598,6 +636,8 @@ export function findVehicleSwap(params: {
    */
   plannedPlateGpsSpan: { min: number; max: number } | null;
   padMin?: number;
+  /** same-site co-location groups (locations.colocated_with_id); [] if none */
+  coLocatedGroups: CoLocatedGroups;
 }): SwapResult | SwapNoCoverage | null {
   const {
     plate,
@@ -608,6 +648,7 @@ export function findVehicleSwap(params: {
     rivals,
     platesWithGps,
     plannedPlateGpsSpan,
+    coLocatedGroups,
   } = params;
   const padMin = params.padMin ?? SWAP_WINDOW_PAD_MIN;
   const win = widenWindow(planIni, planFim, padMin);
@@ -618,7 +659,7 @@ export function findVehicleSwap(params: {
       !s.assigned &&
       s.plate != null &&
       s.plate !== plate &&
-      codeEq(s.code, code) &&
+      codeEq(s.code, code, coLocatedGroups) &&
       inWindow(arrivalMin(s), win),
   );
 
@@ -634,7 +675,7 @@ export function findVehicleSwap(params: {
         !s.assigned &&
         s.plate != null &&
         s.plate !== plate &&
-        codeEq(s.code, code),
+        codeEq(s.code, code, coLocatedGroups),
     );
     if (anyTime.length === 0) return null;
     candidates = anyTime;
@@ -670,7 +711,7 @@ export function findVehicleSwap(params: {
   const rivalMatches = rivals.filter(
     (c) =>
       !!c.code &&
-      codeEq(c.code, code) &&
+      codeEq(c.code, code, coLocatedGroups) &&
       windowsOverlap(win, widenWindow(c.planIni, c.planFim, padMin)),
   );
   // real competition = a rival whose resolved plate is a GPS-tracked vehicle
@@ -810,9 +851,19 @@ export function findPlateTypo(params: {
   candidatePlates: Set<string>;
   padMin?: number;
   minRun?: number;
+  /** same-site co-location groups (locations.colocated_with_id); [] if none */
+  coLocatedGroups: CoLocatedGroups;
 }): PlateTypoResult | null {
-  const { plate, code, planIni, planFim, routeStores, stops, candidatePlates } =
-    params;
+  const {
+    plate,
+    code,
+    planIni,
+    planFim,
+    routeStores,
+    stops,
+    candidatePlates,
+    coLocatedGroups,
+  } = params;
   const padMin = params.padMin ?? SWAP_WINDOW_PAD_MIN;
   const minRun = params.minRun ?? PLATE_TYPO_MIN_RUN;
 
@@ -844,7 +895,7 @@ export function findPlateTypo(params: {
     const hit = suggStops.find(
       (s) =>
         !used.has(s) &&
-        codeEq(s.code, rs.code) &&
+        codeEq(s.code, rs.code, coLocatedGroups) &&
         inWindow(arrivalMin(s), win) &&
         new Date(s.arrivedAt).getTime() >= cursorT,
     );
@@ -862,7 +913,7 @@ export function findPlateTypo(params: {
   // This row's own store must be corroborated too, so the row gets real times.
   const win = widenWindow(planIni, planFim, padMin);
   const suggStop = suggStops.find(
-    (s) => codeEq(s.code, code) && inWindow(arrivalMin(s), win),
+    (s) => codeEq(s.code, code, coLocatedGroups) && inWindow(arrivalMin(s), win),
   );
   if (!suggStop) return null;
 

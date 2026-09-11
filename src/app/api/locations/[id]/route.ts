@@ -6,7 +6,7 @@ import { validateLocationInput } from "@/lib/locations/validate";
 export const dynamic = "force-dynamic";
 
 const COLUMNS =
-  "id, code, arp2_code, name, type, address, locality, time_window, latitude, longitude, radius_meters, updated_at";
+  "id, code, arp2_code, name, type, address, locality, time_window, latitude, longitude, radius_meters, colocated_with_id, updated_at";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -29,6 +29,18 @@ export async function PATCH(
   if (!parsed.ok) {
     return NextResponse.json(
       { error: parsed.errors[0].message, errors: parsed.errors },
+      { status: 422 },
+    );
+  }
+
+  if (parsed.value.colocated_with_id === id) {
+    return NextResponse.json(
+      {
+        error: "Uma location não pode partilhar local físico consigo própria.",
+        errors: [
+          { field: "colocated_with_id", message: "Não pode ser a própria location." },
+        ],
+      },
       { status: 422 },
     );
   }

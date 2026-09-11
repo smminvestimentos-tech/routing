@@ -39,6 +39,7 @@ export type Location = {
   longitude: number | null;
   radius_meters: number;
   active: boolean;
+  colocated_with_id: string | null;
   updated_at: string;
 };
 
@@ -156,6 +157,8 @@ type FormState = {
   latitude: string;
   longitude: string;
   radius_meters: string;
+  /** location id, or "" for none */
+  colocated_with_id: string;
 };
 
 function toForm(l: Location | null): FormState {
@@ -170,6 +173,7 @@ function toForm(l: Location | null): FormState {
     latitude: l?.latitude != null ? String(l.latitude) : "",
     longitude: l?.longitude != null ? String(l.longitude) : "",
     radius_meters: l?.radius_meters != null ? String(l.radius_meters) : "150",
+    colocated_with_id: l?.colocated_with_id ?? "",
   };
 }
 
@@ -211,16 +215,35 @@ type PanelMode = { kind: "edit"; location: Location } | { kind: "create" };
 
 function LocationPanel({
   mode,
+  allLocations,
   onClose,
   onSaved,
 }: {
   mode: PanelMode;
+  /** every location, for the "partilha local físico com" selector + reverse lookup */
+  allLocations: Location[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const isEdit = mode.kind === "edit";
   const [form, setForm] = useState<FormState>(() =>
     toForm(mode.kind === "edit" ? mode.location : null),
+  );
+
+  // Other locations this one can point to — everything except itself.
+  const selfId = isEdit ? mode.location.id : null;
+  const colocateOptions = useMemo(
+    () =>
+      allLocations
+        .filter((l) => l.id !== selfId)
+        .sort((a, b) => a.code.localeCompare(b.code)),
+    [allLocations, selfId],
+  );
+  // The reverse direction: locations that point AT this one (read-only — set
+  // from the OTHER location's own panel, mirroring how merged_into_id works).
+  const colocatedByOthers = useMemo(
+    () => (selfId ? allLocations.filter((l) => l.colocated_with_id === selfId) : []),
+    [allLocations, selfId],
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -422,6 +445,31 @@ function LocationPanel({
             />
           </Field>
 
+          <Field
+            label="Partilha local físico com"
+            error={errors.colocated_with_id}
+            hint="Ex. uma loja e a plataforma de cross-docking anexa — ambas ficam ativas; para deteção de paragens, uma visita a qualquer uma das duas conta para ambas."
+          >
+            <select
+              className={inputClass}
+              value={form.colocated_with_id}
+              onChange={set("colocated_with_id")}
+            >
+              <option value="">(nenhuma)</option>
+              {colocateOptions.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.code} — {l.name ?? "(sem nome)"}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {colocatedByOthers.length > 0 && (
+            <p className="-mt-2 text-xs text-black/40 dark:text-white/40">
+              Também partilham este local:{" "}
+              {colocatedByOthers.map((l) => `${l.code}${l.name ? ` (${l.name})` : ""}`).join(", ")}
+            </p>
+          )}
+
           <div className="mt-2 flex items-center gap-3">
             <button
               type="submit"
@@ -568,6 +616,7 @@ export function LocationsClient({
         <LocationPanel
           key={panel.kind === "edit" ? panel.location.id : "create"}
           mode={panel}
+          allLocations={locations}
           onClose={() => setPanel(null)}
           onSaved={() => {
             setPanel(null);

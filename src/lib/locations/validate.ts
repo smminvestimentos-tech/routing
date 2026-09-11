@@ -34,6 +34,11 @@ export type LocationInput = {
   latitude: number | null;
   longitude: number | null;
   radius_meters: number;
+  // Nullable FK to locations.id — "this location shares its physical site
+  // with that other one" (a store + its attached platform, say), for
+  // stop-detection matching only. Unlike merged_into_id, both locations stay
+  // active and independent (see migration 0034).
+  colocated_with_id: string | null;
 };
 
 export type FieldError = { field: string; message: string };
@@ -129,6 +134,11 @@ export function validateLocationInput(raw: unknown): ValidationResult {
     }
   }
 
+  // colocated_with_id — optional, a location id (uuid). Self-reference and
+  // existence are checked server-side (needs the DB / the record's own id,
+  // which this pure function doesn't have).
+  const colocated_with_id = asTrimmedOrNull(body.colocated_with_id);
+
   if (errors.length > 0) return { ok: false, errors };
 
   return {
@@ -144,6 +154,7 @@ export function validateLocationInput(raw: unknown): ValidationResult {
       latitude: latitude ?? null,
       longitude: longitude ?? null,
       radius_meters,
+      colocated_with_id,
     },
   };
 }

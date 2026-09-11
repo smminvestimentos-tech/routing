@@ -27,6 +27,7 @@ import {
 import {
   codeEq,
   codeKey,
+  type CoLocatedGroups,
   findPlateTypo,
   isEditDistance1,
   resolveMergedCode,
@@ -204,6 +205,7 @@ ok(
     routeStores,
     stops: wstops,
     candidatePlates: new Set(["32OG64"]),
+    coLocatedGroups: [],
   });
   ok("findPlateTypo: suggests 32OG64, run 3", t?.suggPlate === "32OG64" && t?.run === 3, t);
 
@@ -215,6 +217,7 @@ ok(
     routeStores: [routeStores[0]], // single-store route can't corroborate
     stops: wstops,
     candidatePlates: new Set(["32OG64"]),
+    coLocatedGroups: [],
   });
   ok("findPlateTypo: single-store route -> null", none === null, none);
 }
@@ -400,23 +403,23 @@ ok(
   ];
   ok(
     "resolveMergedCode: merged code -> canonical",
-    resolveMergedCode("AUCHAN-4", activeCodes, merged) === "206",
+    resolveMergedCode("AUCHAN-4", activeCodes, merged, []) === "206",
   );
   ok(
     "resolveMergedCode: another merged code, same canonical",
-    resolveMergedCode("7092", activeCodes, merged) === "206",
+    resolveMergedCode("7092", activeCodes, merged, []) === "206",
   );
   ok(
     "resolveMergedCode: already-active code -> unchanged",
-    resolveMergedCode("206", activeCodes, merged) === "206",
+    resolveMergedCode("206", activeCodes, merged, []) === "206",
   );
   ok(
     "resolveMergedCode: unknown code -> unchanged",
-    resolveMergedCode("Z999", activeCodes, merged) === "Z999",
+    resolveMergedCode("Z999", activeCodes, merged, []) === "Z999",
   );
   ok(
     "resolveMergedCode: empty -> unchanged",
-    resolveMergedCode("", activeCodes, merged) === "",
+    resolveMergedCode("", activeCodes, merged, []) === "",
   );
 }
 
@@ -476,24 +479,34 @@ ok(
 }
 
 // ---------------------------------------------------------------------------
-// Albufeira same-site co-location (B78 <=> 94 <=> AUCHAN-06)
+// Same-site co-location (locations.colocated_with_id, migration 0034) —
+// Albufeira's B78 <=> 94 <=> AUCHAN-06 group, built the way the API routes
+// build it from the DB (coLocatedGroupsFromLocations), not a code constant.
 // ---------------------------------------------------------------------------
 {
+  // Mirrors migration 0034's backfill: AUCHAN-06 is the hub, B78 and 94 both
+  // point their colocated_with_id at it.
+  const albufeiraGroups: CoLocatedGroups = [new Set(["AUCHAN-06", "B78", "94"])];
+
   // 1. codeEq bidirectional equivalence
-  ok("Albufeira same-site: '94' == 'B78'", codeEq("94", "B78"));
-  ok("Albufeira same-site: 'B78' == '94'", codeEq("B78", "94"));
-  ok("Albufeira same-site: 'AUCHAN-06' == 'B78'", codeEq("AUCHAN-06", "B78"));
-  ok("Albufeira same-site: 'B78' == 'AUCHAN-06'", codeEq("B78", "AUCHAN-06"));
-  ok("Albufeira same-site: '94' == 'AUCHAN-06'", codeEq("94", "AUCHAN-06"));
-  ok("Albufeira same-site: 'AUCHAN-06' == '94'", codeEq("AUCHAN-06", "94"));
-  ok("Albufeira same-site: number 94 == 'B78'", codeEq(94 as unknown as string, "B78"));
-  ok("Albufeira same-site: '094' == 'B78'", codeEq("094", "B78"));
-  ok("Albufeira same-site: '94.0' == 'B78'", codeEq("94.0", "B78"));
-  ok("Albufeira same-site: ' 94 ' == 'B78'", codeEq(" 94 ", "B78"));
+  ok("Albufeira same-site: '94' == 'B78'", codeEq("94", "B78", albufeiraGroups));
+  ok("Albufeira same-site: 'B78' == '94'", codeEq("B78", "94", albufeiraGroups));
+  ok("Albufeira same-site: 'AUCHAN-06' == 'B78'", codeEq("AUCHAN-06", "B78", albufeiraGroups));
+  ok("Albufeira same-site: 'B78' == 'AUCHAN-06'", codeEq("B78", "AUCHAN-06", albufeiraGroups));
+  ok("Albufeira same-site: '94' == 'AUCHAN-06'", codeEq("94", "AUCHAN-06", albufeiraGroups));
+  ok("Albufeira same-site: 'AUCHAN-06' == '94'", codeEq("AUCHAN-06", "94", albufeiraGroups));
+  ok("Albufeira same-site: number 94 == 'B78'", codeEq(94 as unknown as string, "B78", albufeiraGroups));
+  ok("Albufeira same-site: '094' == 'B78'", codeEq("094", "B78", albufeiraGroups));
+  ok("Albufeira same-site: '94.0' == 'B78'", codeEq("94.0", "B78", albufeiraGroups));
+  ok("Albufeira same-site: ' 94 ' == 'B78'", codeEq(" 94 ", "B78", albufeiraGroups));
+  ok("No co-location groups -> '94' != 'B78'", !codeEq("94", "B78", []));
 
   // 2. codeKey canonical site key
-  ok("Albufeira codeKey: '94' == 'B78'", codeKey("94") === codeKey("B78"));
-  ok("Albufeira codeKey: 'AUCHAN-06' == 'B78'", codeKey("AUCHAN-06") === codeKey("B78"));
+  ok("Albufeira codeKey: '94' == 'B78'", codeKey("94", albufeiraGroups) === codeKey("B78", albufeiraGroups));
+  ok(
+    "Albufeira codeKey: 'AUCHAN-06' == 'B78'",
+    codeKey("AUCHAN-06", albufeiraGroups) === codeKey("B78", albufeiraGroups),
+  );
 
   // 3. resolveMergedCode with active/merged list
   const activeList = ["B78", "AUCHAN-06", "01", "206"];
@@ -503,19 +516,19 @@ ok(
   ];
   ok(
     "resolveMergedCode: '94' (string) resolves to AUCHAN-06",
-    resolveMergedCode("94", activeList, mergedList) === "AUCHAN-06",
+    resolveMergedCode("94", activeList, mergedList, albufeiraGroups) === "AUCHAN-06",
   );
   ok(
     "resolveMergedCode: 94 (number) resolves to AUCHAN-06",
-    resolveMergedCode(94, activeList, mergedList) === "AUCHAN-06",
+    resolveMergedCode(94, activeList, mergedList, albufeiraGroups) === "AUCHAN-06",
   );
   ok(
     "resolveMergedCode: 'B78' stays B78 (active)",
-    resolveMergedCode("B78", activeList, mergedList) === "B78",
+    resolveMergedCode("B78", activeList, mergedList, albufeiraGroups) === "B78",
   );
   ok(
     "resolveMergedCode: 'AUCHAN-06' stays AUCHAN-06 (active)",
-    resolveMergedCode("AUCHAN-06", activeList, mergedList) === "AUCHAN-06",
+    resolveMergedCode("AUCHAN-06", activeList, mergedList, albufeiraGroups) === "AUCHAN-06",
   );
 
   // 4. End-to-end TFS matching: planned 94, GPS detected as B78 (caminhão 280)
@@ -555,6 +568,7 @@ ok(
     pingWindowByPlate: new Map([["28RN74", { min: Date.parse(iso("01:00")), max: Date.parse(iso("10:00")) }]]),
     activeCodes: activeList,
     mergedCodes: mergedList,
+    coLocatedGroups: albufeiraGroups,
   });
 
   ok("TFS 280: summary.ok === 1", tfs280Res.summary.ok === 1, tfs280Res.summary);
@@ -600,6 +614,7 @@ ok(
     pingWindowByPlate: new Map([["28RN75", { min: Date.parse(iso("05:00")), max: Date.parse(iso("12:00")) }]]),
     activeCodes: activeList,
     mergedCodes: mergedList,
+    coLocatedGroups: albufeiraGroups,
   });
 
   ok("TFS 285 (int 94): summary.ok === 1", tfs285Res.summary.ok === 1, tfs285Res.summary);
@@ -644,10 +659,117 @@ ok(
     pingWindowByPlate: new Map([["28RN74", { min: Date.parse(iso("01:00")), max: Date.parse(iso("10:00")) }]]),
     activeCodes: activeList,
     mergedCodes: mergedList,
+    coLocatedGroups: albufeiraGroups,
   });
   ok("TFS reverse (planned B78, GPS AUCHAN-06): summary.ok === 1", tfsRevRes.summary.ok === 1);
   ok("TFS reverse: row Confiança === OK", tfsRevRes.rows[0]["Confiança"] === "OK");
   ok("TFS reverse: row Chegada === '02:48'", tfsRevRes.rows[0]["Hora de Chegada"] === "02:48");
+}
+
+// ---------------------------------------------------------------------------
+// Almada (12 <=> 7030) — new colocated_with_id case (migration 0034). The
+// sheet's own store-code cell must NEVER change to the other member of the
+// group: matching accepts either code's stops, but the row keeps saying
+// exactly what it said on input.
+// ---------------------------------------------------------------------------
+{
+  const almadaGroups: CoLocatedGroups = [new Set(["12", "7030"])];
+
+  // TFS: row planned as loja '12', but the real GPS stop got location-matched
+  // to '7030' (Plataforma Almada) — the exact AT-45-AC pattern investigated
+  // 2026-09-11.
+  const tfsAlmadaRows: SheetRecord[] = [
+    {
+      "Dia do Serviço": day,
+      "Nº Camião": "927",
+      "Matrícula da Viatura": "AT-45-AC",
+      "Ordem de Entrega": "1",
+      "Código de Loja": "12",
+      "Designação da Loja": "Almada",
+      "Janela Início": "06:00",
+      "Janela Fim": "08:00",
+      "Hora de Chegada": "",
+      "Hora de Saída": "",
+      ID: "",
+    },
+  ];
+  const tfsAlmadaStops: DayStop[] = [
+    { id: "alm-1", vehicleId: 927, plate: "AT45AC", code: "7030", arrivedAt: iso("06:29"), departedAt: iso("06:49") },
+  ];
+  const tfsAlmadaArgs = {
+    day,
+    records: tfsAlmadaRows,
+    header: tfsHeader,
+    cols: tfsCols,
+    stops: tfsAlmadaStops,
+    fleetByTruck: new Map(),
+    platesWithGps: new Set(["AT45AC"]),
+    pingWindowByPlate: new Map([["AT45AC", { min: Date.parse(iso("05:00")), max: Date.parse(iso("10:00")) }]]),
+  };
+
+  const withoutColocation = runTfsMatch(tfsAlmadaArgs);
+  ok(
+    "Almada TFS: WITHOUT colocated group -> does not match (12 != 7030)",
+    withoutColocation.summary.ok === 0,
+    withoutColocation.summary,
+  );
+
+  const withColocation = runTfsMatch({ ...tfsAlmadaArgs, coLocatedGroups: almadaGroups });
+  ok("Almada TFS: WITH colocated group -> matches OK", withColocation.summary.ok === 1, withColocation.summary);
+  ok(
+    "Almada TFS: 'Código de Loja' cell stays '12' (never rewritten to 7030)",
+    withColocation.rows[0]["Código de Loja"] === "12",
+    withColocation.rows[0]["Código de Loja"],
+  );
+  ok(
+    "Almada TFS: times come from the real (7030) stop",
+    withColocation.rows[0]["Hora de Chegada"] === "06:29" && withColocation.rows[0]["Hora de Saída"] === "06:49",
+    withColocation.rows[0],
+  );
+
+  // Azambuja: same shape, the other direction — planned N_LOJA '7030', real
+  // stop matched to '12'.
+  const azAlmadaHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azAlmadaRecords: SheetRecord[] = [
+    {
+      ROTA: "R9",
+      N_LOJA: "7030",
+      NOME: "Plataforma Almada",
+      MATRICULA: "AT-45-AC",
+      "Hora Chegada": "",
+      "Hora Saida": "",
+      CICLO: "06:00 | 08:00",
+      TIPO: "C",
+    },
+  ];
+  const azAlmadaCols = resolveAzColumns(azAlmadaHeader);
+  const azAlmadaStops: DayStop[] = [
+    { id: "alm-2", vehicleId: 927, plate: "AT45AC", code: "12", arrivedAt: iso("06:29"), departedAt: iso("06:49") },
+  ];
+  const azAlmadaArgs = {
+    day,
+    records: azAlmadaRecords,
+    header: azAlmadaHeader,
+    cols: azAlmadaCols,
+    stops: azAlmadaStops,
+    platesWithGps: new Set(["AT45AC"]),
+    pingWindowByPlate: new Map([["AT45AC", { min: Date.parse(iso("05:00")), max: Date.parse(iso("10:00")) }]]),
+  };
+
+  const azWithout = runAzMatch(azAlmadaArgs);
+  ok(
+    "Almada Azambuja: WITHOUT colocated group -> does not match",
+    azWithout.summary.ok === 0,
+    azWithout.summary,
+  );
+
+  const azWith = runAzMatch({ ...azAlmadaArgs, coLocatedGroups: almadaGroups });
+  ok("Almada Azambuja: WITH colocated group -> matches OK", azWith.summary.ok === 1, azWith.summary);
+  ok(
+    "Almada Azambuja: 'N_LOJA' cell stays '7030' (never rewritten to 12)",
+    azWith.rows[0]["N_LOJA"] === "7030",
+    azWith.rows[0]["N_LOJA"],
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

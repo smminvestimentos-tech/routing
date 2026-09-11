@@ -35,6 +35,7 @@
 import {
   codeEq,
   codeKey,
+  type CoLocatedGroups,
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
@@ -81,7 +82,7 @@ export {
   parseClockMin,
   parseServiceDay,
 };
-export type { DayStop, MergedCodeEntry, SheetRecord };
+export type { CoLocatedGroups, DayStop, MergedCodeEntry, SheetRecord };
 
 // The columns the TFS sheet is expected to carry, in its own order. Shown in
 // the UI as a reference; matching itself is accent/spacing tolerant.
@@ -162,6 +163,8 @@ export type RunMatchArgs = {
   activeCodes?: readonly string[];
   /** inactive, merged location code -> canonical code (locations.merged_into_id) */
   mergedCodes?: readonly MergedCodeEntry[];
+  /** same-site co-location groups (locations.colocated_with_id) */
+  coLocatedGroups?: CoLocatedGroups;
 };
 
 export type RunMatchResult = {
@@ -383,6 +386,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
+  const coLocatedGroups = args.coLocatedGroups ?? [];
   const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
 
   const outHeader = [...header];
@@ -399,7 +403,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       ? String(r[cols.truckCol] ?? "").trim()
       : "";
     const rawCode = normalizeStoreCode(r[cols.codeCol]);
-    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
+    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes, coLocatedGroups);
     const designacao = cols.designacaoCol
       ? String(r[cols.designacaoCol] ?? "").trim()
       : "";
@@ -512,7 +516,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     const byCode = new Map<string, Work[]>();
     for (const w of groupWorks) {
-      const k = codeKey(w.code);
+      const k = codeKey(w.code, coLocatedGroups);
       const arr = byCode.get(k);
       if (arr) arr.push(w);
       else byCode.set(k, [w]);
@@ -522,7 +526,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       const rowsG = [...gw].sort((a, b) => a.ordem - b.ordem || a.idx - b.idx);
       const code = rowsG[0].code;
       const stopsG = stops
-        .filter((s) => !s.assigned && s.plate === plate && codeEq(s.code, code))
+        .filter((s) => !s.assigned && s.plate === plate && codeEq(s.code, code, coLocatedGroups))
         .sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
       const clean = stopsG.length > 0 && stopsG.length === rowsG.length;
 
@@ -635,6 +639,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           routeStores: routeStoresByTruck.get(w.rawTruck) ?? [],
           stops,
           candidatePlates: platesWithDayStops,
+          coLocatedGroups,
         });
         if (typo) {
           w.conf = PLATE_TYPO;
@@ -679,6 +684,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       rivals,
       platesWithGps,
       plannedPlateGpsSpan: pingWindowByPlate.get(w.plate) ?? null,
+      coLocatedGroups,
     });
     if (!sw) continue;
 
