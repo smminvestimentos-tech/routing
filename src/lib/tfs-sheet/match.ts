@@ -42,7 +42,9 @@ import {
   findVehicleSwap,
   fmtDuration,
   fmtHM,
+  implausibleKeptNote,
   KEPT,
+  minutesBetweenTimeCells,
   noGpsCoverageNote,
   normalizePlate,
   normalizeStoreCode,
@@ -371,6 +373,8 @@ type Work = {
     | typeof SWAP_OUT_OF_WINDOW
     | typeof PLATE_TYPO;
   real: string;
+  /** set when input Chegada/Saída were rejected as an implausible pre-fill */
+  placeholderNote: string;
   assignedStop: WStop | null;
 };
 
@@ -437,12 +441,23 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       : "";
     const ordem = ordemDigits ? Number(ordemDigits) : idx + 1;
 
-    // Row already carries BOTH times in the uploaded file -> it was resolved
-    // elsewhere; keep it verbatim and skip every downstream step.
-    const kept =
-      !empty &&
-      String(r[cols.chegadaCol] ?? "").trim() !== "" &&
-      String(r[cols.saidaCol] ?? "").trim() !== "";
+    // Row already carries BOTH times in the uploaded file -> normally it was
+    // resolved elsewhere, so keep it verbatim and skip every downstream step.
+    // BUT a same-value (or reversed) Chegada/Saída is never a real visit —
+    // our own GPS-derived stops never close in zero minutes (fleet-wide
+    // audit, 2026-09) — so that shape is almost certainly the transporter's
+    // planning system pre-filling both cells with a placeholder for a store
+    // that hasn't actually been delivered yet. Treat it as NOT kept: fall
+    // through to normal matching against our real stops, same as a blank row.
+    const rawChegada = String(r[cols.chegadaCol] ?? "").trim();
+    const rawSaida = String(r[cols.saidaCol] ?? "").trim();
+    const bothFilled = !empty && rawChegada !== "" && rawSaida !== "";
+    const durMin = bothFilled ? minutesBetweenTimeCells(rawChegada, rawSaida) : null;
+    const implausible = bothFilled && durMin != null && durMin <= 0;
+    const kept = bothFilled && !implausible;
+    const placeholderNote = implausible
+      ? implausibleKeptNote(rawChegada, rawSaida)
+      : "";
 
     return {
       idx,
@@ -467,6 +482,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       swapPlate: null,
       conf: kept ? KEPT : "",
       real: "",
+      placeholderNote,
       assignedStop: null,
     };
   });
@@ -763,12 +779,27 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         ? w.swapPlate
         : w.plate;
     if (cols.plateCol && plateOut) w.out[cols.plateCol] = plateOut;
+    // Always (re)write the two time columns so the output reflects only our
+    // matching: filled when a stop was matched, blank otherwise. A row that
+    // fell through here because its own pre-filled values were rejected as an
+    // implausible placeholder (see placeholderNote above) must never show
+    // that stale value on a "Rever manualmente" row — it would look like a
+    // confirmed time when it's exactly the opposite.
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtHM(w.assignedStop.arrivedAt);
       w.out[cols.saidaCol] = fmtHM(w.assignedStop.departedAt);
+    } else {
+      w.out[cols.chegadaCol] = "";
+      w.out[cols.saidaCol] = "";
     }
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
-    w.out[REAL_COL] = w.real || "";
+    // A row whose input Chegada/Saída were rejected as an implausible pre-fill
+    // (see placeholderNote above) always carries that explanation — prepended
+    // ahead of whatever the normal match produced, even "OK" (a real stop was
+    // found; the note documents that the file's own value was overridden).
+    w.out[REAL_COL] = w.placeholderNote
+      ? w.placeholderNote + (w.real ? ` ${w.real}` : "")
+      : w.real || "";
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;
     else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;

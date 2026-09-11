@@ -44,8 +44,10 @@ import {
   fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
+  implausibleKeptNote,
   KEPT,
   lisbonEpoch,
+  minutesBetweenTimeCells,
   noGpsCoverageNote,
   normalizePlate,
   normalizeStoreCode,
@@ -524,6 +526,8 @@ type Work = {
     | typeof SWAP_OUT_OF_WINDOW
     | typeof PLATE_TYPO;
   real: string;
+  /** set when input Chegada/Saída were rejected as an implausible pre-fill */
+  placeholderNote: string;
   swapPlate: string | null;
   assignedStop: WStop | null;
 };
@@ -584,10 +588,21 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     // Row already carries BOTH times in the uploaded file -> resolved elsewhere;
     // keep it verbatim and skip grouping + every matching step.
-    const kept =
-      !empty &&
-      String(r[cols.chegadaCol] ?? "").trim() !== "" &&
-      String(r[cols.saidaCol] ?? "").trim() !== "";
+    const rawChegada = String(r[cols.chegadaCol] ?? "").trim();
+    const rawSaida = String(r[cols.saidaCol] ?? "").trim();
+    const bothFilled = !empty && rawChegada !== "" && rawSaida !== "";
+    // A same-value (or reversed) Chegada/Saída is never a real visit — our own
+    // GPS-derived stops never close in zero minutes (fleet-wide audit,
+    // 2026-09) — so that shape is almost certainly the transporter's planning
+    // system pre-filling both cells with a placeholder for a store that
+    // hasn't actually been delivered yet. Treat it as NOT kept: fall through
+    // to normal matching against our real stops, same as a blank row.
+    const durMin = bothFilled ? minutesBetweenTimeCells(rawChegada, rawSaida) : null;
+    const implausible = bothFilled && durMin != null && durMin <= 0;
+    const kept = bothFilled && !implausible;
+    const placeholderNote = implausible
+      ? implausibleKeptNote(rawChegada, rawSaida)
+      : "";
 
     return {
       idx,
@@ -605,6 +620,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       groupKey: `${rota} ${codeKey(code)}`,
       conf: kept ? KEPT : "",
       real: "",
+      placeholderNote,
       swapPlate: null,
       assignedStop: null,
     };
@@ -959,7 +975,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       w.out[cols.plateCol] = w.swapPlate;
     }
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
-    w.out[REAL_COL] = w.real || "";
+    // A row whose input Chegada/Saída were rejected as an implausible pre-fill
+    // (see placeholderNote above) always carries that explanation — prepended
+    // ahead of whatever the normal match produced, even "OK" (a real stop was
+    // found; the note documents that the file's own value was overridden).
+    w.out[REAL_COL] = w.placeholderNote
+      ? w.placeholderNote + (w.real ? ` ${w.real}` : "")
+      : w.real || "";
 
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;

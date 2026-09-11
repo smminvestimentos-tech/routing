@@ -310,6 +310,55 @@ export function parseClockMin(v: unknown): number | null {
   return asFraction(Number(s.replace(",", ".")));
 }
 
+// Minutes between two "DD/MM/YYYY HH:MM" strings (b - a), or null if either
+// doesn't match that shape.
+function minutesBetweenDMYHM(a: string, b: string): number | null {
+  const parse = (s: string) => {
+    const m = s
+      .trim()
+      .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const [, d, mo, y, h, mi] = m;
+    return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+  };
+  const ta = parse(a);
+  const tb = parse(b);
+  if (ta == null || tb == null) return null;
+  return (tb - ta) / 60_000;
+}
+
+// Best-effort minutes between two already-filled Chegada/Saída *display*
+// strings — tolerant of either the transporter's own full "DD/MM/YYYY HH:MM"
+// pre-fill or a bare "HH:MM" / Excel time-fraction cell (same calendar day
+// assumed). null when neither shape parses.
+//
+// Used to sanity-check a row that arrives with BOTH times already filled
+// before trusting it verbatim (see KEPT in both matchers): a real delivery in
+// this fleet never takes zero minutes (see the duration audit behind the
+// Azambuja BG-75-IP investigation, 2026-09), so Saída <= Chegada is a strong
+// signal of an upstream placeholder — the transporter's own planning system
+// pre-filling both cells with the same value for a store that hasn't actually
+// been delivered yet — not a confirmed visit.
+export function minutesBetweenTimeCells(a: string, b: string): number | null {
+  const full = minutesBetweenDMYHM(a, b);
+  if (full != null) return full;
+  const ma = parseClockMin(a);
+  const mb = parseClockMin(b);
+  if (ma == null || mb == null) return null;
+  return mb - ma;
+}
+
+// Caption for a row whose input Chegada/Saída were rejected as an implausible
+// (zero or negative duration) pre-fill rather than trusted as KEPT.
+export function implausibleKeptNote(rawChegada: string, rawSaida: string): string {
+  return (
+    `Ficheiro trazia Chegada e Saída já preenchidas mas sem duração real ` +
+    `(${rawChegada} → ${rawSaida}) — provável placeholder do sistema de ` +
+    `planeamento, não uma entrega confirmada. Tratada como não confirmada ` +
+    `e sujeita ao emparelhamento normal.`
+  );
+}
+
 export type TimeWindow = { lo: number; hi: number };
 
 // Planned window widened by `padMin` on each side. null when neither end reads

@@ -16,6 +16,7 @@ import {
   runMatch as runTfsMatch,
   KEPT,
   PLATE_TYPO,
+  REVIEW,
   type DayStop,
   type SheetRecord,
 } from "@/lib/tfs-sheet/match";
@@ -320,6 +321,69 @@ ok(
     r.rows[1]["Hora Chegada"] === "05/09/2026 07:00" && r.rows[1]["Hora Saida"] === "05/09/2026 07:20",
   );
   ok("Azambuja kept: E16 + B77 matched OK", r.rows[0]["Confiança"] === "OK" && r.rows[2]["Confiança"] === "OK", [r.rows[0]["Confiança"], r.rows[2]["Confiança"]]);
+}
+
+// ---------------------------------------------------------------------------
+// Implausible pre-fill (Chegada === Saída, or Saída < Chegada) must NEVER be
+// trusted as "kept" — the 2026-09 BG-75-IP bug: the transporter's own sheet
+// arrives with both cells already filled to the same placeholder value for a
+// store that wasn't actually delivered. Real GPS closes never take 0 minutes.
+// ---------------------------------------------------------------------------
+{
+  // TFS: E16 arrives pre-filled 09:00=09:00 (placeholder) but 12AB34 really
+  // stopped there at 08:12-08:40 -> must resolve to that real stop, OK, with
+  // the placeholder documented in Real. E66 arrives reversed (09:40 -> 09:20,
+  // garbage) with NO real stop backing it -> must go to REVIEW, never keep
+  // 09:40/09:20 verbatim.
+  const recs = [
+    { ...tfsRow(1, "E16", "Azambuja", "08:00", "10:00"), "Matrícula da Viatura": "12AB34", "Hora de Chegada": "09:00", "Hora de Saída": "09:00" },
+    { ...tfsRow(2, "E66", "Samora Correia", "09:00", "11:00"), "Matrícula da Viatura": "12AB34", "Hora de Chegada": "09:40", "Hora de Saída": "09:20" },
+  ];
+  const stops: DayStop[] = [
+    { id: "z1", vehicleId: 42, plate: "12AB34", code: "E16", arrivedAt: iso("08:12"), departedAt: iso("08:40") },
+  ];
+  const r = runTfsMatch({
+    day, records: recs, header: tfsHeader, cols: tfsCols, stops,
+    fleetByTruck: new Map(),
+    platesWithGps: new Set(["12AB34"]),
+    pingWindowByPlate: new Map([["12AB34", { min: new Date(iso("00:00")).getTime(), max: new Date(iso("23:59")).getTime() }]]),
+  });
+  console.log("\nTFS (implausible pre-fill) summary:", JSON.stringify(r.summary));
+  ok("TFS implausible: summary.kept === 0", r.summary.kept === 0, r.summary);
+  ok("TFS implausible: E16 resolved OK from real stop, not the 09:00 placeholder", r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora de Chegada"] === "08:12" && r.rows[0]["Hora de Saída"] === "08:40", r.rows[0]);
+  ok("TFS implausible: E16 Real documents the override", typeof r.rows[0]["Real"] === "string" && (r.rows[0]["Real"] as string).includes("09:00"), r.rows[0]["Real"]);
+  ok("TFS implausible: E66 (no real stop, reversed times) -> REVIEW, not kept verbatim", r.rows[1]["Confiança"] === REVIEW && r.rows[1]["Hora de Chegada"] === "" && r.rows[1]["Hora de Saída"] === "", r.rows[1]);
+  ok("TFS implausible: E66 Real documents the rejected placeholder", typeof r.rows[1]["Real"] === "string" && (r.rows[1]["Real"] as string).includes("09:40"), r.rows[1]["Real"]);
+}
+{
+  // Azambuja: same shape, full "DD/MM/YYYY HH:MM" pre-fill this sheet uses.
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const mk = (rota: string, code: string, ch = "", sa = ""): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code, MATRICULA: "12-AB-34",
+    "Hora Chegada": ch, "Hora Saida": sa, CICLO: "08:00 | 20:00", TIPO: "C",
+  });
+  const azRecords = [
+    mk("R1", "E16", "09/09/2026 11:54", "09/09/2026 11:54"), // placeholder, real stop exists
+    mk("R2", "E66", "09/09/2026 14:43", "09/09/2026 14:43"), // placeholder, NO real stop -> review
+  ];
+  const azCols = resolveAzColumns(azHeader);
+  const azStops: DayStop[] = [
+    { id: "z2", vehicleId: 43, plate: "12AB34", code: "E16", arrivedAt: iso("08:30"), departedAt: iso("09:02") },
+  ];
+  const r = runAzMatch({
+    day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+    platesWithGps: new Set(["12AB34"]),
+    pingWindowByPlate: new Map([["12AB34", { min: new Date(iso("00:00")).getTime(), max: new Date(iso("23:59")).getTime() }]]),
+  });
+  console.log("Azambuja (implausible pre-fill) summary:", JSON.stringify(r.summary));
+  ok("Azambuja implausible: summary.kept === 0", r.summary.kept === 0, r.summary);
+  ok(
+    "Azambuja implausible: E16 resolved OK from real stop, not the 11:54 placeholder",
+    r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] !== "09/09/2026 11:54",
+    r.rows[0],
+  );
+  ok("Azambuja implausible: E66 (no real stop) -> REVIEW, times blanked, not 14:43/14:43", r.rows[1]["Confiança"] === REVIEW && r.rows[1]["Hora Chegada"] === "" && r.rows[1]["Hora Saida"] === "", r.rows[1]);
+  ok("Azambuja implausible: E66 Real documents the rejected placeholder", typeof r.rows[1]["Real"] === "string" && (r.rows[1]["Real"] as string).includes("14:43"), r.rows[1]["Real"]);
 }
 
 // ---------------------------------------------------------------------------
