@@ -112,22 +112,39 @@ export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Store code equality. Store codes here are "{optional letter prefix}{digits}"
-// ("E25", "B97", "133") or a merged/composite code ("B97-E72", "H96-B37").
+// Normalise a store code: handles string, number (e.g. 94), strips Excel float
+// suffixes (".0"), trims whitespace.
+export function normalizeStoreCode(v: unknown): string {
+  if (v == null) return "";
+  let s = String(v).trim();
+  s = s.replace(/\.0+$/, "");
+  return s;
+}
+
+// Co-located / same-site equivalence groups.
+// Physical sites that house multiple logical locations / codes (e.g. store + warehouse
+// sharing the same address/coordinates, or legacy codes used in planning sheets).
+// Any code in a group is considered an exact same-site match for any other code in the group.
 //
-//  - exact, case-insensitive
-//  - same letter prefix + same digits ignoring leading zeros: "A5" == "A05",
-//    "01" == "1". A *different* letter is a different store, so "B97" != "E97"
-//    (an earlier digits-only rule wrongly matched those).
-//  - one code is the "-"/"/" base segment of the other: "B97" == "B97-E72"
-//    (the sheet uses the base, our locations row carries the merged code).
-export function codeEq(
+// Group 1 — Albufeira:
+//   - 'B78': Loja Albufeira (GPS proximity stop detection tags visits under this code)
+//   - 'AUCHAN-06': Armazém Albufeira / Plataforma Albufeira (same physical site & coords)
+//   - '94': Legacy code for Armazém Albufeira still used in transport planning sheets
+export const SAME_SITE_GROUPS: ReadonlyArray<ReadonlySet<string>> = [
+  new Set(["B78", "94", "AUCHAN-06"]),
+];
+
+// Check whether code a and code b are equal under standard base rules:
+// - case-insensitive
+// - same letter prefix + same digits ignoring leading zeros ("A5" == "A05", "01" == "1")
+// - base segment of composite code ("B97" == "B97-E72")
+export function codeBaseEq(
   a: string | null | undefined,
   b: string | null | undefined,
 ): boolean {
   if (a == null || b == null) return false;
-  const x = String(a).trim().toUpperCase();
-  const y = String(b).trim().toUpperCase();
+  const x = normalizeStoreCode(a).toUpperCase();
+  const y = normalizeStoreCode(b).toUpperCase();
   if (!x || !y) return false;
   if (x === y) return true;
 
@@ -142,8 +159,66 @@ export function codeEq(
   return false;
 }
 
+export function findSameSiteGroup(
+  code: string | null | undefined,
+): ReadonlySet<string> | null {
+  if (!code) return null;
+  const s = normalizeStoreCode(code).toUpperCase();
+  for (const group of SAME_SITE_GROUPS) {
+    for (const member of group) {
+      if (codeBaseEq(member, s)) return group;
+    }
+  }
+  return null;
+}
+
+export function areSameSite(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  const groupA = findSameSiteGroup(a);
+  if (!groupA) return false;
+  const sB = normalizeStoreCode(b).toUpperCase();
+  for (const member of groupA) {
+    if (codeBaseEq(member, sB)) return true;
+  }
+  return false;
+}
+
+export function canonicalSiteCode(code: string | null | undefined): string {
+  if (!code) return "";
+  const norm = normalizeStoreCode(code);
+  const group = findSameSiteGroup(norm);
+  if (group) {
+    // Return the primary/first representative of the group (e.g. "B78" for Albufeira)
+    return [...group][0];
+  }
+  return norm;
+}
+
+// Store code equality with same-site / co-location support.
+export function codeEq(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (a == null || b == null) return false;
+  const x = normalizeStoreCode(a).toUpperCase();
+  const y = normalizeStoreCode(b).toUpperCase();
+  if (!x || !y) return false;
+  if (x === y) return true;
+
+  // 1. Same-site co-location group match (e.g. B78 <=> 94 <=> AUCHAN-06)
+  if (areSameSite(x, y)) return true;
+
+  // 2. Base code equality (same prefix + digits, or composite code segment)
+  return codeBaseEq(x, y);
+}
+
 export function codeKey(code: string): string {
-  const k = code.trim().replace(/^0+(?=.)/, "").toLowerCase();
+  const norm = normalizeStoreCode(code);
+  const canonical = canonicalSiteCode(norm);
+  const k = canonical.trim().replace(/^0+(?=.)/, "").toLowerCase();
   return k || "(sem código)";
 }
 
@@ -152,21 +227,25 @@ export function codeKey(code: string): string {
 export type MergedCodeEntry = { code: string; canonicalCode: string };
 
 // Sheets sometimes still carry a store code we've since merged into a
-// canonical location (0019, 0030) — the planning system that generates them
+// canonical location (0019, 0030, 0031) — the planning system that generates them
 // lags behind our locations table. Resolve it to the canonical code before any
 // codeEq comparison against stops, so a visit now attributed to the canonical
-// location still matches the sheet's row for the old code. Only kicks in when
-// the raw code doesn't already match a currently active location — this never
-// overrides a genuine live code, even a coincidental one.
+// location still matches the sheet's row for the old code.
 export function resolveMergedCode(
-  raw: string,
+  raw: unknown,
   activeCodes: readonly string[],
   merged: readonly MergedCodeEntry[],
 ): string {
-  if (!raw) return raw;
-  if (activeCodes.some((c) => codeEq(c, raw))) return raw;
-  const hit = merged.find((m) => codeEq(m.code, raw));
-  return hit ? hit.canonicalCode : raw;
+  const norm = normalizeStoreCode(raw);
+  if (!norm) return norm;
+
+  // If the raw code directly matches a currently active location (exact or base code,
+  // without co-location grouping), keep it verbatim.
+  if (activeCodes.some((c) => codeBaseEq(c, norm))) return norm;
+
+  // Check merged/alias list (handles string/int and codeBaseEq)
+  const hit = merged.find((m) => codeBaseEq(m.code, norm) || codeEq(m.code, norm));
+  return hit ? hit.canonicalCode : norm;
 }
 
 const HM = new Intl.DateTimeFormat("en-GB", {

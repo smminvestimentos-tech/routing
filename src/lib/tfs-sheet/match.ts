@@ -45,6 +45,7 @@ import {
   KEPT,
   noGpsCoverageNote,
   normalizePlate,
+  normalizeStoreCode,
   parseClockMin,
   parseServiceDay,
   pick,
@@ -393,7 +394,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const rawTruck = cols.truckCol
       ? String(r[cols.truckCol] ?? "").trim()
       : "";
-    const rawCode = String(r[cols.codeCol] ?? "").trim();
+    const rawCode = normalizeStoreCode(r[cols.codeCol]);
     const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
     const designacao = cols.designacaoCol
       ? String(r[cols.designacaoCol] ?? "").trim()

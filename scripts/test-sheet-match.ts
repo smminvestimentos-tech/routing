@@ -24,6 +24,8 @@ import {
   runMatch as runAzMatch,
 } from "@/lib/azambuja-sheet/match";
 import {
+  codeEq,
+  codeKey,
   findPlateTypo,
   isEditDistance1,
   resolveMergedCode,
@@ -407,6 +409,181 @@ ok(
     withResolution.rows[0]["Código de Loja"] === "AUCHAN-4",
     withResolution.rows[0]["Código de Loja"],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Albufeira same-site co-location (B78 <=> 94 <=> AUCHAN-06)
+// ---------------------------------------------------------------------------
+{
+  // 1. codeEq bidirectional equivalence
+  ok("Albufeira same-site: '94' == 'B78'", codeEq("94", "B78"));
+  ok("Albufeira same-site: 'B78' == '94'", codeEq("B78", "94"));
+  ok("Albufeira same-site: 'AUCHAN-06' == 'B78'", codeEq("AUCHAN-06", "B78"));
+  ok("Albufeira same-site: 'B78' == 'AUCHAN-06'", codeEq("B78", "AUCHAN-06"));
+  ok("Albufeira same-site: '94' == 'AUCHAN-06'", codeEq("94", "AUCHAN-06"));
+  ok("Albufeira same-site: 'AUCHAN-06' == '94'", codeEq("AUCHAN-06", "94"));
+  ok("Albufeira same-site: number 94 == 'B78'", codeEq(94 as unknown as string, "B78"));
+  ok("Albufeira same-site: '094' == 'B78'", codeEq("094", "B78"));
+  ok("Albufeira same-site: '94.0' == 'B78'", codeEq("94.0", "B78"));
+  ok("Albufeira same-site: ' 94 ' == 'B78'", codeEq(" 94 ", "B78"));
+
+  // 2. codeKey canonical site key
+  ok("Albufeira codeKey: '94' == 'B78'", codeKey("94") === codeKey("B78"));
+  ok("Albufeira codeKey: 'AUCHAN-06' == 'B78'", codeKey("AUCHAN-06") === codeKey("B78"));
+
+  // 3. resolveMergedCode with active/merged list
+  const activeList = ["B78", "AUCHAN-06", "01", "206"];
+  const mergedList = [
+    { code: "94", canonicalCode: "AUCHAN-06" },
+    { code: "AUCHAN-4", canonicalCode: "206" },
+  ];
+  ok(
+    "resolveMergedCode: '94' (string) resolves to AUCHAN-06",
+    resolveMergedCode("94", activeList, mergedList) === "AUCHAN-06",
+  );
+  ok(
+    "resolveMergedCode: 94 (number) resolves to AUCHAN-06",
+    resolveMergedCode(94, activeList, mergedList) === "AUCHAN-06",
+  );
+  ok(
+    "resolveMergedCode: 'B78' stays B78 (active)",
+    resolveMergedCode("B78", activeList, mergedList) === "B78",
+  );
+  ok(
+    "resolveMergedCode: 'AUCHAN-06' stays AUCHAN-06 (active)",
+    resolveMergedCode("AUCHAN-06", activeList, mergedList) === "AUCHAN-06",
+  );
+
+  // 4. End-to-end TFS matching: planned 94, GPS detected as B78 (caminhão 280)
+  const tfs280Rows: SheetRecord[] = [
+    {
+      "Dia do Serviço": day,
+      "Nº Camião": "280",
+      "Matrícula da Viatura": "28-RN-74",
+      "Ordem de Entrega": "1",
+      "Código de Loja": "94",
+      "Designação da Loja": "Armazém Albufeira",
+      "Janela Início": "02:00",
+      "Janela Fim": "04:00",
+      "Hora de Chegada": "",
+      "Hora de Saída": "",
+      ID: "",
+    },
+  ];
+  const tfs280Stops: DayStop[] = [
+    {
+      id: "alb-stop-1",
+      vehicleId: 280,
+      plate: "28RN74",
+      code: "B78",
+      arrivedAt: iso("02:48"),
+      departedAt: iso("03:23"),
+    },
+  ];
+  const tfs280Res = runTfsMatch({
+    day,
+    records: tfs280Rows,
+    header: tfsHeader,
+    cols: tfsCols,
+    stops: tfs280Stops,
+    fleetByTruck: new Map([["280", "28RN74"]]),
+    platesWithGps: new Set(["28RN74"]),
+    pingWindowByPlate: new Map([["28RN74", { min: Date.parse(iso("01:00")), max: Date.parse(iso("10:00")) }]]),
+    activeCodes: activeList,
+    mergedCodes: mergedList,
+  });
+
+  ok("TFS 280: summary.ok === 1", tfs280Res.summary.ok === 1, tfs280Res.summary);
+  ok("TFS 280: row Confiança === OK", tfs280Res.rows[0]["Confiança"] === "OK");
+  ok("TFS 280: row Hora de Chegada === '02:48'", tfs280Res.rows[0]["Hora de Chegada"] === "02:48");
+  ok("TFS 280: row Hora de Saída === '03:23'", tfs280Res.rows[0]["Hora de Saída"] === "03:23");
+  ok("TFS 280: row Real is empty on OK", tfs280Res.rows[0]["Real"] === "");
+
+  // 5. End-to-end TFS matching: planned with integer 94
+  const tfs285Rows: SheetRecord[] = [
+    {
+      "Dia do Serviço": day,
+      "Nº Camião": "285",
+      "Matrícula da Viatura": "28-RN-75",
+      "Ordem de Entrega": "1",
+      "Código de Loja": 94 as unknown as string,
+      "Designação da Loja": "Armazém Albufeira",
+      "Janela Início": "06:00",
+      "Janela Fim": "08:00",
+      "Hora de Chegada": "",
+      "Hora de Saída": "",
+      ID: "",
+    },
+  ];
+  const tfs285Stops: DayStop[] = [
+    {
+      id: "alb-stop-2",
+      vehicleId: 285,
+      plate: "28RN75",
+      code: "B78",
+      arrivedAt: iso("06:25"),
+      departedAt: iso("07:30"),
+    },
+  ];
+  const tfs285Res = runTfsMatch({
+    day,
+    records: tfs285Rows,
+    header: tfsHeader,
+    cols: tfsCols,
+    stops: tfs285Stops,
+    fleetByTruck: new Map([["285", "28RN75"]]),
+    platesWithGps: new Set(["28RN75"]),
+    pingWindowByPlate: new Map([["28RN75", { min: Date.parse(iso("05:00")), max: Date.parse(iso("12:00")) }]]),
+    activeCodes: activeList,
+    mergedCodes: mergedList,
+  });
+
+  ok("TFS 285 (int 94): summary.ok === 1", tfs285Res.summary.ok === 1, tfs285Res.summary);
+  ok("TFS 285 (int 94): row Confiança === OK", tfs285Res.rows[0]["Confiança"] === "OK");
+  ok("TFS 285 (int 94): row Chegada === '06:25'", tfs285Res.rows[0]["Hora de Chegada"] === "06:25");
+  ok("TFS 285 (int 94): row Saída === '07:30'", tfs285Res.rows[0]["Hora de Saída"] === "07:30");
+
+  // 6. Reverse: planned B78, GPS stop tagged AUCHAN-06
+  const tfsRevRows: SheetRecord[] = [
+    {
+      "Dia do Serviço": day,
+      "Nº Camião": "280",
+      "Matrícula da Viatura": "28-RN-74",
+      "Ordem de Entrega": "1",
+      "Código de Loja": "B78",
+      "Designação da Loja": "Loja Albufeira",
+      "Janela Início": "02:00",
+      "Janela Fim": "04:00",
+      "Hora de Chegada": "",
+      "Hora de Saída": "",
+      ID: "",
+    },
+  ];
+  const tfsRevStops: DayStop[] = [
+    {
+      id: "alb-stop-3",
+      vehicleId: 280,
+      plate: "28RN74",
+      code: "AUCHAN-06",
+      arrivedAt: iso("02:48"),
+      departedAt: iso("03:23"),
+    },
+  ];
+  const tfsRevRes = runTfsMatch({
+    day,
+    records: tfsRevRows,
+    header: tfsHeader,
+    cols: tfsCols,
+    stops: tfsRevStops,
+    fleetByTruck: new Map([["280", "28RN74"]]),
+    platesWithGps: new Set(["28RN74"]),
+    pingWindowByPlate: new Map([["28RN74", { min: Date.parse(iso("01:00")), max: Date.parse(iso("10:00")) }]]),
+    activeCodes: activeList,
+    mergedCodes: mergedList,
+  });
+  ok("TFS reverse (planned B78, GPS AUCHAN-06): summary.ok === 1", tfsRevRes.summary.ok === 1);
+  ok("TFS reverse: row Confiança === OK", tfsRevRes.rows[0]["Confiança"] === "OK");
+  ok("TFS reverse: row Chegada === '02:48'", tfsRevRes.rows[0]["Hora de Chegada"] === "02:48");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

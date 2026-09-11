@@ -48,6 +48,7 @@ import {
   lisbonEpoch,
   noGpsCoverageNote,
   normalizePlate,
+  normalizeStoreCode,
   parseClockMin,
   parseServiceDay,
   pick,
@@ -564,7 +565,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
   const works: Work[] = records.map((r, idx) => {
     const rota = String(r[cols.rotaCol] ?? "").trim();
-    const rawCode = String(r[cols.codeCol] ?? "").trim();
+    const rawCode = normalizeStoreCode(r[cols.codeCol]);
     const code = resolveMergedCode(rawCode, activeCodes, mergedCodes);
     const designacao = cols.nomeCol
       ? String(r[cols.nomeCol] ?? "").trim()
