@@ -55,11 +55,15 @@ export const ZZ_COL = "ZZ";
 export const YY_COL = "YY";
 export const XX_COL = "XX";
 const TECH_COLS = [ZZ_COL, YY_COL, XX_COL] as const;
+const TECH_COL_SET: ReadonlySet<string> = new Set(TECH_COLS);
 
 // Light tints — dark enough to read at a glance, light enough to keep the cell
 // text legible. ARGB (leading FF = opaque).
 const FILL_AMBER = "FFFFE699";
 const FILL_RED = "FFF4B6B0";
+// Header row fill — matches the transporter's own export exactly
+// (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
+const FILL_HEADER = "FFFFC000";
 
 const SUGGESTION_CONFS: ReadonlySet<string> = new Set([
   SWAP,
@@ -89,6 +93,12 @@ export async function buildSheetWorkbook(
     ...header,
     ...TECH_COLS.filter((c) => !header.includes(c)),
   ];
+  // Last 1-indexed column that isn't one of our own hidden technical columns
+  // — the real file's autofilter/header-fill stop there too, not at ZZ/YY/XX.
+  let lastVisibleCol = 0;
+  outHeader.forEach((h, i) => {
+    if (!TECH_COL_SET.has(h)) lastVisibleCol = i + 1;
+  });
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "routing/sheet-match";
@@ -96,7 +106,19 @@ export async function buildSheetWorkbook(
   const ws = wb.addWorksheet(args.sheetName || "Folha");
 
   ws.addRow(outHeader);
-  ws.getRow(1).font = { bold: true };
+  const headerRow = ws.getRow(1);
+  headerRow.font = { bold: true };
+  outHeader.forEach((h, i) => {
+    if (TECH_COL_SET.has(h)) return;
+    headerRow.getCell(i + 1).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: FILL_HEADER },
+    };
+  });
+
+  // Freeze the header row so it stays visible while scrolling.
+  ws.views = [{ state: "frozen", ySplit: 1 }];
 
   const isSuggestion = (r: SheetRecord) =>
     SUGGESTION_CONFS.has(String(r[CONFIANCA_COL] ?? ""));
@@ -121,6 +143,32 @@ export async function buildSheetWorkbook(
   }
 
   const lastRow = rows.length + 1; // + header
+
+  // Autofilter over the whole data range (header + every row), stopping at
+  // the last real column — same footprint as the transporter's own export.
+  ws.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: lastRow, column: lastVisibleCol },
+  };
+
+  // Thin grid border ("Contornos" + "Interior") on every cell that carries
+  // data — header and rows, every visible column — never the hidden ZZ/YY/XX.
+  const THIN_BORDER = { style: "thin" as const, color: { argb: "FF000000" } };
+  const visibleCols = outHeader
+    .map((h, i) => (TECH_COL_SET.has(h) ? -1 : i + 1))
+    .filter((c) => c > 0);
+  for (let r = 1; r <= lastRow; r++) {
+    const row = ws.getRow(r);
+    for (const c of visibleCols) {
+      row.getCell(c).border = {
+        top: THIN_BORDER,
+        left: THIN_BORDER,
+        bottom: THIN_BORDER,
+        right: THIN_BORDER,
+      };
+    }
+  }
+
   if (lastRow < 2) {
     // no data rows — still emit a valid file
     return Buffer.from(await wb.xlsx.writeBuffer()).toString("base64");

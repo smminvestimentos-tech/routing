@@ -112,6 +112,12 @@ export type ResolvedColumns = {
   nomeCol: string | null;
   plateCol: string;
   cicloCol: string | null;
+  /** "VIATURA PLANEADO" — source for the Centro Custo / N_Dedicado fill */
+  viaturaPlaneadoCol: string | null;
+  /** existing header if found, else the canonical name to add */
+  centroCustoCol: string | null;
+  /** existing header if found, else the canonical name to add */
+  nDedicadoCol: string | null;
   /** our own "Dia Serviço" column, present only on a re-uploaded output */
   diaCol: string | null;
   /** existing header if found, else the canonical name to add */
@@ -119,6 +125,23 @@ export type ResolvedColumns = {
   saidaCol: string;
   errors: string[];
 };
+
+export type ViaturaPlaneadaClass = { k: "F" | "D"; l: string };
+
+// VIATURA PLANEADO -> Centro Custo (K) / N_Dedicado (L). Validated against
+// Ficheiro_Horários_TFS_12-09-2026.xlsx: 0 discrepancies over 67 distinct
+// VIATURA PLANEADO values / 529 rows (2026-09-14).
+export function classifyViaturaPlaneada(j: string): ViaturaPlaneadaClass {
+  const upper = j.toUpperCase();
+  if (upper.startsWith("F") || upper.startsWith("PF")) {
+    return { k: "F", l: "" };
+  }
+  const singleLetterMatch = j.match(/^([A-Za-z])0*(\d+)$/);
+  if (singleLetterMatch) {
+    return { k: "D", l: singleLetterMatch[2] };
+  }
+  return { k: "D", l: j };
+}
 
 export type MatchSummary = {
   /** data rows considered (blank rows excluded) */
@@ -198,6 +221,9 @@ export function resolveColumns(header: string[]): ResolvedColumns {
   const nomeCol = take("nome", "designacao", "nome da loja", "designacao da loja");
   const plateCol = take("matricula", "matricula da viatura", "matricula viatura");
   const cicloCol = take("ciclo");
+  const viaturaPlaneadoCol = take("viatura planeado", "viatura planeada");
+  const centroCustoCol = take("centro custo");
+  const nDedicadoCol = take("n dedicado", "no dedicado", "num dedicado");
   const diaCol = take(
     "dia servico",
     "dia de servico",
@@ -218,6 +244,9 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     nomeCol,
     plateCol: plateCol ?? "",
     cicloCol,
+    viaturaPlaneadoCol,
+    centroCustoCol,
+    nDedicadoCol,
     diaCol,
     chegadaCol: chegadaCol ?? "Hora Chegada",
     saidaCol: saidaCol ?? "Hora Saida",
@@ -575,9 +604,16 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   for (const s of stops) if (s.plate) platesWithDayStops.add(s.plate);
 
   const diaCol = cols.diaCol ?? DIA_COL;
+  const centroCustoColOut = cols.centroCustoCol ?? "Centro Custo";
+  const nDedicadoColOut = cols.nDedicadoCol ?? "N_Dedicado";
   const outHeader = [...header];
   for (const c of [diaCol, cols.chegadaCol, cols.saidaCol, CONFIANCA_COL, REAL_COL]) {
     if (!outHeader.includes(c)) outHeader.push(c);
+  }
+  if (cols.viaturaPlaneadoCol) {
+    for (const c of [centroCustoColOut, nDedicadoColOut]) {
+      if (!outHeader.includes(c)) outHeader.push(c);
+    }
   }
 
   const works: Work[] = records.map((r, idx) => {
@@ -617,9 +653,19 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       ? implausibleKeptNote(rawChegada, rawSaida)
       : "";
 
+    const out: SheetRecord = { ...r };
+    if (cols.viaturaPlaneadoCol) {
+      const rawViatura = String(r[cols.viaturaPlaneadoCol] ?? "").trim();
+      if (rawViatura) {
+        const { k, l } = classifyViaturaPlaneada(rawViatura);
+        out[centroCustoColOut] = k;
+        out[nDedicadoColOut] = l;
+      }
+    }
+
     return {
       idx,
-      out: { ...r },
+      out,
       empty,
       kept,
       rota,
