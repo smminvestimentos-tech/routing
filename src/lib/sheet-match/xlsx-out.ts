@@ -151,8 +151,9 @@ export async function buildSheetWorkbook(
     to: { row: lastRow, column: lastVisibleCol },
   };
 
-  // Thin grid border ("Contornos" + "Interior") on every cell that carries
-  // data — header and rows, every visible column — never the hidden ZZ/YY/XX.
+  // Thin grid border ("Contornos" + "Interior") + centered horizontal
+  // alignment on every cell that carries data — header and rows, every
+  // visible column — never the hidden ZZ/YY/XX.
   const THIN_BORDER = { style: "thin" as const, color: { argb: "FF000000" } };
   const visibleCols = outHeader
     .map((h, i) => (TECH_COL_SET.has(h) ? -1 : i + 1))
@@ -160,12 +161,14 @@ export async function buildSheetWorkbook(
   for (let r = 1; r <= lastRow; r++) {
     const row = ws.getRow(r);
     for (const c of visibleCols) {
-      row.getCell(c).border = {
+      const cell = row.getCell(c);
+      cell.border = {
         top: THIN_BORDER,
         left: THIN_BORDER,
         bottom: THIN_BORDER,
         right: THIN_BORDER,
       };
+      cell.alignment = { horizontal: "center" };
     }
   }
 
