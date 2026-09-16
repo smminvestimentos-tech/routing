@@ -1,0 +1,75 @@
+-- ============================================================================
+-- ** NOT a normal migration ** — do NOT wrap this file's CREATE INDEX in
+-- begin;/commit; the way every other file in this folder is wrapped.
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block at all
+-- (Postgres error: "CREATE INDEX CONCURRENTLY cannot run inside a
+-- transaction block") — it manages its own multi-transaction protocol
+-- internally specifically so it can build without holding a lock that blocks
+-- concurrent writes. Paste the CREATE INDEX statement below into the SQL
+-- Editor and run it on its own, with no begin;/commit; around it.
+-- ============================================================================
+--
+-- Root-caused (2026-09-15) while trying to unstick a stalled detect_stops
+-- cursor for the 'azambuja' account: a manual catch-up walk (0.5h..5min
+-- adaptive p_now steps, same technique as scripts/backfill-azambuja-pings.ts)
+-- kept hitting "canceling statement due to statement timeout" even at the
+-- 5-minute floor, with near-identical ~7-8s latency on every call regardless
+-- of step size (30/15/7.5/5 min) and regardless of whether 0 or several
+-- stops were upserted. That's the signature of a FIXED per-call cost
+-- independent of the p_now window, not of "too much data inside the
+-- window" (which was 0038-era backfill's problem, fixed there by thinning
+-- ping density instead).
+--
+-- detect_stops()'s outer loop (0009) runs this exact query on every single
+-- invocation, unfiltered by p_now:
+--
+--   select distinct vp.vehicle_id
+--   from vehicle_pings vp
+--   where vp.trackit_account = p_trackit_account;
+--
+-- The only existing index that could serve it is
+-- vehicle_pings_account_vehicle_recorded_idx (trackit_account, vehicle_id,
+-- recorded_at) — a 3-column index whose 3rd column (recorded_at) buys it
+-- nothing for a plain DISTINCT vehicle_id and only adds bytes per entry.
+-- Postgres has no built-in loose/"skip scan" for DISTINCT, so it must walk
+-- every index entry for that account (~282k for azambuja and growing at
+-- ~40k/day, vs. ~32k total for 'default' — which is exactly why 'default'
+-- has never hit this).
+--
+-- PREVIEW — run this FIRST, before creating the index, and paste the plan
+-- back for confirmation. Expect a Seq Scan or a full Index Scan across the
+-- whole azambuja partition feeding a HashAggregate/Unique, with a row count
+-- near 282k and a runtime in the same few-seconds range as the timing-out
+-- detect_stops calls:
+--
+--   explain (analyze, buffers, format text)
+--   select distinct vehicle_id
+--   from vehicle_pings
+--   where trackit_account = 'azambuja';
+--
+-- FIX — a narrower 2-column index with no recorded_at, so Postgres can
+-- answer the same query with an Index Only Scan: no heap fetch per row
+-- (given a reasonably vacuumed visibility map) and a smaller index to
+-- stream through than the 3-column one. This does not change the schema
+-- of match_stop_location, detect_stops, or any other logic — it is a pure
+-- read-path index, safe to add and to drop later if it doesn't help enough.
+-- Not a true skip-scan (still O(rows for that account), not O(distinct
+-- vehicles)) — if it isn't enough on its own, the next step is rewriting
+-- the query as a recursive-CTE loose index scan, not another index.
+
+create index concurrently if not exists vehicle_pings_account_vehicle_idx
+  on vehicle_pings (trackit_account, vehicle_id);
+
+-- VERIFY — run again after the index finishes building (CONCURRENTLY
+-- returns once it's fully valid, no separate wait needed) and paste the new
+-- plan back. Expect "Index Only Scan using vehicle_pings_account_vehicle_idx"
+-- replacing whatever full scan showed up in the PREVIEW, and a large drop in
+-- both planning irrelevant here and actual runtime:
+--
+--   explain (analyze, buffers, format text)
+--   select distinct vehicle_id
+--   from vehicle_pings
+--   where trackit_account = 'azambuja';
+--
+-- Only once that confirms the plan changed and the latency dropped should
+-- the manual detect_stops catch-up for 'azambuja' resume.
