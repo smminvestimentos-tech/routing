@@ -64,6 +64,10 @@ const FILL_RED = "FFF4B6B0";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
+// Standardized font, per the administrator's request — applied to every
+// visible cell (header + data), never to the hidden ZZ/YY/XX technical
+// columns, same exception already used for color/border/alignment below.
+const FONT_NAME = "Aptos Narrow";
 
 const SUGGESTION_CONFS: ReadonlySet<string> = new Set([
   SWAP,
@@ -107,7 +111,6 @@ export async function buildSheetWorkbook(
 
   ws.addRow(outHeader);
   const headerRow = ws.getRow(1);
-  headerRow.font = { bold: true };
   outHeader.forEach((h, i) => {
     if (TECH_COL_SET.has(h)) return;
     headerRow.getCell(i + 1).fill = {
@@ -152,8 +155,8 @@ export async function buildSheetWorkbook(
   };
 
   // Thin grid border ("Contornos" + "Interior") + centered horizontal
-  // alignment on every cell that carries data — header and rows, every
-  // visible column — never the hidden ZZ/YY/XX.
+  // alignment + standardized font on every cell that carries data — header
+  // and rows, every visible column — never the hidden ZZ/YY/XX.
   const THIN_BORDER = { style: "thin" as const, color: { argb: "FF000000" } };
   const visibleCols = outHeader
     .map((h, i) => (TECH_COL_SET.has(h) ? -1 : i + 1))
@@ -169,6 +172,8 @@ export async function buildSheetWorkbook(
         right: THIN_BORDER,
       };
       cell.alignment = { horizontal: "center" };
+      cell.font =
+        r === 1 ? { name: FONT_NAME, bold: true } : { name: FONT_NAME };
     }
   }
 
