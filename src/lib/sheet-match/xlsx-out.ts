@@ -34,6 +34,23 @@
 //     distinct from the generic amber. No snapshot column is needed: the rule
 //     keys off «Real» (which the user doesn't edit), not off the plate cell's
 //     own value, so an accidental plate delete doesn't change whether it fires.
+//
+//   • 🟣 roxo/lilás on «Hora de Chegada» AND «Hora de Saída» (both cells, same
+//     row) whenever the stop's duration (Saída - Chegada) reads under 5
+//     minutes. Deliberately NOT limited to any location type — armazéns/CDs
+//     included on purpose: even though 0035 treats a 0-min warehouse stop as
+//     legitimate for matching purposes, a human reviewer should still SEE it,
+//     because a real short stop sometimes hides fragmentation (confirmed
+//     2026-09). Only fires once both cells hold something Excel can parse as a
+//     time (bare "HH:MM…" or the Azambuja "DD/MM/YYYY HH:MM" shape) — a row
+//     still stuck on "⚠️ Rever manualmente" has blank times and never lights
+//     up. A hidden technical column «WW» carries the live duration in minutes
+//     (an Excel formula, not a snapshot, so it re-evaluates as the user edits
+//     either cell). 🔴 takes priority: while a suggestion is still pending
+//     (plate cell == ZZ and Confiança <> "OK", same test as the red rule
+//     above) the times shown belong to an UNCONFIRMED candidate stop, so 🟣
+//     stays off even if that candidate's duration is short — accepting the
+//     suggestion (Confiança -> "OK") lets 🟣 evaluate normally from then on.
 
 import ExcelJS from "exceljs";
 import {
@@ -54,13 +71,19 @@ import {
 export const ZZ_COL = "ZZ";
 export const YY_COL = "YY";
 export const XX_COL = "XX";
-const TECH_COLS = [ZZ_COL, YY_COL, XX_COL] as const;
+// WW — live "Saída minus Chegada" in minutes, an Excel FORMULA (not a
+// snapshot like ZZ/YY/XX) referencing the row's own Chegada/Saída cells, so it
+// re-evaluates whenever the user edits either one. "" when either cell is
+// blank or unparseable. Backs the 🟣 short-stop rule below.
+export const WW_COL = "WW";
+const TECH_COLS = [ZZ_COL, YY_COL, XX_COL, WW_COL] as const;
 const TECH_COL_SET: ReadonlySet<string> = new Set(TECH_COLS);
 
 // Light tints — dark enough to read at a glance, light enough to keep the cell
 // text legible. ARGB (leading FF = opaque).
 const FILL_AMBER = "FFFFE699";
 const FILL_RED = "FFF4B6B0";
+const FILL_PURPLE = "FFDCC6F2";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
@@ -139,6 +162,8 @@ export async function buildSheetWorkbook(
       if (h === XX_COL) {
         return saidaColName ? String(r[saidaColName] ?? "") : "";
       }
+      // WW is a formula, filled in below once every row + column letter exists.
+      if (h === WW_COL) return "";
       const v = r[h];
       return v == null ? "" : v;
     });
@@ -194,6 +219,7 @@ export async function buildSheetWorkbook(
   const zzL = letter(ZZ_COL)!;
   const yyL = letter(YY_COL)!;
   const xxL = letter(XX_COL)!;
+  const wwL = letter(WW_COL)!;
 
   // Hide the technical columns.
   for (const c of TECH_COLS) {
@@ -207,6 +233,33 @@ export async function buildSheetWorkbook(
   for (const n of [CONFIANCA_COL, REAL_COL]) {
     const i = outHeader.indexOf(n);
     if (i >= 0) ws.getColumn(i + 1).width = n === REAL_COL ? 60 : 26;
+  }
+
+  // Populate WW with a live formula per row: minutes between Chegada and
+  // Saída, tolerant of both time shapes this app ever writes into those
+  // cells — bare "HH:MM[:SS]" (TFS) or "DD/MM/YYYY HH:MM" (Azambuja, whose
+  // cycles can cross midnight) — mirroring parseClockMin/minutesBetweenTimeCells
+  // (common.ts) in Excel-formula form. "" (via IFERROR) whenever either cell
+  // is blank or doesn't parse, so a malformed cell never miscolors the row.
+  if (chegadaL && saidaL) {
+    const serial = (colL: string, row: number) => {
+      const cell = `$${colL}${row}`;
+      const timePart = `TRIM(MID(${cell},FIND(" ",${cell})+1,20))`;
+      return (
+        `IF(ISNUMBER(SEARCH("/",${cell})),` +
+        `DATEVALUE(LEFT(${cell},FIND(" ",${cell})-1))+TIMEVALUE(${timePart}),` +
+        `TIMEVALUE(${cell}))`
+      );
+    };
+    for (let i = 0; i < rows.length; i++) {
+      const row = i + 2;
+      const cheCell = `$${chegadaL}${row}`;
+      const saiCell = `$${saidaL}${row}`;
+      const formula =
+        `IFERROR(IF(OR(${cheCell}="",${saiCell}=""),"",` +
+        `ROUND((${serial(saidaL, row)}-${serial(chegadaL, row)})*1440,0)),"")`;
+      ws.getCell(`${wwL}${row}`).value = { formula };
+    }
   }
 
   const solid = (argb: string) => ({
@@ -290,6 +343,31 @@ export async function buildSheetWorkbook(
           priority: 4,
           formulae: [`ISNUMBER(SEARCH("cobertura GPS",$${realL}2))`],
           style: solid(FILL_RED),
+        },
+      ],
+    });
+  }
+
+  // 🟣 short stop (< 5 min): painted on Chegada + Saída together, keyed off
+  // the live WW duration. Suppressed while the row is still an unconfirmed
+  // suggestion (same "plate cell == ZZ and Confiança <> OK" test as the red
+  // rule above) — those times belong to a candidate stop, not a confirmed
+  // one, so 🔴 keeps priority until the suggestion is accepted or changed.
+  if (chegadaL && saidaL) {
+    const pending =
+      confL && plateL
+        ? `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`
+        : "FALSE";
+    ws.addConditionalFormatting({
+      ref: colsRef(chegadaL, saidaL),
+      rules: [
+        {
+          type: "expression",
+          priority: 5,
+          formulae: [
+            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}))`,
+          ],
+          style: solid(FILL_PURPLE),
         },
       ],
     });
