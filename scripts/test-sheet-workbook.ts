@@ -105,12 +105,14 @@ const rows: SheetRecord[] = [
   /* 13 */ row({ "Matrícula da Viatura": "44DD44", "Hora de Chegada": "13:00", "Hora de Saída": "13:02", [CONFIANCA_COL]: SWAP }), // 2min but STILL PENDING -> red only, no purple
   /* 14 */ row({ "Matrícula da Viatura": "99JJ99", "Hora de Chegada": "16:00", "Hora de Saída": "16:05", [CONFIANCA_COL]: "OK" }), // exactly 5min -> NOT purple (boundary)
   /* 15 */ row({ "Matrícula da Viatura": "00KK00", "Código de Loja": "94", "Hora de Chegada": "15:00", "Hora de Saída": "15:00", [CONFIANCA_COL]: "OK" }), // 0min warehouse (code94) -> purple, no exception for CDs
+  // --- 🔘 conflito de horários sobrepostos (5ª regra) ---
+  /* 16 */ row({ "Matrícula da Viatura": "33IV96", "Código de Loja": "7001", "Hora de Chegada": "02:54", "Hora de Saída": "03:34", [CONFIANCA_COL]: "OK", [REAL_COL]: "⚠️ Conflito: sobrepõe-se à linha 7005 (Auchan Congelados, 02:50–03:10) — mesma viatura, horários fisicamente incompatíveis. Confirma qual está correto." }),
 ];
-const LAST = rows.length + 1; // 15
+const LAST = rows.length + 1; // 16
 const suggestionRowNums = [5, 6, 7, 13];
 const gpsRowNums = [8, 9];
 const shortStopRowNums = [11, 12, 15]; // purple expected
-const notShortStopRowNums = [2, 3, 13, 14]; // purple NOT expected (13 pending-suppressed, 14 boundary)
+const notShortStopRowNums = [2, 3, 13, 14, 16]; // purple NOT expected (13 pending-suppressed, 14 boundary, 16 conflict-suppressed)
 
 async function main() {
   const b64 = await buildSheetWorkbook({
@@ -147,7 +149,7 @@ async function main() {
 
   // ---- conditional formatting ----
   const cfs = cfsOf(ws);
-  ok("5 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 5, cfs.map((c) => c.ref));
+  ok("6 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 6, cfs.map((c) => c.ref));
 
   // Layout: C=Matrícula, E=Chegada, F=Saída, G=Confiança, H=Real, I=ZZ, J=YY, K=XX, L=WW.
   const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
@@ -155,26 +157,31 @@ async function main() {
   const amberSai = cfFor(`F2:F${LAST}`);
   const redSugg = cfFor(`C2:C${LAST} G2:G${LAST}`);
   const redGps = cfFor(`C2:C${LAST}`);
-  const purpleTimes = cfFor(`E2:E${LAST} F2:F${LAST}`);
+  const timeCfs = cfs.filter((c) => c.ref === `E2:E${LAST} F2:F${LAST}`);
+  const grayConflict = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Conflito"));
+  const purpleTimes = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("$L2<5"));
   ok("amber Chegada sqref = E-column only", !!amberChe, cfs.map((c) => c.ref));
   ok("amber Saída sqref = F-column only", !!amberSai, cfs.map((c) => c.ref));
   ok("red suggestion sqref = Matrícula + Confiança", !!redSugg, cfs.map((c) => c.ref));
   ok("red no-GPS sqref = Matrícula column ONLY (not Confiança)", !!redGps, cfs.map((c) => c.ref));
+  ok("gray conflict rule present on Chegada + Saída", !!grayConflict, timeCfs);
   ok("purple short-stop sqref = Chegada + Saída", !!purpleTimes, cfs.map((c) => c.ref));
 
   const fChe = amberChe?.rules[0]?.formulae?.[0] ?? "";
   const fSai = amberSai?.rules[0]?.formulae?.[0] ?? "";
   const fSugg = redSugg?.rules[0]?.formulae?.[0] ?? "";
   const fGps = redGps?.rules[0]?.formulae?.[0] ?? "";
-  const fPurple = purpleTimes?.rules[0]?.formulae?.[0] ?? "";
+  const fGray = grayConflict?.formulae?.[0] ?? "";
+  const fPurple = purpleTimes?.formulae?.[0] ?? "";
   ok("amber Chegada formula", fChe === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""))', fChe);
   ok("amber Saída formula", fSai === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""))', fSai);
   ok("red suggestion formula", fSugg === 'AND($I2<>"",$C2=$I2,$G2<>"OK")', fSugg);
   ok('red no-GPS formula = ISNUMBER(SEARCH("cobertura GPS",$H2))', fGps === 'ISNUMBER(SEARCH("cobertura GPS",$H2))', fGps);
   ok("red no-GPS formula does NOT reference the plate cell ($C) — a plate delete can't hide it", !/\$C\d/.test(fGps), fGps);
+  ok('gray conflict formula = ISNUMBER(SEARCH("Conflito",$H2))', fGray === 'ISNUMBER(SEARCH("Conflito",$H2))', fGray);
   ok(
-    "purple formula keys off WW (<5, >=0) and suppresses while a suggestion is pending",
-    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")))',
+    "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending OR in conflict",
+    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))))',
     fPurple,
   );
   ok("no CF paints a whole-row range", cfs.every((c) => !/(^|\s)A2:/.test(c.ref)), cfs.map((c) => c.ref));
@@ -195,6 +202,7 @@ async function main() {
     return cell === "" && (/rever/i.test(st.conf) || snap !== "");
   };
   const redGpsOn = (realText: string) => /cobertura gps/i.test(realText); // mirrors SEARCH("cobertura GPS",$H)
+  const grayConflictOn = (realText: string) => /conflito/i.test(realText); // mirrors SEARCH("Conflito",$H)
 
   const rever = { conf: REVIEW, chegada: "", saida: "", yy: "", xx: "" };
   ok("Rever, both blank -> both amber", amberOn(fChe, rever) && amberOn(fSai, rever));
@@ -211,10 +219,15 @@ async function main() {
   ok("swap note ('não tem dados GPS') -> plate cell NOT red", redGpsOn("Nota: o veículo XX não tem dados GPS — não é alternativa real.") === false);
   ok("no-GPS red survives an accidental plate delete (formula ignores the plate cell)", redGpsOn(noGpsCoverageNote("72XR33", false)) === true);
 
+  // *** 🔘 conflict dark gray ***
+  ok("conflict Real text -> Chegada+Saída gray", grayConflictOn(rows[14][REAL_COL] as string) === true);
+  ok("plain OK (no conflict) -> not gray", grayConflictOn("") === false);
+
   // *** 🟣 short-stop purple ***
-  const purpleOn = (st: { ww: number | ""; zz: string; plate: string; conf: string }) => {
+  const purpleOn = (st: { ww: number | ""; zz: string; plate: string; conf: string; real?: string }) => {
     const pending = st.zz !== "" && st.plate === st.zz && st.conf !== "OK";
-    return st.ww !== "" && st.ww >= 0 && st.ww < 5 && !pending;
+    const conflict = grayConflictOn(st.real ?? "");
+    return st.ww !== "" && st.ww >= 0 && st.ww < 5 && !pending && !conflict;
   };
   ok("3min OK -> purple", purpleOn({ ww: 3, zz: "", plate: "66HH66", conf: "OK" }) === true);
   ok("20min OK -> not purple", purpleOn({ ww: 20, zz: "", plate: "11AA11", conf: "OK" }) === false);
@@ -222,13 +235,14 @@ async function main() {
   ok("2min but suggestion still pending -> NOT purple (red keeps priority)", purpleOn({ ww: 2, zz: "44DD44", plate: "44DD44", conf: SWAP }) === false);
   ok("same 2min duration, suggestion ACCEPTED (Confiança -> OK) -> purple turns on", purpleOn({ ww: 2, zz: "44DD44", plate: "44DD44", conf: "OK" }) === true);
   ok("suggestion rejected by editing the plate away from ZZ -> pending test no longer blocks purple", purpleOn({ ww: 2, zz: "44DD44", plate: "44DD46", conf: SWAP }) === true);
+  ok("2min conflict row -> NOT purple (gray keeps priority)", purpleOn({ ww: 2, zz: "", plate: "33IV96", conf: "OK", real: rows[14][REAL_COL] as string }) === false);
   ok("exactly 5min -> NOT purple (strict <5 boundary)", purpleOn({ ww: 5, zz: "", plate: "99JJ99", conf: "OK" }) === false);
   ok("exactly 0min (warehouse/CD, code94) -> purple (no location exception)", purpleOn({ ww: 0, zz: "", plate: "00KK00", conf: "OK" }) === true);
   ok("blank WW (row without both times) -> not purple", purpleOn({ ww: "", zz: "", plate: "33CC33", conf: REVIEW }) === false);
 
   // ---- data validation ----
   const dvAt = (r: number) => ws.getCell(r, colIdx(CONFIANCA_COL)).dataValidation;
-  ok("dropdown ['OK'] on exactly the suggestion rows", suggestionRowNums.every((r) => dvAt(r)?.type === "list") && [2, 3, 4, 8, 9, 10, 11, 12, 14, 15].every((r) => !dvAt(r)));
+  ok("dropdown ['OK'] on exactly the suggestion rows", suggestionRowNums.every((r) => dvAt(r)?.type === "list") && [2, 3, 4, 8, 9, 10, 11, 12, 14, 15, 16].every((r) => !dvAt(r)));
   void gpsRowNums;
   void shortStopRowNums;
   void notShortStopRowNums;
@@ -279,13 +293,18 @@ async function main() {
   );
   ok("Azambuja: ZZ/YY/XX/WW appended & hidden", ["ZZ", "YY", "XX", "WW"].every((c) => azWs.getColumn(azHdr.indexOf(c) + 1).hidden === true));
 
-  const azPurple = azCfs.find((c) => c.ref === `${gL}2:${gL}${azLast} ${hL}2:${hL}${azLast}`);
-  ok("Azambuja: purple short-stop sqref = Hora Chegada + Hora Saida", !!azPurple, azCfs.map((c) => c.ref));
+  const azTimeCfs = azCfs.filter((c) => c.ref === `${gL}2:${gL}${azLast} ${hL}2:${hL}${azLast}`);
+  const azConflict = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Conflito"));
+  ok("Azambuja: conflict gray rule on Hora Chegada + Hora Saida", !!azConflict);
+  ok("Azambuja: conflict formula keys off Real", azConflict?.formulae?.[0] === `ISNUMBER(SEARCH("Conflito",$${jL}2))`);
+
   const azWwL = azWs.getColumn(azHdr.indexOf(WW_COL) + 1).letter;
+  const azPurple = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes(`$${azWwL}2`));
+  ok("Azambuja: purple short-stop sqref = Hora Chegada + Hora Saida", !!azPurple, azCfs.map((c) => c.ref));
   ok(
     "Azambuja: purple formula keys off its own WW column",
-    !!azPurple?.rules[0]?.formulae?.[0]?.includes(`$${azWwL}2`),
-    azPurple?.rules[0]?.formulae?.[0],
+    !!azPurple?.formulae?.[0]?.includes(`$${azWwL}2`),
+    azPurple?.formulae?.[0],
   );
   const azWwFormula = (azWs.getCell(5, azHdr.indexOf(WW_COL) + 1).value as { formula?: string } | null)?.formula ?? "";
   ok(

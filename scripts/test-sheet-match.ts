@@ -1087,5 +1087,217 @@ ok(
   );
 }
 
+// ---------------------------------------------------------------------------
+// 5th visual rule: physical schedule overlap / conflict detection (dark gray)
+// Case 1: User's headline case (33-IV-96, route 185840951 / 185840819, 15/09)
+// 7005 mantido 02:50-03:10 vs 7001 OK 02:54-03:34
+// ---------------------------------------------------------------------------
+{
+  const azDay = "2026-09-15";
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  const azRecords: SheetRecord[] = [
+    {
+      ROTA: "185840951",
+      N_LOJA: "7005",
+      NOME: "Auchan Congelados",
+      MATRICULA: "33-IV-96",
+      "Hora Chegada": "15/09/2026 02:50",
+      "Hora Saida": "15/09/2026 03:10",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+    {
+      ROTA: "185840951",
+      N_LOJA: "7001",
+      NOME: "Auchan Azambuja",
+      MATRICULA: "33-IV-96",
+      "Hora Chegada": "",
+      "Hora Saida": "",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+  ];
+  const azStops: DayStop[] = [
+    {
+      id: "stop-7001",
+      vehicleId: 1039275,
+      plate: "33IV96",
+      code: "7001",
+      arrivedAt: "2026-09-15T02:54:00+01:00",
+      departedAt: "2026-09-15T03:34:00+01:00",
+    },
+  ];
+  const r = runAzMatch({
+    day: azDay,
+    records: azRecords,
+    header: azHeader,
+    cols: azCols,
+    stops: azStops,
+    platesWithGps: new Set(["33IV96"]),
+    pingWindowByPlate: new Map(),
+    rawRecords: azRecords,
+  });
+
+  const row7005 = r.rows[0];
+  const row7001 = r.rows[1];
+
+  ok("33-IV-96 conflict: row 7005 conf kept unchanged", row7005["Confiança"] === KEPT, row7005);
+  ok("33-IV-96 conflict: row 7005 times kept unchanged", row7005["Hora Chegada"] === "15/09/2026 02:50" && row7005["Hora Saida"] === "15/09/2026 03:10", row7005);
+  ok("33-IV-96 conflict: row 7001 conf OK unchanged", row7001["Confiança"] === "OK", row7001);
+  ok("33-IV-96 conflict: row 7001 times OK unchanged", row7001["Hora Chegada"] === "15/09/2026 02:54" && row7001["Hora Saida"] === "15/09/2026 03:34", row7001);
+
+  ok("33-IV-96 conflict: row 7005 flags conflict in Real", typeof row7005["Real"] === "string" && row7005["Real"].includes("⚠️ Conflito: sobrepõe-se à linha 7001 (Auchan Azambuja, 02:54–03:34)"), row7005["Real"]);
+  ok("33-IV-96 conflict: row 7001 flags conflict in Real", typeof row7001["Real"] === "string" && row7001["Real"].includes("⚠️ Conflito: sobrepõe-se à linha 7005 (Auchan Congelados, 02:50–03:10)"), row7001["Real"]);
+}
+
+// Case 2: Co-located stores (12/7030, 26/7004, 01/7001, B78/94) with overlapping times
+// Must NOT flag conflict because they are the same physical site!
+{
+  const azDay = "2026-09-15";
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  const azRecords: SheetRecord[] = [
+    {
+      ROTA: "R100",
+      N_LOJA: "B78",
+      NOME: "Albufeira Hiper",
+      MATRICULA: "28-RN-74",
+      "Hora Chegada": "15/09/2026 02:50",
+      "Hora Saida": "15/09/2026 03:10",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+    {
+      ROTA: "R100",
+      N_LOJA: "94",
+      NOME: "Albufeira Armazém",
+      MATRICULA: "28-RN-74",
+      "Hora Chegada": "15/09/2026 02:54",
+      "Hora Saida": "15/09/2026 03:34",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+  ];
+  const coLocatedGroups: CoLocatedGroups = [new Set(["B78", "94", "AUCHAN-06"])];
+  const r = runAzMatch({
+    day: azDay,
+    records: azRecords,
+    header: azHeader,
+    cols: azCols,
+    stops: [],
+    platesWithGps: new Set(["28RN74"]),
+    pingWindowByPlate: new Map(),
+    rawRecords: azRecords,
+    coLocatedGroups,
+  });
+  ok("co-located B78/94: no conflict flagged on B78", !String(r.rows[0]["Real"] ?? "").includes("Conflito"), r.rows[0]["Real"]);
+  ok("co-located B78/94: no conflict flagged on 94", !String(r.rows[1]["Real"] ?? "").includes("Conflito"), r.rows[1]["Real"]);
+}
+
+// Case 3: Adjacent stops (02:50-03:10 and 03:10-03:30)
+// Must NOT flag conflict because startB === endA (no overlap)
+{
+  const azDay = "2026-09-15";
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  const azRecords: SheetRecord[] = [
+    {
+      ROTA: "R101",
+      N_LOJA: "7005",
+      NOME: "Auchan Congelados",
+      MATRICULA: "33-IV-96",
+      "Hora Chegada": "15/09/2026 02:50",
+      "Hora Saida": "15/09/2026 03:10",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+    {
+      ROTA: "R101",
+      N_LOJA: "7001",
+      NOME: "Auchan Azambuja",
+      MATRICULA: "33-IV-96",
+      "Hora Chegada": "15/09/2026 03:10",
+      "Hora Saida": "15/09/2026 03:30",
+      CICLO: "01:00 | 05:00",
+      TIPO: "C",
+    },
+  ];
+  const r = runAzMatch({
+    day: azDay,
+    records: azRecords,
+    header: azHeader,
+    cols: azCols,
+    stops: [],
+    platesWithGps: new Set(["33IV96"]),
+    pingWindowByPlate: new Map(),
+    rawRecords: azRecords,
+  });
+  ok("adjacent stops: no conflict flagged on 7005", !String(r.rows[0]["Real"] ?? "").includes("Conflito"), r.rows[0]["Real"]);
+  ok("adjacent stops: no conflict flagged on 7001", !String(r.rows[1]["Real"] ?? "").includes("Conflito"), r.rows[1]["Real"]);
+}
+
+// Case 4: TFS sheet conflict detection
+{
+  const tfsDay = "2026-09-15";
+  const tfsHeader = [
+    "Dia do Serviço",
+    "Nº Camião",
+    "Matrícula da Viatura",
+    "Ordem de Entrega",
+    "Código de Loja",
+    "Designação da Loja",
+    "Janela Início",
+    "Janela Fim",
+    "Hora de Chegada",
+    "Hora de Saída",
+    "ID",
+  ];
+  const tfsCols = resolveTfsColumns(tfsHeader);
+  const tfsRecords: SheetRecord[] = [
+    {
+      "Dia do Serviço": tfsDay,
+      "Nº Camião": "500",
+      "Matrícula da Viatura": "11-AA-11",
+      "Ordem de Entrega": "1",
+      "Código de Loja": "E89",
+      "Designação da Loja": "Continente Cascais",
+      "Janela Início": "08:00",
+      "Janela Fim": "10:00",
+      "Hora de Chegada": "08:30",
+      "Hora de Saída": "09:15",
+      ID: "TFS-500-11AA11-1ªRota-15/09/2026",
+    },
+    {
+      "Dia do Serviço": tfsDay,
+      "Nº Camião": "500",
+      "Matrícula da Viatura": "11-AA-11",
+      "Ordem de Entrega": "2",
+      "Código de Loja": "B97",
+      "Designação da Loja": "Continente Amadora",
+      "Janela Início": "08:00",
+      "Janela Fim": "10:00",
+      "Hora de Chegada": "09:00",
+      "Hora de Saída": "09:45",
+      ID: "TFS-500-11AA11-1ªRota-15/09/2026",
+    },
+  ];
+  const r = runTfsMatch({
+    day: tfsDay,
+    records: tfsRecords,
+    header: tfsHeader,
+    cols: tfsCols,
+    stops: [],
+    platesWithGps: new Set(["11AA11"]),
+    fleetByTruck: new Map(),
+    pingWindowByPlate: new Map(),
+  });
+  ok("TFS conflict: row E89 flags conflict in Real", typeof r.rows[0]["Real"] === "string" && r.rows[0]["Real"].includes("⚠️ Conflito: sobrepõe-se à linha B97 (Continente Amadora, 09:00–09:45)"), r.rows[0]["Real"]);
+  ok("TFS conflict: row B97 flags conflict in Real", typeof r.rows[1]["Real"] === "string" && r.rows[1]["Real"].includes("⚠️ Conflito: sobrepõe-se à linha E89 (Continente Cascais, 08:30–09:15)"), r.rows[1]["Real"]);
+  ok("TFS conflict: row E89 conf KEPT unchanged", r.rows[0]["Confiança"] === KEPT);
+  ok("TFS conflict: row B97 conf KEPT unchanged", r.rows[1]["Confiança"] === KEPT);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+

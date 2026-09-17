@@ -1057,3 +1057,173 @@ export function plateTypoNote(
 
 // Re-exported so matchers can normalise plates without a second import.
 export { normalizePlate };
+
+// ---------------------------------------------------------------------------
+// Schedule overlap / conflict detection (5th visual rule: dark gray)
+// ---------------------------------------------------------------------------
+
+// Parse a Chegada/Saída cell string into epoch ms (Lisbon wall-clock).
+// Tolerant of "DD/MM/YYYY HH:MM", bare "HH:MM", or ISO timestamp.
+export function parseTimeCellToEpochMs(
+  v: unknown,
+  defaultDay?: string,
+): number | null {
+  if (v == null || v === "") return null;
+  const s = String(v).trim();
+  const dmyMatch = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/,
+  );
+  if (dmyMatch) {
+    const [, d, mo, y, h, mi] = dmyMatch;
+    const ymd = `${y}-${pad2(mo)}-${pad2(d)}`;
+    return lisbonEpoch(ymd, Number(h) * 60 + Number(mi));
+  }
+  const hmMatch = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hmMatch) {
+    const min = Number(hmMatch[1]) * 60 + Number(hmMatch[2]);
+    const day = defaultDay || "2000-01-01";
+    return lisbonEpoch(day, min);
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.getTime();
+  return null;
+}
+
+// Extract clean "HH:MM" display time for the note caption.
+export function fmtTimeCellForNote(v: unknown): string {
+  if (v == null) return "";
+  const s = String(v).trim();
+  const m = s.match(/\b(\d{1,2}:\d{2})\b/);
+  return m ? m[1] : s;
+}
+
+// Format the conflict note stamped on the "Real" column.
+export function scheduleConflictNote(params: {
+  otherCode: string;
+  otherName?: string | null;
+  otherChegada: string;
+  otherSaida: string;
+}): string {
+  const { otherCode, otherName, otherChegada, otherSaida } = params;
+  const tChegada = fmtTimeCellForNote(otherChegada);
+  const tSaida = fmtTimeCellForNote(otherSaida);
+  const times = `${tChegada}–${tSaida}`;
+  const label = otherName && otherName.trim() !== otherCode.trim()
+    ? `${otherCode} (${otherName.trim()}, ${times})`
+    : `${otherCode} (${times})`;
+  return `⚠️ Conflito: sobrepõe-se à linha ${label} — mesma viatura, horários fisicamente incompatíveis. Confirma qual está correto.`;
+}
+
+export type DetectScheduleConflictItem = {
+  idx: number;
+  out: SheetRecord;
+  route: string;
+  plate: string | null;
+  code: string;
+  name?: string;
+};
+
+/**
+ * Flags physical schedule conflicts between rows of the same route and same
+ * vehicle plate with different, non-co-located store codes.
+ * Pure in terms of schedule values: only annotates `REAL_COL` with the conflict
+ * warning note; never touches Chegada, Saída, or Confiança.
+ */
+export function detectScheduleConflicts(params: {
+  items: DetectScheduleConflictItem[];
+  chegadaCol: string;
+  saidaCol: string;
+  defaultDay: string;
+  coLocatedGroups: CoLocatedGroups;
+}): void {
+  const { items, chegadaCol, saidaCol, defaultDay, coLocatedGroups } = params;
+
+  type ParsedItem = DetectScheduleConflictItem & {
+    plate: string;
+    startMs: number;
+    effEndMs: number;
+    chegadaStr: string;
+    saidaStr: string;
+  };
+
+  const parsed: ParsedItem[] = [];
+  for (const it of items) {
+    if (!it.plate || !it.code) continue;
+    const chegadaStr = String(it.out[chegadaCol] ?? "").trim();
+    const saidaStr = String(it.out[saidaCol] ?? "").trim();
+    if (!chegadaStr || !saidaStr) continue;
+
+    const startMs = parseTimeCellToEpochMs(chegadaStr, defaultDay);
+    const endMs = parseTimeCellToEpochMs(saidaStr, defaultDay);
+    if (startMs == null || endMs == null) continue;
+
+    // Reject inverted intervals where departure is strictly before arrival.
+    if (endMs < startMs) continue;
+
+    // Minimum 1 min effective duration so a 0-min pass-through during another
+    // stop is correctly caught as overlapping, without catching adjacent stops.
+    const effEndMs = Math.max(endMs, startMs + 60_000);
+    parsed.push({
+      ...it,
+      plate: it.plate,
+      startMs,
+      effEndMs,
+      chegadaStr,
+      saidaStr,
+    });
+  }
+
+  // Group by (plate, route)
+  const byGroup = new Map<string, ParsedItem[]>();
+  for (const it of parsed) {
+    const normPlate = normalizePlate(it.plate);
+    if (!normPlate) continue;
+    const routeKey = it.route.trim().toLowerCase() || "(sem-rota)";
+    const key = `${normPlate}::${routeKey}`;
+    const list = byGroup.get(key);
+    if (list) list.push(it);
+    else byGroup.set(key, [it]);
+  }
+
+  const conflictsByItem = new Map<ParsedItem, ParsedItem[]>();
+
+  for (const group of byGroup.values()) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      const a = group[i];
+      for (let j = i + 1; j < group.length; j++) {
+        const b = group[j];
+        // 1. Must be different store codes and NOT co-located/merged.
+        if (codeEq(a.code, b.code, coLocatedGroups)) continue;
+
+        // 2. Physical overlap: startA < effEndB && startB < effEndA
+        if (a.startMs < b.effEndMs && b.startMs < a.effEndMs) {
+          let listA = conflictsByItem.get(a);
+          if (!listA) conflictsByItem.set(a, (listA = []));
+          listA.push(b);
+
+          let listB = conflictsByItem.get(b);
+          if (!listB) conflictsByItem.set(b, (listB = []));
+          listB.push(a);
+        }
+      }
+    }
+  }
+
+  // Stamp notes on conflicting items
+  for (const [it, rivals] of conflictsByItem.entries()) {
+    const notes = rivals.map((r) =>
+      scheduleConflictNote({
+        otherCode: r.code,
+        otherName: r.name,
+        otherChegada: r.chegadaStr,
+        otherSaida: r.saidaStr,
+      }),
+    );
+    const combinedNote = notes.join(" ");
+    const existing = String(it.out[REAL_COL] ?? "").trim();
+    it.out[REAL_COL] = existing
+      ? `${combinedNote} ${existing}`
+      : combinedNote;
+  }
+}

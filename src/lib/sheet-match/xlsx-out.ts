@@ -51,6 +51,13 @@
 //     above) the times shown belong to an UNCONFIRMED candidate stop, so 🟣
 //     stays off even if that candidate's duration is short — accepting the
 //     suggestion (Confiança -> "OK") lets 🟣 evaluate normally from then on.
+//
+//   • 🔘 cinzento escuro on «Hora de Chegada» AND «Hora de Saída» (both cells,
+//     same row) whenever «Real» flags a physical schedule conflict ("Conflito").
+//     Fires when two rows of the same route and vehicle plate have overlapping
+//     time windows at different store codes (not co-located/merged). Takes
+//     precedence over 🟣 (short stop). Both times and Confiança values are kept
+//     verbatim as calculated/maintained.
 
 import ExcelJS from "exceljs";
 import {
@@ -84,6 +91,7 @@ const TECH_COL_SET: ReadonlySet<string> = new Set(TECH_COLS);
 const FILL_AMBER = "FFFFE699";
 const FILL_RED = "FFF4B6B0";
 const FILL_PURPLE = "FFDCC6F2";
+export const FILL_DARK_GRAY = "FFA6A6A6";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
@@ -348,24 +356,44 @@ export async function buildSheetWorkbook(
     });
   }
 
-  // 🟣 short stop (< 5 min): painted on Chegada + Saída together, keyed off
-  // the live WW duration. Suppressed while the row is still an unconfirmed
-  // suggestion (same "plate cell == ZZ and Confiança <> OK" test as the red
-  // rule above) — those times belong to a candidate stop, not a confirmed
-  // one, so 🔴 keeps priority until the suggestion is accepted or changed.
-  if (chegadaL && saidaL) {
-    const pending =
-      confL && plateL
-        ? `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`
-        : "FALSE";
+  // 🔘 conflito de horários sobrepostos: Chegada + Saída pintadas a cinzento
+  // escuro quando «Real» menciona "Conflito" (mesma rota + viatura com paragens
+  // fisicamente incompatíveis em lojas diferentes). Tem prioridade sobre o
+  // roxo de paragem curta.
+  if (chegadaL && saidaL && realL) {
     ws.addConditionalFormatting({
       ref: colsRef(chegadaL, saidaL),
       rules: [
         {
           type: "expression",
           priority: 5,
+          formulae: [`ISNUMBER(SEARCH("Conflito",$${realL}2))`],
+          style: solid(FILL_DARK_GRAY),
+        },
+      ],
+    });
+  }
+
+  // 🟣 short stop (< 5 min): painted on Chegada + Saída together, keyed off
+  // the live WW duration. Suppressed while the row is still an unconfirmed
+  // suggestion (same "plate cell == ZZ and Confiança <> OK" test as the red
+  // rule above) OR when the row is in conflict (🔘 cinzento escuro keeps priority).
+  if (chegadaL && saidaL) {
+    const pending =
+      confL && plateL
+        ? `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`
+        : "FALSE";
+    const conflict = realL
+      ? `ISNUMBER(SEARCH("Conflito",$${realL}2))`
+      : "FALSE";
+    ws.addConditionalFormatting({
+      ref: colsRef(chegadaL, saidaL),
+      rules: [
+        {
+          type: "expression",
+          priority: 6,
           formulae: [
-            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}))`,
+            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}))`,
           ],
           style: solid(FILL_PURPLE),
         },

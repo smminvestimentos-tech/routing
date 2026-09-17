@@ -39,6 +39,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
+  detectScheduleConflicts,
   findPlateTypo,
   findVehicleSwap,
   fmtDuration,
@@ -112,6 +113,7 @@ export type ResolvedColumns = {
   codeCol: string;
   designacaoCol: string | null;
   ordemCol: string | null;
+  voltaCol: string | null;
   /** "ID" column — {Transportador}-{Nº}-{Matrícula}-{Volta}ªRota-{Data} */
   idCol: string | null;
   janIniCol: string | null;
@@ -308,6 +310,7 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     "nome da loja",
   );
   const ordemCol = take("ordem de entrega", "ordem entrega", "ordem");
+  const voltaCol = take("volta da viatura", "volta viatura", "volta");
   const janIniCol = take("janela inicio", "janela ini", "inicio janela");
   const janFimCol = take("janela fim", "janela fim loja", "fim janela");
   const chegadaCol = take("hora de chegada", "hora chegada", "chegada");
@@ -330,6 +333,7 @@ export function resolveColumns(header: string[]): ResolvedColumns {
     codeCol: codeCol ?? "",
     designacaoCol,
     ordemCol,
+    voltaCol,
     idCol,
     janIniCol,
     janFimCol,
@@ -821,6 +825,41 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else review++;
     if (w.source === "discrepancy") discrepancy++;
   }
+
+  // 5th visual signaling rule: detect physical schedule overlaps between rows
+  // of the same route & plate at different store codes (not co-located/merged).
+  // Stamps conflict warning in REAL_COL; leaves times and Confiança untouched.
+  detectScheduleConflicts({
+    items: works
+      .filter((w) => !w.empty)
+      .map((w) => {
+        const route = cols.idCol && w.out[cols.idCol]
+          ? String(w.out[cols.idCol]).trim()
+          : cols.voltaCol && w.out[cols.voltaCol]
+            ? `${w.rawTruck}::volta_${w.out[cols.voltaCol]}`.trim()
+            : w.rawTruck
+              ? String(w.rawTruck).trim()
+              : "tfs";
+        const plate = cols.plateCol && w.out[cols.plateCol]
+          ? String(w.out[cols.plateCol]).trim()
+          : w.swapPlate || w.plate;
+        const name = cols.designacaoCol
+          ? String(w.out[cols.designacaoCol] ?? "").trim()
+          : w.designacao;
+        return {
+          idx: w.idx,
+          out: w.out,
+          route,
+          plate,
+          code: w.code,
+          name,
+        };
+      }),
+    chegadaCol: cols.chegadaCol,
+    saidaCol: cols.saidaCol,
+    defaultDay: day,
+    coLocatedGroups,
+  });
 
   return {
     rows: works.map((w) => w.out),

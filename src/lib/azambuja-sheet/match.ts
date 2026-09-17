@@ -40,6 +40,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
+  detectScheduleConflicts,
   findPlateTypo,
   findVehicleSwap,
   fmtDateTimeLisbon,
@@ -1086,6 +1087,28 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else if (w.conf === PLATE_TYPO) plateTypo++;
     else review++;
   }
+
+  // 5th visual signaling rule: detect physical schedule overlaps between rows
+  // of the same route & plate at different store codes (not co-located/merged).
+  // Stamps conflict warning in REAL_COL; leaves times and Confiança untouched.
+  detectScheduleConflicts({
+    items: works
+      .filter((w) => !w.empty)
+      .map((w) => ({
+        idx: w.idx,
+        out: w.out,
+        route: String(w.out[cols.rotaCol] ?? w.rota ?? "").trim(),
+        plate: cols.plateCol
+          ? String(w.out[cols.plateCol] ?? "")
+          : w.swapPlate || w.plate,
+        code: w.code,
+        name: cols.nomeCol ? String(w.out[cols.nomeCol] ?? "") : undefined,
+      })),
+    chegadaCol: cols.chegadaCol,
+    saidaCol: cols.saidaCol,
+    defaultDay: day,
+    coLocatedGroups,
+  });
 
   const routesOk = [...routeMap.values()].filter(
     (rg) => rg.length > 0 && rg.every((g) => g.conf === "OK"),
