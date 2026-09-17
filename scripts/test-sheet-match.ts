@@ -29,7 +29,9 @@ import {
   codeKey,
   type CoLocatedGroups,
   findPlateTypo,
+  FRAGMENT_MERGE_GAP_MIN,
   isEditDistance1,
+  mergeFragmentedStops,
   resolveMergedCode,
 } from "@/lib/sheet-match/common";
 
@@ -769,6 +771,319 @@ ok(
     "Almada Azambuja: 'N_LOJA' cell stays '7030' (never rewritten to 12)",
     azWith.rows[0]["N_LOJA"] === "7030",
     azWith.rows[0]["N_LOJA"],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// mergeFragmentedStops — direct unit tests. Backs the 2026-09
+// azambuja-2026-09-15-conferido fragmentation bug: 71 sheet rows landed "OK"
+// with an exact 0.0min duration (Chegada === Saída), 57 of them (80%) at
+// código 7001 alone — detect_stops cutting/reopening a stop on a >50m GPS
+// reposition inside the same yard, with the matcher then pairing the row to
+// whichever fragment sorted first (often the shortest).
+// ---------------------------------------------------------------------------
+{
+  const f = (
+    id: string,
+    vehicleId: number,
+    code: string | null,
+    arr: string,
+    dep: string | null,
+  ): DayStop => ({
+    id,
+    vehicleId,
+    plate: "40TT01",
+    code,
+    arrivedAt: iso(arr),
+    departedAt: dep ? iso(dep) : null,
+  });
+
+  // 1. Two 0min fragments 5min apart -> merged into one spanning both.
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, "7001", "07:58", "07:58"),
+      f("g2", 1, "7001", "08:03", "08:03"),
+    ]);
+    ok("mergeFragmentedStops: 2 fragments 5min apart -> 1 effective stop", merged.length === 1, merged);
+    ok(
+      "mergeFragmentedStops: effective stop spans earliest arrival to latest departure",
+      merged[0]?.arrivedAt === iso("07:58") && merged[0]?.departedAt === iso("08:03"),
+      merged[0],
+    );
+  }
+
+  // 2. Exactly at the threshold -> still merges (<=, not <).
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, "7001", "07:00", "07:00"),
+      f("g2", 1, "7001", `07:${String(FRAGMENT_MERGE_GAP_MIN).padStart(2, "0")}`, "07:20"),
+    ]);
+    ok(`mergeFragmentedStops: gap === ${FRAGMENT_MERGE_GAP_MIN}min (boundary) -> merges`, merged.length === 1, merged);
+  }
+
+  // 3. Just past the threshold -> two genuinely separate stops kept.
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, "7001", "07:00", "07:00"),
+      f("g2", 1, "7001", "07:16", "07:20"),
+    ]);
+    ok("mergeFragmentedStops: gap > threshold -> NOT merged (2 stops kept)", merged.length === 2, merged);
+  }
+
+  // 4. Chain of 3 fragments, each within the gap of its neighbour -> all fold
+  // into ONE effective stop even though fragment 1 -> 3 alone would exceed it.
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, "7001", "07:58", "07:58"),
+      f("g2", 1, "7001", "08:03", "08:03"),
+      f("g3", 1, "7001", "08:09", "08:31"),
+    ]);
+    ok("mergeFragmentedStops: 3-fragment chain -> 1 effective stop", merged.length === 1, merged);
+    ok(
+      "mergeFragmentedStops: chain spans 07:58 -> 08:31 (33min, plausible)",
+      merged[0]?.arrivedAt === iso("07:58") && merged[0]?.departedAt === iso("08:31"),
+      merged[0],
+    );
+  }
+
+  // 5. Same code, DIFFERENT vehicle, close in time -> never merged across vehicles.
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, "7001", "07:58", "07:58"),
+      f("g2", 2, "7001", "08:00", "08:00"),
+    ]);
+    ok("mergeFragmentedStops: different vehicleId -> never merged", merged.length === 2, merged);
+  }
+
+  // 6. No code at all -> passed through untouched, never merged with anything.
+  {
+    const merged = mergeFragmentedStops([
+      f("g1", 1, null, "07:58", "07:58"),
+      f("g2", 1, null, "08:00", "08:00"),
+    ]);
+    ok("mergeFragmentedStops: stops without a code are passed through untouched", merged.length === 2, merged);
+  }
+
+  // 7. Isolated single stop (código 94 shape: a genuine one-off 0min
+  // pass-through, nothing nearby) -> returned unchanged, duration stays 0.
+  {
+    const merged = mergeFragmentedStops([f("g1", 1, "94", "10:00", "10:00")]);
+    ok(
+      "mergeFragmentedStops: isolated 0min stop (código 94) stays 0min — never invents a duration",
+      merged.length === 1 && merged[0].arrivedAt === merged[0].departedAt,
+      merged[0],
+    );
+  }
+
+  // 8. NEVER bridges a Lisbon calendar-day boundary — regression for the
+  // azambuja "02:00 | 14:00" / 7005 case (test-azambuja-window.ts): a stop
+  // that itself straddles midnight (23:24 -> 00:12 next day) sits right next
+  // to a genuine in-day 0min stop (23:59). Fusing them would launder the
+  // ambiguous next-day departure into what looks like one clean, in-window
+  // visit — each matcher's own day/CICLO logic must keep judging the
+  // midnight-crossing one on its own, unmerged.
+  {
+    const iso2 = (day: "09" | "10", hhmm: string) => `2026-09-${day}T${hhmm}:00+01:00`;
+    const spans: DayStop = { id: "s2", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso2("09", "23:24"), departedAt: iso2("10", "00:12") };
+    const inDay: DayStop = { id: "s2b", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso2("09", "23:59"), departedAt: iso2("09", "23:59") };
+    const merged = mergeFragmentedStops([spans, inDay]);
+    ok(
+      "mergeFragmentedStops: a midnight-crossing fragment is never fused with a neighbouring in-day one",
+      merged.length === 2 &&
+        merged.some((m) => m.id === "s2" && m.departedAt === spans.departedAt) &&
+        merged.some((m) => m.id === "s2b" && m.departedAt === inDay.departedAt),
+      merged,
+    );
+  }
+
+  // 9. Two same-day fragments close together, near (but not crossing)
+  // midnight, still merge normally — the guard is about the DAY boundary,
+  // not proximity to midnight itself.
+  {
+    const iso2 = (day: "09" | "10", hhmm: string) => `2026-09-${day}T${hhmm}:00+01:00`;
+    const merged = mergeFragmentedStops([
+      { id: "n1", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso2("09", "23:40"), departedAt: iso2("09", "23:40") },
+      { id: "n2", vehicleId: 1, plate: "AA11BB", code: "7005", arrivedAt: iso2("09", "23:52"), departedAt: iso2("09", "23:59") },
+    ]);
+    ok(
+      "mergeFragmentedStops: two same-day fragments near midnight still merge normally",
+      merged.length === 1 && merged[0].arrivedAt === iso2("09", "23:40") && merged[0].departedAt === iso2("09", "23:59"),
+      merged,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end: the código 7001 fragmentation bug, reproduced through the real
+// matchers (not just the unit-level merge). Azambuja hits the sharper version
+// directly — match.ts's "candidates.length >= g.rows.length" branch zips
+// fragments positionally onto sheet rows in arrival order and simply leaves
+// any extra fragment unassigned, so a single row facing 2+ fragments always
+// got the earliest (often shortest, sometimes 0min) one. TFS's own positional
+// zip (assignGroup) would instead have sent these to REVIEW outright (raw
+// fragment count != row count). After the shared pre-merge fix, both resolve
+// to one clean OK row with the real, non-zero duration.
+// ---------------------------------------------------------------------------
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+
+  // Case 1 — 3 fragments (2 of them exactly 0min) cut by a yard reposition.
+  {
+    const azRecords: SheetRecord[] = [
+      { ROTA: "185798003", N_LOJA: "7001", NOME: "Plataforma Azambuja", MATRICULA: "40-TT-01", "Hora Chegada": "", "Hora Saida": "", CICLO: "07:00 | 09:00", TIPO: "C" },
+    ];
+    const azStops: DayStop[] = [
+      { id: "frag1", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("07:58"), departedAt: iso("07:58") },
+      { id: "frag2", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("08:03"), departedAt: iso("08:03") },
+      { id: "frag3", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("08:09"), departedAt: iso("08:31") },
+    ];
+    const r = runAzMatch({
+      day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+      platesWithGps: new Set(["40TT01"]),
+      pingWindowByPlate: new Map(),
+    });
+    ok("7001 fragmentation case 1 (Azambuja): row matches OK", r.rows[0]["Confiança"] === "OK", r.rows[0]);
+    ok(
+      "7001 fragmentation case 1 (Azambuja): merged duration 07:58 -> 08:31, NOT 0.0min",
+      r.rows[0]["Hora Chegada"] === "09/09/2026 07:58" && r.rows[0]["Hora Saida"] === "09/09/2026 08:31",
+      [r.rows[0]["Hora Chegada"], r.rows[0]["Hora Saida"]],
+    );
+  }
+
+  // Case 2 — 2 fragments, first exactly 0min.
+  {
+    const azRecords: SheetRecord[] = [
+      { ROTA: "185798010", N_LOJA: "7001", NOME: "Plataforma Azambuja", MATRICULA: "41-UU-02", "Hora Chegada": "", "Hora Saida": "", CICLO: "05:00 | 07:00", TIPO: "C" },
+    ];
+    const azStops: DayStop[] = [
+      { id: "frag4", vehicleId: 702, plate: "41UU02", code: "7001", arrivedAt: iso("05:44"), departedAt: iso("05:44") },
+      { id: "frag5", vehicleId: 702, plate: "41UU02", code: "7001", arrivedAt: iso("05:51"), departedAt: iso("06:12") },
+    ];
+    const r = runAzMatch({
+      day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+      platesWithGps: new Set(["41UU02"]),
+      pingWindowByPlate: new Map(),
+    });
+    ok(
+      "7001 fragmentation case 2 (Azambuja): OK, merged duration 05:44 -> 06:12",
+      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09/09/2026 05:44" && r.rows[0]["Hora Saida"] === "09/09/2026 06:12",
+      r.rows[0],
+    );
+  }
+
+  // Case 3 — 3 fragments, all three exactly/near 0min individually.
+  {
+    const azRecords: SheetRecord[] = [
+      { ROTA: "185798044", N_LOJA: "7001", NOME: "Plataforma Azambuja", MATRICULA: "42-VV-03", "Hora Chegada": "", "Hora Saida": "", CICLO: "13:00 | 15:00", TIPO: "C" },
+    ];
+    const azStops: DayStop[] = [
+      { id: "frag6", vehicleId: 703, plate: "42VV03", code: "7001", arrivedAt: iso("13:20"), departedAt: iso("13:20") },
+      { id: "frag7", vehicleId: 703, plate: "42VV03", code: "7001", arrivedAt: iso("13:25"), departedAt: iso("13:25") },
+      { id: "frag8", vehicleId: 703, plate: "42VV03", code: "7001", arrivedAt: iso("13:28"), departedAt: iso("13:44") },
+    ];
+    const r = runAzMatch({
+      day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+      platesWithGps: new Set(["42VV03"]),
+      pingWindowByPlate: new Map(),
+    });
+    ok(
+      "7001 fragmentation case 3 (Azambuja): OK, merged duration 13:20 -> 13:44",
+      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09/09/2026 13:20" && r.rows[0]["Hora Saida"] === "09/09/2026 13:44",
+      r.rows[0],
+    );
+  }
+
+  // TFS side of the same shared fix: before it, this shape (3 raw fragments,
+  // 1 sheet row) fell to REVIEW (fragment count != row count) instead of a
+  // false OK — either way the bug, just a different symptom. After the fix,
+  // it's a clean OK with the merged, plausible duration.
+  {
+    const tfsFragHeader = [
+      "Dia do Serviço", "Nº Camião", "Matrícula da Viatura", "Ordem de Entrega",
+      "Código de Loja", "Designação da Loja", "Janela Início", "Janela Fim",
+      "Hora de Chegada", "Hora de Saída", "ID",
+    ];
+    const tfsFragCols = resolveTfsColumns(tfsFragHeader);
+    const tfsFragRow: SheetRecord = {
+      "Dia do Serviço": day, "Nº Camião": "701", "Matrícula da Viatura": "40TT01",
+      "Ordem de Entrega": "1", "Código de Loja": "7001", "Designação da Loja": "Plataforma Azambuja",
+      "Janela Início": "07:00", "Janela Fim": "09:00", "Hora de Chegada": "", "Hora de Saída": "", ID: "",
+    };
+    const tfsFragStops: DayStop[] = [
+      { id: "frag1", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("07:58"), departedAt: iso("07:58") },
+      { id: "frag2", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("08:03"), departedAt: iso("08:03") },
+      { id: "frag3", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("08:09"), departedAt: iso("08:31") },
+    ];
+    const r = runTfsMatch({
+      day, records: [tfsFragRow], header: tfsFragHeader, cols: tfsFragCols, stops: tfsFragStops,
+      fleetByTruck: new Map(), platesWithGps: new Set(["40TT01"]), pingWindowByPlate: new Map(),
+    });
+    ok("7001 fragmentation (TFS): row matches OK, not REVIEW", r.rows[0]["Confiança"] === "OK", r.rows[0]);
+    ok(
+      "7001 fragmentation (TFS): merged duration 07:58 -> 08:31, NOT 0.0min",
+      r.rows[0]["Hora de Chegada"] === "07:58" && r.rows[0]["Hora de Saída"] === "08:31",
+      [r.rows[0]["Hora de Chegada"], r.rows[0]["Hora de Saída"]],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Regression: código 94 (Albufeira) must still show a legitimate 0min
+// duration when it really is a single, isolated pass-through — no nearby
+// fragment to explain away. The fix must never invent a duration.
+// ---------------------------------------------------------------------------
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  const azRecords: SheetRecord[] = [
+    { ROTA: "R94", N_LOJA: "94", NOME: "Armazém Albufeira", MATRICULA: "28-RN-74", "Hora Chegada": "", "Hora Saida": "", CICLO: "01:00 | 04:00", TIPO: "C" },
+  ];
+  const azStops: DayStop[] = [
+    { id: "alb-1", vehicleId: 280, plate: "28RN74", code: "94", arrivedAt: iso("02:48"), departedAt: iso("02:48") },
+  ];
+  const r = runAzMatch({
+    day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+    platesWithGps: new Set(["28RN74"]),
+    pingWindowByPlate: new Map(),
+  });
+  ok("código 94 isolated 0min: still matches OK", r.rows[0]["Confiança"] === "OK", r.rows[0]);
+  ok(
+    "código 94 isolated 0min: duration STAYS 0min (Chegada === Saída) — no invented duration",
+    r.rows[0]["Hora Chegada"] === r.rows[0]["Hora Saida"] && r.rows[0]["Hora Chegada"] === "09/09/2026 02:48",
+    r.rows[0],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Boundary: two GENUINELY distinct visits to the same location by the same
+// vehicle, far enough apart (> FRAGMENT_MERGE_GAP_MIN), must NOT be fused
+// into one — each sheet row keeps its own real visit.
+// ---------------------------------------------------------------------------
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  const mk = (rota: string): SheetRecord => ({
+    ROTA: rota, N_LOJA: "7001", NOME: "Plataforma Azambuja", MATRICULA: "40-TT-01",
+    "Hora Chegada": "", "Hora Saida": "", CICLO: "06:00 | 14:00", TIPO: "C",
+  });
+  const azRecords = [mk("R1"), mk("R2")];
+  // Morning visit (08:00-08:10) and an afternoon revisit (12:00-12:15) —
+  // 3h50 apart, nowhere near the 15min fragment threshold.
+  const azStops: DayStop[] = [
+    { id: "v1", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("08:00"), departedAt: iso("08:10") },
+    { id: "v2", vehicleId: 701, plate: "40TT01", code: "7001", arrivedAt: iso("12:00"), departedAt: iso("12:15") },
+  ];
+  const r = runAzMatch({
+    day, records: azRecords, header: azHeader, cols: azCols, stops: azStops,
+    platesWithGps: new Set(["40TT01"]),
+    pingWindowByPlate: new Map(),
+  });
+  ok("two genuine visits, same code/vehicle, 3h50 apart: both rows OK", r.rows[0]["Confiança"] === "OK" && r.rows[1]["Confiança"] === "OK", r.rows);
+  ok(
+    "two genuine visits: each row keeps its OWN visit, not fused",
+    r.rows[0]["Hora Chegada"] === "09/09/2026 08:00" && r.rows[1]["Hora Chegada"] === "09/09/2026 12:00",
+    [r.rows[0]["Hora Chegada"], r.rows[1]["Hora Chegada"]],
   );
 }
 

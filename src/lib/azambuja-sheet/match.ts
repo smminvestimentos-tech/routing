@@ -48,6 +48,7 @@ import {
   implausibleKeptNote,
   KEPT,
   lisbonEpoch,
+  mergeFragmentedStops,
   minutesBetweenTimeCells,
   noGpsCoverageNote,
   normalizePlate,
@@ -80,6 +81,7 @@ export {
   SWAP_OUT_OF_WINDOW,
   PLATE_TYPO,
   dedupeStops,
+  mergeFragmentedStops,
   parseServiceDay,
 };
 export type { CoLocatedGroups, DayStop, MergedCodeEntry, SheetRecord };
@@ -597,7 +599,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
   const coLocatedGroups = args.coLocatedGroups ?? [];
-  const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
+  // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
+  // into one effective stop BEFORE any candidate selection below — see
+  // mergeFragmentedStops in common.ts for why.
+  const stops: WStop[] = mergeFragmentedStops(args.stops).map((s) => ({
+    ...s,
+    assigned: false,
+  }));
 
   // Candidate pool for the plate-typo check: plates with real GPS stops today.
   const platesWithDayStops = new Set<string>();

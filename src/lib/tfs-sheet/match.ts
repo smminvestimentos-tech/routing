@@ -45,6 +45,7 @@ import {
   fmtHM,
   implausibleKeptNote,
   KEPT,
+  mergeFragmentedStops,
   minutesBetweenTimeCells,
   noGpsCoverageNote,
   normalizePlate,
@@ -79,6 +80,7 @@ export {
   codeEq,
   dedupeStops,
   fmtHM,
+  mergeFragmentedStops,
   parseClockMin,
   parseServiceDay,
 };
@@ -387,7 +389,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
   const coLocatedGroups = args.coLocatedGroups ?? [];
-  const stops: WStop[] = args.stops.map((s) => ({ ...s, assigned: false }));
+  // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
+  // into one effective stop BEFORE any candidate selection below — see
+  // mergeFragmentedStops in common.ts for why.
+  const stops: WStop[] = mergeFragmentedStops(args.stops).map((s) => ({
+    ...s,
+    assigned: false,
+  }));
 
   const outHeader = [...header];
   for (const c of [cols.chegadaCol, cols.saidaCol, CONFIANCA_COL, REAL_COL]) {

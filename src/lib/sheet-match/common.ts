@@ -84,6 +84,109 @@ export function dedupeStops(stops: DayStop[]): DayStop[] {
   return out;
 }
 
+// How close two fragments of a vehicle's stops at the SAME location may sit,
+// end-to-start, before they're treated as one continuous visit rather than
+// two separate ones. Tuned against the 2026-09 azambuja-2026-09-15-conferido
+// audit: 71 sheet rows landed "OK" with an exact 0.0min duration (Chegada ==
+// Saída), 57 of them (80%) at code 7001 alone — detect_stops cutting/
+// reopening a stop on a >50m GPS reposition inside the same yard, and the
+// matcher then pairing the row to whichever fragment happened to sort first
+// (often the shortest). 15min is wide enough to re-stitch that kind of
+// reposition-triggered split, narrow enough not to fuse two genuinely
+// distinct visits to the same warehouse hours apart.
+export const FRAGMENT_MERGE_GAP_MIN = 15;
+
+// Collapse sequential same-vehicle, same-location DayStop fragments that sit
+// within `padMin` of each other (previous departedAt -> next arrivedAt) into
+// one "effective" stop: arrivedAt = earliest fragment's, departedAt = latest
+// fragment's. Must run AFTER dedupeStops (which merges cross-TRACKiT-account
+// duplicates of the SAME ping stream, keyed only on time overlap) and BEFORE
+// any candidate selection, so every downstream step — positional pairing,
+// swap detection, plate-typo corroboration, the "Real" caption — sees one
+// real visit instead of N artificial fragments.
+//
+// Keyed on EXACT code equality (normalizeStoreCode), not the fuzzy
+// codeEq/co-location matching used for sheet<->stop matching: stitching
+// fragments of what was always the same stop is a much safer call than
+// merging two co-located-but-distinct sites, which is a different feature.
+// Grouped by vehicleId (the physical GPS-tracked truck), not plate — plate
+// can be null or per-account-attributed oddly, vehicleId never is. A stop
+// with no code at all is left untouched: with nothing to key it to, there's
+// no location a neighbouring fragment could safely be said to belong to.
+//
+// A single isolated stop with nothing nearby (e.g. a genuine one-off 0min
+// pass-through at a warehouse) is returned unchanged — this never invents a
+// duration, it only re-joins fragments that already exist close together.
+//
+// NEVER bridges a Lisbon calendar-day boundary, in either direction: a
+// fragment that already straddles midnight on its own is left completely
+// alone (it can't absorb a neighbour, and nothing can merge into it), and a
+// same-day fragment is never fused into a run that would push it across
+// midnight. That's not fragmentation — it's the exact shape the day/CICLO
+// window logic in each matcher (stopInWindow, groupWindowMs) exists to
+// scrutinise separately (same-day route vs. an explicit "+1" continuation).
+// Regression: azambuja CICLO "02:00 | 14:00" at 7005 with a genuine 23:59
+// in-day 0min stop sitting inside the window of a SEPARATE 23:24->00:12
+// (next day) artifact at the same code/vehicle — merging them would have
+// laundered the rejected next-day stop into a seemingly-clean OK row.
+export function mergeFragmentedStops(
+  stops: DayStop[],
+  padMin: number = FRAGMENT_MERGE_GAP_MIN,
+): DayStop[] {
+  const byKey = new Map<string, DayStop[]>();
+  const out: DayStop[] = [];
+  for (const s of stops) {
+    if (!s.code) {
+      out.push(s);
+      continue;
+    }
+    const key = `${s.vehicleId}::${normalizeStoreCode(s.code).toUpperCase()}`;
+    const arr = byKey.get(key);
+    if (arr) arr.push(s);
+    else byKey.set(key, [s]);
+  }
+  const padMs = padMin * 60_000;
+  for (const group of byKey.values()) {
+    group.sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
+    let cur: DayStop | null = null;
+    // Conservative on an open (still-ongoing) fragment: without a real
+    // departedAt we don't know when it truly ends, so its end is estimated as
+    // its own arrivedAt (the minimum, never invented) — that can only make
+    // the gap to the next fragment look LARGER, never trigger a merge that
+    // isn't backed by an actual observed gap.
+    let curEndMs = -Infinity;
+    for (const s of group) {
+      const startMs = new Date(s.arrivedAt).getTime();
+      const sEnd = s.departedAt ?? s.arrivedAt;
+      const endMs = new Date(sEnd).getTime();
+      const sSpansDays = lisbonDayOf(s.arrivedAt) !== lisbonDayOf(sEnd);
+      if (sSpansDays) {
+        // Isolate it completely: emit as-is, and break the chain so a
+        // following same-day fragment doesn't merge into it either.
+        out.push(s);
+        cur = null;
+        curEndMs = -Infinity;
+        continue;
+      }
+      const canExtend =
+        cur != null &&
+        startMs - curEndMs <= padMs &&
+        lisbonDayOf(cur.arrivedAt) === lisbonDayOf(sEnd);
+      if (cur && canExtend) {
+        if (endMs > curEndMs) {
+          cur.departedAt = s.departedAt ?? cur.departedAt;
+          curEndMs = endMs;
+        }
+      } else {
+        cur = { ...s };
+        out.push(cur);
+        curEndMs = endMs;
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -303,6 +406,21 @@ export function fmtHM(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return HM.format(d);
+}
+
+// en-CA formats as YYYY-MM-DD directly — used only to compare Lisbon
+// CALENDAR days (mergeFragmentedStops' midnight-boundary guard), never to
+// build a display string.
+const LISBON_YMD = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Lisbon",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+// ISO timestamp -> its Lisbon wall-clock calendar day ("YYYY-MM-DD").
+function lisbonDayOf(iso: string): string {
+  return LISBON_YMD.format(new Date(iso));
 }
 
 const DMY_HM = new Intl.DateTimeFormat("en-GB", {
