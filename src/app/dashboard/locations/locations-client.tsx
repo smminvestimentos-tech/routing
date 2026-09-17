@@ -10,6 +10,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { MapPin, ExternalLink } from "lucide-react";
 import {
   SortableTable,
   useDebouncedSearch,
@@ -60,6 +61,13 @@ function fmtCoord(n: number | null): string {
   return n == null ? "—" : n.toFixed(5);
 }
 
+function parseCoord(v: string): number | null {
+  const trimmed = v.trim().replace(",", ".");
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Search: name or code, partial and case-insensitive (see the request).
 function matchesSearch(l: Location, needle: string): boolean {
   if (!needle) return true;
@@ -74,7 +82,23 @@ const columns: Col<Location>[] = [
     key: "name",
     label: "Nome",
     value: (r) => r.name ?? "",
-    render: (r) => r.name ?? "—",
+    render: (r) => (
+      <span className="inline-flex items-center gap-1.5">
+        <span>{r.name ?? "—"}</span>
+        {r.latitude != null && r.longitude != null && (
+          <a
+            href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-black/35 transition-colors hover:text-blue-600 dark:text-white/35 dark:hover:text-blue-400"
+            title={`Abrir ${r.name ?? r.code} (${r.latitude}, ${r.longitude}) no Google Maps`}
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+          </a>
+        )}
+      </span>
+    ),
   },
   {
     key: "type",
@@ -120,6 +144,27 @@ const columns: Col<Location>[] = [
     align: "right",
     value: (r) => r.longitude,
     render: (r) => fmtCoord(r.longitude),
+  },
+  {
+    key: "maps",
+    label: "Mapa",
+    value: (r) => (r.latitude != null && r.longitude != null ? 1 : 0),
+    render: (r) =>
+      r.latitude != null && r.longitude != null ? (
+        <a
+          href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-500/20 dark:bg-blue-400/15 dark:text-blue-300 dark:hover:bg-blue-400/25"
+          title={`Abrir (${r.latitude}, ${r.longitude}) no Google Maps`}
+        >
+          <ExternalLink className="h-3 w-3 shrink-0" />
+          <span>Maps ↗</span>
+        </a>
+      ) : (
+        <span className="text-black/30 dark:text-white/30">—</span>
+      ),
   },
   {
     key: "radius",
@@ -248,6 +293,10 @@ function LocationPanel({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const parsedLat = parseCoord(form.latitude);
+  const parsedLng = parseCoord(form.longitude);
+  const hasValidCoords = parsedLat !== null && parsedLng !== null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -404,35 +453,60 @@ function LocationPanel({
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="Latitude"
-              error={errors.latitude}
-              hint={`${PT_LAT.min} a ${PT_LAT.max}`}
-            >
-              <input
-                className={inputClass}
-                type="number"
-                step="any"
-                inputMode="decimal"
-                value={form.latitude}
-                onChange={set("latitude")}
-              />
-            </Field>
-            <Field
-              label="Longitude"
-              error={errors.longitude}
-              hint={`${PT_LNG.min} a ${PT_LNG.max}`}
-            >
-              <input
-                className={inputClass}
-                type="number"
-                step="any"
-                inputMode="decimal"
-                value={form.longitude}
-                onChange={set("longitude")}
-              />
-            </Field>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-black/50 dark:text-white/50">
+                Coordenadas GPS
+              </span>
+              {hasValidCoords ? (
+                <a
+                  href={`https://www.google.com/maps?q=${parsedLat},${parsedLng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-500/20 dark:bg-blue-400/15 dark:text-blue-300 dark:hover:bg-blue-400/25"
+                  title={`Abrir (${parsedLat}, ${parsedLng}) no Google Maps`}
+                >
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span>Ver no Maps ↗</span>
+                </a>
+              ) : (
+                <span className="text-xs text-black/30 dark:text-white/30">
+                  (sem coordenadas)
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field
+                label="Latitude"
+                error={errors.latitude}
+                hint={`${PT_LAT.min} a ${PT_LAT.max}`}
+              >
+                <input
+                  className={inputClass}
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  value={form.latitude}
+                  onChange={set("latitude")}
+                />
+              </Field>
+              <Field
+                label="Longitude"
+                error={errors.longitude}
+                hint={`${PT_LNG.min} a ${PT_LNG.max}`}
+              >
+                <input
+                  className={inputClass}
+                  type="number"
+                  step="any"
+                  inputMode="decimal"
+                  value={form.longitude}
+                  onChange={set("longitude")}
+                />
+              </Field>
+            </div>
           </div>
 
           <Field label="Raio (metros)" error={errors.radius_meters}>
