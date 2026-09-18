@@ -433,7 +433,7 @@ const DMY_HM = new Intl.DateTimeFormat("en-GB", {
   hour12: false,
 });
 
-// ISO timestamp -> "DD/MM/YYYY HH:MM" in Portugal wall-clock. "" for
+// ISO timestamp -> "DD-MM-YYYY HH:MM" in Portugal wall-clock. "" for
 // null/invalid. Used for sheets whose delivery cycles cross midnight (Azambuja),
 // where a bare "HH:MM" is ambiguous about which calendar day it belongs to.
 export function fmtDateTimeLisbon(iso: string | null | undefined): string {
@@ -442,7 +442,7 @@ export function fmtDateTimeLisbon(iso: string | null | undefined): string {
   if (Number.isNaN(d.getTime())) return "";
   const p: Record<string, string> = {};
   for (const part of DMY_HM.formatToParts(d)) p[part.type] = part.value;
-  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
+  return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute}`;
 }
 
 // A clock value -> minutes since midnight. Handles "HH:MM", an Excel day
@@ -466,13 +466,15 @@ export function parseClockMin(v: unknown): number | null {
   return asFraction(Number(s.replace(",", ".")));
 }
 
-// Minutes between two "DD/MM/YYYY HH:MM" strings (b - a), or null if either
-// doesn't match that shape.
+// Minutes between two "DD/MM/YYYY HH:MM" or "DD-MM-YYYY HH:MM" strings
+// (b - a), or null if either doesn't match that shape. Both separators are
+// accepted so a re-uploaded "conferido" file (written with "-") and an
+// older export or transporter pre-fill (written with "/") both round-trip.
 function minutesBetweenDMYHM(a: string, b: string): number | null {
   const parse = (s: string) => {
     const m = s
       .trim()
-      .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/);
+      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})$/);
     if (!m) return null;
     const [, d, mo, y, h, mi] = m;
     return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
@@ -1063,7 +1065,9 @@ export { normalizePlate };
 // ---------------------------------------------------------------------------
 
 // Parse a Chegada/Saída cell string into epoch ms (Lisbon wall-clock).
-// Tolerant of "DD/MM/YYYY HH:MM", bare "HH:MM", or ISO timestamp.
+// Tolerant of "DD/MM/YYYY HH:MM" or "DD-MM-YYYY HH:MM" (either separator —
+// our own export used "/" before, "-" now, and a re-uploaded file may carry
+// either), bare "HH:MM", or ISO timestamp.
 export function parseTimeCellToEpochMs(
   v: unknown,
   defaultDay?: string,
@@ -1071,7 +1075,7 @@ export function parseTimeCellToEpochMs(
   if (v == null || v === "") return null;
   const s = String(v).trim();
   const dmyMatch = s.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/,
+    /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})$/,
   );
   if (dmyMatch) {
     const [, d, mo, y, h, mi] = dmyMatch;

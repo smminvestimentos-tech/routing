@@ -419,11 +419,11 @@ export function stopInWindow(
   return !Number.isFinite(d) || d < hiMs;
 }
 
-// Render a Chegada/Saída cell as "DD/MM/YYYY HH:MM" (wall-clock — NO timezone
+// Render a Chegada/Saída cell as "DD-MM-YYYY HH:MM" (wall-clock — NO timezone
 // shift). Prefers the Excel serial from the workbook's raw pass (unambiguous);
-// falls back to parsing our own "DD/MM/YYYY HH:MM", a "DD/MM/YY[YY] [HH:MM]"
-// string, or "HH:MM" alone (attached to `serviceDay`). Unparseable input is
-// returned unchanged.
+// falls back to parsing our own "DD-MM-YYYY HH:MM" (or the older "/"
+// separator), a "DD/MM/YY[YY] [HH:MM]" string, or "HH:MM" alone (attached to
+// `serviceDay`). Unparseable input is returned unchanged.
 export function normalizeDateTimeCell(
   display: string,
   raw: unknown,
@@ -431,7 +431,7 @@ export function normalizeDateTimeCell(
 ): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   const fmt = (y: number, mo: number, d: number, h: number, mi: number) =>
-    `${pad(d)}/${pad(mo)}/${y} ${pad(h)}:${pad(mi)}`;
+    `${pad(d)}-${pad(mo)}-${y} ${pad(h)}:${pad(mi)}`;
 
   const serial =
     typeof raw === "number" && Number.isFinite(raw)
@@ -1025,7 +1025,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
     // Row that arrived with both times filled: keep the VALUES the user gave,
-    // but re-render Chegada/Saída in our "DD/MM/YYYY HH:MM" format so the whole
+    // but re-render Chegada/Saída in our "DD-MM-YYYY HH:MM" format so the whole
     // sheet is visually consistent (the transporter / Excel may hand us
     // "9/8/26", 2-digit year, M/D order, an Excel serial…). MATRICULA is left
     // untouched. Only «Dia Serviço» + the two derived columns are also written.
@@ -1047,7 +1047,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
     // Always (re)write the two time columns so the output reflects only our
-    // matching: "DD/MM/YYYY HH:MM" (Lisbon) when a stop was matched, blank
+    // matching: "DD-MM-YYYY HH:MM" (Lisbon) when a stop was matched, blank
     // otherwise. Full date + time — not bare HH:MM like the TFS sheet —
     // because Azambuja cycles cross midnight, so the hour alone is ambiguous
     // about the day. This mirrors the transporter's own pre-filled cells

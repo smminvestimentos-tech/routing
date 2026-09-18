@@ -260,12 +260,12 @@ async function main() {
     "Dia Serviço": "2026-09-09", "Hora Chegada": "", "Hora Saida": "", [REAL_COL]: "", ...o,
   });
   const azRows = [
-    azRow({ "Hora Chegada": "09/09/2026 06:26", "Hora Saida": "09/09/2026 07:09", [CONFIANCA_COL]: "OK" }),
+    azRow({ "Hora Chegada": "09-09-2026 06:26", "Hora Saida": "09-09-2026 07:09", [CONFIANCA_COL]: "OK" }),
     azRow({ MATRICULA: "72-XR-33", [CONFIANCA_COL]: REVIEW, [REAL_COL]: noGpsCoverageNote("72XR33", false) }),
     azRow({ MATRICULA: "AB-12-CD", [CONFIANCA_COL]: REVIEW, [REAL_COL]: "Sem paragens nossas para AB12CD em 2026-09-09." }),
     // 🟣 crosses midnight — exactly the shape 0035/fmtDateTimeLisbon exists
     // for; the WW formula must read the DATE part too, not just the time.
-    azRow({ "Hora Chegada": "09/09/2026 23:58", "Hora Saida": "10/09/2026 00:01", [CONFIANCA_COL]: "OK" }),
+    azRow({ "Hora Chegada": "09-09-2026 23:58", "Hora Saida": "10-09-2026 00:01", [CONFIANCA_COL]: "OK" }),
   ];
   const azB64 = await buildSheetWorkbook({
     rows: azRows, header: azHeader,

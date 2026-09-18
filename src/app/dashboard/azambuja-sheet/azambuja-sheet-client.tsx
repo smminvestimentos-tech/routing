@@ -246,7 +246,7 @@ export function AzambujaSheetClient() {
           <li>
             Linhas que já vêm com <strong>Hora Chegada e Hora Saida</strong>{" "}
             preenchidas não são re-emparelhadas — os valores do utilizador são
-            mantidos (só re-formatados para <strong>DD/MM/AAAA HH:MM</strong>,
+            mantidos (só re-formatados para <strong>DD-MM-AAAA HH:MM</strong>,
             para a folha ficar toda igual). Ficam{" "}
             <strong>✅ Já preenchido (mantido)</strong>, distinto de{" "}
             <strong>OK</strong> (valor calculado por nós).
@@ -309,7 +309,7 @@ export function AzambujaSheetClient() {
         <p className="mt-3">
           O ficheiro devolvido traz <strong>Hora Chegada</strong> /{" "}
           <strong>Hora Saida</strong> preenchidas com{" "}
-          <strong>data + hora de Lisboa</strong> (DD/MM/AAAA HH:MM — os ciclos
+          <strong>data + hora de Lisboa</strong> (DD-MM-AAAA HH:MM — os ciclos
           atravessam a meia-noite, a hora sozinha seria ambígua) e as colunas{" "}
           <strong>Confiança</strong>, <strong>Real</strong> e{" "}
           <strong>Dia Serviço</strong> (para poder recarregar o ficheiro

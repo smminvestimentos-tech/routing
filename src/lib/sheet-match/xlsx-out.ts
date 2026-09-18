@@ -42,7 +42,7 @@
 //     legitimate for matching purposes, a human reviewer should still SEE it,
 //     because a real short stop sometimes hides fragmentation (confirmed
 //     2026-09). Only fires once both cells hold something Excel can parse as a
-//     time (bare "HH:MM…" or the Azambuja "DD/MM/YYYY HH:MM" shape) — a row
+//     time (bare "HH:MM…" or the Azambuja "DD-MM-YYYY HH:MM" shape) — a row
 //     still stuck on "⚠️ Rever manualmente" has blank times and never lights
 //     up. A hidden technical column «WW» carries the live duration in minutes
 //     (an Excel formula, not a snapshot, so it re-evaluates as the user edits
@@ -245,16 +245,18 @@ export async function buildSheetWorkbook(
 
   // Populate WW with a live formula per row: minutes between Chegada and
   // Saída, tolerant of both time shapes this app ever writes into those
-  // cells — bare "HH:MM[:SS]" (TFS) or "DD/MM/YYYY HH:MM" (Azambuja, whose
-  // cycles can cross midnight) — mirroring parseClockMin/minutesBetweenTimeCells
-  // (common.ts) in Excel-formula form. "" (via IFERROR) whenever either cell
-  // is blank or doesn't parse, so a malformed cell never miscolors the row.
+  // cells — bare "HH:MM[:SS]" (TFS) or "DD-MM-YYYY HH:MM" (Azambuja, whose
+  // cycles can cross midnight; "/" also accepted — older exports and
+  // transporter pre-fills used that separator before this app switched to
+  // "-") — mirroring parseClockMin/minutesBetweenTimeCells (common.ts) in
+  // Excel-formula form. "" (via IFERROR) whenever either cell is blank or
+  // doesn't parse, so a malformed cell never miscolors the row.
   if (chegadaL && saidaL) {
     const serial = (colL: string, row: number) => {
       const cell = `$${colL}${row}`;
       const timePart = `TRIM(MID(${cell},FIND(" ",${cell})+1,20))`;
       return (
-        `IF(ISNUMBER(SEARCH("/",${cell})),` +
+        `IF(OR(ISNUMBER(SEARCH("/",${cell})),ISNUMBER(SEARCH("-",${cell}))),` +
         `DATEVALUE(LEFT(${cell},FIND(" ",${cell})-1))+TIMEVALUE(${timePart}),` +
         `TIMEVALUE(${cell}))`
       );

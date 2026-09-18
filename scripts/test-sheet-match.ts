@@ -323,7 +323,7 @@ ok(
   ok("Azambuja kept: E66 conf === KEPT", r.rows[1]["Confiança"] === KEPT, r.rows[1]["Confiança"]);
   ok(
     "Azambuja kept: E66 times untouched",
-    r.rows[1]["Hora Chegada"] === "05/09/2026 07:00" && r.rows[1]["Hora Saida"] === "05/09/2026 07:20",
+    r.rows[1]["Hora Chegada"] === "05-09-2026 07:00" && r.rows[1]["Hora Saida"] === "05-09-2026 07:20",
   );
   ok("Azambuja kept: E16 + B77 matched OK", r.rows[0]["Confiança"] === "OK" && r.rows[2]["Confiança"] === "OK", [r.rows[0]["Confiança"], r.rows[2]["Confiança"]]);
 }
@@ -946,7 +946,7 @@ ok(
     ok("7001 fragmentation case 1 (Azambuja): row matches OK", r.rows[0]["Confiança"] === "OK", r.rows[0]);
     ok(
       "7001 fragmentation case 1 (Azambuja): merged duration 07:58 -> 08:31, NOT 0.0min",
-      r.rows[0]["Hora Chegada"] === "09/09/2026 07:58" && r.rows[0]["Hora Saida"] === "09/09/2026 08:31",
+      r.rows[0]["Hora Chegada"] === "09-09-2026 07:58" && r.rows[0]["Hora Saida"] === "09-09-2026 08:31",
       [r.rows[0]["Hora Chegada"], r.rows[0]["Hora Saida"]],
     );
   }
@@ -967,7 +967,7 @@ ok(
     });
     ok(
       "7001 fragmentation case 2 (Azambuja): OK, merged duration 05:44 -> 06:12",
-      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09/09/2026 05:44" && r.rows[0]["Hora Saida"] === "09/09/2026 06:12",
+      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09-09-2026 05:44" && r.rows[0]["Hora Saida"] === "09-09-2026 06:12",
       r.rows[0],
     );
   }
@@ -989,7 +989,7 @@ ok(
     });
     ok(
       "7001 fragmentation case 3 (Azambuja): OK, merged duration 13:20 -> 13:44",
-      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09/09/2026 13:20" && r.rows[0]["Hora Saida"] === "09/09/2026 13:44",
+      r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora Chegada"] === "09-09-2026 13:20" && r.rows[0]["Hora Saida"] === "09-09-2026 13:44",
       r.rows[0],
     );
   }
@@ -1050,7 +1050,7 @@ ok(
   ok("código 94 isolated 0min: still matches OK", r.rows[0]["Confiança"] === "OK", r.rows[0]);
   ok(
     "código 94 isolated 0min: duration STAYS 0min (Chegada === Saída) — no invented duration",
-    r.rows[0]["Hora Chegada"] === r.rows[0]["Hora Saida"] && r.rows[0]["Hora Chegada"] === "09/09/2026 02:48",
+    r.rows[0]["Hora Chegada"] === r.rows[0]["Hora Saida"] && r.rows[0]["Hora Chegada"] === "09-09-2026 02:48",
     r.rows[0],
   );
 }
@@ -1082,7 +1082,7 @@ ok(
   ok("two genuine visits, same code/vehicle, 3h50 apart: both rows OK", r.rows[0]["Confiança"] === "OK" && r.rows[1]["Confiança"] === "OK", r.rows);
   ok(
     "two genuine visits: each row keeps its OWN visit, not fused",
-    r.rows[0]["Hora Chegada"] === "09/09/2026 08:00" && r.rows[1]["Hora Chegada"] === "09/09/2026 12:00",
+    r.rows[0]["Hora Chegada"] === "09-09-2026 08:00" && r.rows[1]["Hora Chegada"] === "09-09-2026 12:00",
     [r.rows[0]["Hora Chegada"], r.rows[1]["Hora Chegada"]],
   );
 }
@@ -1143,9 +1143,9 @@ ok(
   const row7001 = r.rows[1];
 
   ok("33-IV-96 conflict: row 7005 conf kept unchanged", row7005["Confiança"] === KEPT, row7005);
-  ok("33-IV-96 conflict: row 7005 times kept unchanged", row7005["Hora Chegada"] === "15/09/2026 02:50" && row7005["Hora Saida"] === "15/09/2026 03:10", row7005);
+  ok("33-IV-96 conflict: row 7005 times kept unchanged", row7005["Hora Chegada"] === "15-09-2026 02:50" && row7005["Hora Saida"] === "15-09-2026 03:10", row7005);
   ok("33-IV-96 conflict: row 7001 conf OK unchanged", row7001["Confiança"] === "OK", row7001);
-  ok("33-IV-96 conflict: row 7001 times OK unchanged", row7001["Hora Chegada"] === "15/09/2026 02:54" && row7001["Hora Saida"] === "15/09/2026 03:34", row7001);
+  ok("33-IV-96 conflict: row 7001 times OK unchanged", row7001["Hora Chegada"] === "15-09-2026 02:54" && row7001["Hora Saida"] === "15-09-2026 03:34", row7001);
 
   ok("33-IV-96 conflict: row 7005 flags conflict in Real", typeof row7005["Real"] === "string" && row7005["Real"].includes("⚠️ Conflito: sobrepõe-se à linha 7001 (Auchan Azambuja, 02:54–03:34)"), row7005["Real"]);
   ok("33-IV-96 conflict: row 7001 flags conflict in Real", typeof row7001["Real"] === "string" && row7001["Real"].includes("⚠️ Conflito: sobrepõe-se à linha 7005 (Auchan Congelados, 02:50–03:10)"), row7001["Real"]);
