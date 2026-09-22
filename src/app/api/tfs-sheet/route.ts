@@ -5,23 +5,28 @@ import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { lisbonDayStartISO, addDaysYmd } from "@/app/dashboard/_server";
 import { normalizePlate } from "@/lib/fleet/validate";
-import { coLocatedGroupsFromLocations } from "@/lib/sheet-match/common";
+import { coLocatedGroupsFromLocations, type DayStop } from "@/lib/sheet-match/common";
 import {
   collectServiceDay,
   dedupeStops,
   normalizeTruck,
   resolveColumns,
   runMatch,
-  type DayStop,
   type MergedCodeEntry,
   type SheetRecord,
 } from "@/lib/tfs-sheet/match";
+import { formatTrackitDate, resolveTrackitFallback } from "@/lib/sheet-match/trackit-fallback";
+import type { LocationForMatch } from "@/lib/sheet-match/trackit-candidates";
 
 // Internal tool, no auth yet — same stance as the rest of /dashboard. Parses
 // one day's TFS sheet, matches it against our stops, and returns a filled-in
 // workbook. Nothing is persisted between uploads.
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 150s (was 60s) — see src/app/api/azambuja-sheet/route.ts's comment: this
+// project's Vercel plan/Fluid Compute already runs other routes well above
+// 60s (up to 300s), and the (capped, budgeted) TRACKiT /vehicleTravels
+// fallback below needs the headroom.
+export const maxDuration = 150;
 
 // Hard ceiling on how many ping rows we'll page in for one day's window.
 const PING_LIMIT = 200_000;
@@ -40,6 +45,7 @@ function embeddedCode(loc: StopEmbedRow["location"]): string | null {
 }
 
 export async function POST(request: NextRequest) {
+  const fnStart = Date.now(); // TRACKiT fallback's global deadline is relative to this
   let form: FormData;
   try {
     form = await request.formData();
@@ -138,11 +144,16 @@ export async function POST(request: NextRequest) {
         .order("id", { ascending: true })
         .range(from, to),
     ),
-    fetchAllRows<{ vehicle_id: number; plate: string | null; recorded_at: string }>(
+    fetchAllRows<{
+      vehicle_id: number;
+      plate: string | null;
+      recorded_at: string;
+      trackit_account: string;
+    }>(
       (from, to) =>
         supabase
           .from("vehicle_pings")
-          .select("vehicle_id, plate, recorded_at", { count: "exact" })
+          .select("vehicle_id, plate, recorded_at, trackit_account", { count: "exact" })
           .gte("recorded_at", dayStart)
           .lt("recorded_at", dayEnd)
           .not("plate", "is", null)
@@ -162,9 +173,14 @@ export async function POST(request: NextRequest) {
     // stricter <5min threshold to actual stores (loja), never armazém/CD.
     // "latitude, longitude" feed codeCoords — the consecutive-stop
     // implausible-speed check (detectImplausibleSpeed, common.ts).
+    // "radius_meters" feeds the TRACKiT-fallback location matcher
+    // (matchStopLocationTs, trackit-candidates.ts) — same radii detect_stops
+    // itself uses.
     supabase
       .from("locations")
-      .select("id, code, type, latitude, longitude, active, merged_into_id, colocated_with_id"),
+      .select(
+        "id, code, type, latitude, longitude, radius_meters, active, merged_into_id, colocated_with_id",
+      ),
   ]);
 
   if (stopsRes.error) {
@@ -182,9 +198,15 @@ export async function POST(request: NextRequest) {
 
   // Most-seen plate per vehicle that day (vehicle_pings.plate, normalised), and
   // per plate the [min, max] time span of its pings in this window (for the
-  // swap-coverage gate).
+  // swap-coverage gate). Also, directly (not by inverting plateByVehicle —
+  // would be lossy if a vehicle_id ever shows >1 plate in a day) the
+  // most-seen vehicle_id per PLATE and the set of trackit_accounts each
+  // vehicle pinged under today — both only needed by the TRACKiT fallback
+  // below, kept here so this stays a single pass over pingsRes.data.
   const plateTally = new Map<number, Map<string, number>>();
+  const vehicleTallyByPlate = new Map<string, Map<number, number>>();
   const pingWindowByPlate = new Map<string, { min: number; max: number }>();
+  const accountsByVehicle = new Map<number, Set<string>>();
   for (const p of pingsRes.data) {
     if (!p.plate) continue;
     const np = normalizePlate(String(p.plate));
@@ -195,6 +217,22 @@ export async function POST(request: NextRequest) {
       plateTally.set(p.vehicle_id, m);
     }
     m.set(np, (m.get(np) ?? 0) + 1);
+
+    let vm = vehicleTallyByPlate.get(np);
+    if (!vm) {
+      vm = new Map();
+      vehicleTallyByPlate.set(np, vm);
+    }
+    vm.set(p.vehicle_id, (vm.get(p.vehicle_id) ?? 0) + 1);
+
+    if (p.trackit_account) {
+      let accs = accountsByVehicle.get(p.vehicle_id);
+      if (!accs) {
+        accs = new Set();
+        accountsByVehicle.set(p.vehicle_id, accs);
+      }
+      accs.add(p.trackit_account);
+    }
 
     const t = new Date(p.recorded_at as string).getTime();
     if (Number.isFinite(t)) {
@@ -217,6 +255,18 @@ export async function POST(request: NextRequest) {
       }
     }
     if (best) plateByVehicle.set(vid, best);
+  }
+  const vehicleIdByPlate = new Map<string, number>();
+  for (const [pl, m] of vehicleTallyByPlate) {
+    let best: number | null = null;
+    let bestN = -1;
+    for (const [vid, n] of m) {
+      if (n > bestN) {
+        best = vid;
+        bestN = n;
+      }
+    }
+    if (best != null) vehicleIdByPlate.set(pl, best);
   }
 
   // dedupeStops merges the same physical visit when a vehicle is tracked by
@@ -266,6 +316,7 @@ export async function POST(request: NextRequest) {
   // others above.
   const codeTypes = new Map<string, string>();
   const codeCoords = new Map<string, { lat: number; lng: number }>();
+  const locationsForMatch: LocationForMatch[] = [];
   if (!locationsRes.error) {
     const codeById = new Map<string, string>();
     for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
@@ -280,10 +331,25 @@ export async function POST(request: NextRequest) {
       if (l.latitude != null && l.longitude != null) {
         codeCoords.set(l.code, { lat: l.latitude, lng: l.longitude });
       }
+      if (l.latitude != null && l.longitude != null && l.radius_meters != null) {
+        locationsForMatch.push({
+          id: l.id,
+          code: l.code,
+          latitude: l.latitude,
+          longitude: l.longitude,
+          radius_meters: l.radius_meters,
+          active: l.active,
+        });
+      }
     }
   }
 
-  const { rows, header: outHeader, summary } = runMatch({
+  // Pass 1: exactly today's matching, no I/O. If nothing is eligible for the
+  // TRACKiT fallback (the common case), this is the final result — zero extra
+  // cost. `stops` here is passed fresh each call and never mutated by
+  // runMatch (it copies + resets `.assigned` internally), so pass 1 and pass
+  // 2 are independently deterministic given the same inputs.
+  const matchArgs = {
     day,
     records,
     rawRecords: recordsRaw,
@@ -298,7 +364,40 @@ export async function POST(request: NextRequest) {
     coLocatedGroups,
     codeTypes,
     codeCoords,
-  });
+  };
+  let matched = runMatch(matchArgs);
+  let trackitDiagnostics: {
+    targeted: number;
+    attempted: number;
+    resolved: number;
+    cappedPlates: string[];
+    failedPlates: string[];
+  } | null = null;
+
+  if (matched.pendingTrackitPlates.length > 0) {
+    const realStopsByVehicle = new Map<number, DayStop[]>();
+    for (const s of stops) {
+      const arr = realStopsByVehicle.get(s.vehicleId) ?? [];
+      arr.push(s);
+      realStopsByVehicle.set(s.vehicleId, arr);
+    }
+
+    const { trackitStopsByPlate, diagnostics } = await resolveTrackitFallback({
+      pendingPlates: matched.pendingTrackitPlates,
+      vehicleIdByPlate,
+      accountsByVehicle,
+      realStopsByVehicle,
+      locations: locationsForMatch,
+      dateBegin: formatTrackitDate(new Date(dayStart).getTime()),
+      dateEnd: formatTrackitDate(new Date(dayEnd).getTime()),
+      fnStart,
+    });
+
+    matched = runMatch({ ...matchArgs, trackitStopsByPlate });
+    trackitDiagnostics = { ...diagnostics, resolved: matched.summary.trackitFallback };
+  }
+
+  const { rows, header: outHeader, summary } = matched;
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"
   // dropdown on suggestion rows). Input parsing above stays on SheetJS.
@@ -321,5 +420,6 @@ export async function POST(request: NextRequest) {
       fleetTrucks: fleetRes.error ? null : (fleetRes.data?.length ?? 0),
       fleetError: fleetRes.error?.message ?? null,
     },
+    ...(trackitDiagnostics ? { trackitFallback: trackitDiagnostics } : {}),
   });
 }

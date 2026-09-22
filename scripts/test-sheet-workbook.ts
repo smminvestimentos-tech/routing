@@ -149,7 +149,7 @@ async function main() {
 
   // ---- conditional formatting ----
   const cfs = cfsOf(ws);
-  ok("7 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 7, cfs.map((c) => c.ref));
+  ok("8 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 8, cfs.map((c) => c.ref));
 
   // Layout: C=Matrícula, E=Chegada, F=Saída, G=Confiança, H=Real, I=ZZ, J=YY, K=XX, L=WW.
   const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
@@ -191,8 +191,8 @@ async function main() {
     fBlue,
   );
   ok(
-    "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending, in conflict, OR implausibly fast",
-    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))),NOT(ISNUMBER(SEARCH("Velocidade implausível",$H2))))',
+    "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending, in conflict, implausibly fast, OR TRACKiT-fallback",
+    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))),NOT(ISNUMBER(SEARCH("Velocidade implausível",$H2))),NOT(ISNUMBER(SEARCH("TRACKiT",$G2))))',
     fPurple,
   );
   ok("no CF paints a whole-row range", cfs.every((c) => !/(^|\s)A2:/.test(c.ref)), cfs.map((c) => c.ref));

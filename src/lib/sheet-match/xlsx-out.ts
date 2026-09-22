@@ -73,6 +73,16 @@
 //     to 🔘 when a row somehow carries both notes (NOT("Conflito") in its own
 //     formula, not just priority number — same defensive style as 🟣 below).
 //     Takes precedence over 🟣 (short stop).
+//
+//   • 🟢 verde/menta (FFB6E3C6) on «Hora de Chegada» AND «Hora de Saída» (both
+//     cells, same row) whenever Confiança é TRACKIT_FALLBACK — a linha que a
+//     nossa `stops` não resolveu de todo, preenchida a partir do
+//     `/vehicleTravels` da TRACKiT como segunda fonte (ver common.ts /
+//     trackit-candidates.ts). Cede a 🔘 (conflito) e 🔵 (velocidade
+//     implausível) quando a linha acumula essas notas também — mesmo estilo
+//     defensivo dos outros. 🟣 (paragem curta) cede a este quando ambos se
+//     aplicam: saber que o dado vem de uma fonte não confirmada é mais
+//     acionável do que saber que é curto.
 
 import ExcelJS from "exceljs";
 import {
@@ -110,6 +120,12 @@ export const FILL_DARK_GRAY = "FFA6A6A6";
 // Implausible-speed rule (🔵, 2026-09-22) — distinct blue, confirmed with the
 // user, kept apart from the reds/oranges/yellows already in the palette above.
 export const FILL_SPEED = "FF9DC3E6";
+// TRACKiT-fallback rule (🟢, 2026-09-22) — a row `stops` never resolved,
+// filled instead from /vehicleTravels (see TRACKIT_FALLBACK, common.ts /
+// trackit-candidates.ts). A distinct mint/teal, apart from every other tint
+// above, so "unconfirmed second-source data" reads differently at a glance
+// from "short stop" (🟣) or "data problem" (🔘/🔵).
+export const FILL_TRACKIT = "FFB6E3C6";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
@@ -416,11 +432,41 @@ export async function buildSheetWorkbook(
     });
   }
 
+  // 🟢 TRACKiT fallback: `stops` never resolved this row at all, filled from
+  // /vehicleTravels instead (see TRACKIT_FALLBACK, common.ts). Cedes to 🔘
+  // (conflito) and 🔵 (velocidade implausível) — same defensive NOT() style
+  // as those two use against each other — when the row somehow accumulates
+  // both notes (the later detectScheduleConflicts/detectImplausibleSpeed
+  // passes run over every row regardless of Confiança).
+  const trackit = confL ? `ISNUMBER(SEARCH("TRACKiT",$${confL}2))` : "FALSE";
+  if (chegadaL && saidaL && confL) {
+    const conflict = realL
+      ? `ISNUMBER(SEARCH("Conflito",$${realL}2))`
+      : "FALSE";
+    const speed = realL
+      ? `ISNUMBER(SEARCH("Velocidade implausível",$${realL}2))`
+      : "FALSE";
+    ws.addConditionalFormatting({
+      ref: colsRef(chegadaL, saidaL),
+      rules: [
+        {
+          type: "expression",
+          priority: 7,
+          formulae: [`AND(${trackit},NOT(${conflict}),NOT(${speed}))`],
+          style: solid(FILL_TRACKIT),
+        },
+      ],
+    });
+  }
+
   // 🟣 short stop (< 5 min): painted on Chegada + Saída together, keyed off
   // the live WW duration. Suppressed while the row is still an unconfirmed
   // suggestion (same "plate cell == ZZ and Confiança <> OK" test as the red
-  // rule above) OR when the row is in conflict (🔘) or implausibly fast (🔵)
-  // — both keep priority over 🟣.
+  // rule above), when the row is in conflict (🔘) or implausibly fast (🔵) —
+  // both keep priority over 🟣 — or when it's a TRACKiT-fallback row (🟢
+  // keeps priority: knowing the source is unconfirmed matters more here than
+  // knowing it's short, and the "confirma antes de aceitar" note already
+  // covers it).
   if (chegadaL && saidaL) {
     const pending =
       confL && plateL
@@ -437,9 +483,9 @@ export async function buildSheetWorkbook(
       rules: [
         {
           type: "expression",
-          priority: 7,
+          priority: 8,
           formulae: [
-            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}),NOT(${speed}))`,
+            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}),NOT(${speed}),NOT(${trackit}))`,
           ],
           style: solid(FILL_PURPLE),
         },

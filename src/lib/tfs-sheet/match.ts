@@ -33,6 +33,7 @@
 //      in our tracking.
 
 import {
+  arrivalMin,
   classifyKeptDuration,
   codeEq,
   codeKey,
@@ -48,6 +49,7 @@ import {
   fmtHM,
   type ImplausibleKeptReason,
   implausibleKeptNote,
+  inWindow,
   KEPT,
   mergeFragmentedStops,
   minutesBetweenKeptCells,
@@ -63,6 +65,7 @@ import {
   REAL_COL,
   resolveMergedCode,
   REVIEW,
+  TRACKIT_FALLBACK,
   type MergedCodeEntry,
   type RouteStore,
   type SheetRecord,
@@ -70,8 +73,14 @@ import {
   SWAP_OUT_OF_WINDOW,
   SWAP_WINDOW_PAD_MIN,
   type SwapRival,
+  widenWindow,
   type WStop,
 } from "@/lib/sheet-match/common";
+import {
+  applyTrackitOutcome,
+  tryTrackitFallback,
+  type TrackitCandidateMap,
+} from "@/lib/sheet-match/trackit-candidates";
 
 export {
   CONFIANCA_COL,
@@ -81,6 +90,7 @@ export {
   SWAP,
   SWAP_OUT_OF_WINDOW,
   PLATE_TYPO,
+  TRACKIT_FALLBACK,
   codeEq,
   dedupeStops,
   fmtHM,
@@ -144,6 +154,8 @@ export type MatchSummary = {
   swapOutOfWindow: number;
   /** rows flagged "🔤 Possível erro de matrícula" (one-char plate slip) */
   plateTypo: number;
+  /** rows filled from TRACKiT /vehicleTravels because `stops` had nothing */
+  trackitFallback: number;
 };
 
 export type RunMatchArgs = {
@@ -188,12 +200,27 @@ export type RunMatchArgs = {
   /** locations.code -> {lat,lng}. Feeds detectImplausibleSpeed (common.ts) —
    *  a code missing here is never speed-checked, not an assumption either way. */
   codeCoords?: ReadonlyMap<string, { lat: number; lng: number }>;
+  /**
+   * TRACKiT /vehicleTravels-derived fallback candidates, keyed by plate — only
+   * consulted for a row `stops` couldn't resolve at all (Step 4 leftover).
+   * Omitted (pass 1 / no I/O yet) -> behaves exactly as before this feature
+   * existed. See src/lib/sheet-match/trackit-candidates.ts and
+   * src/app/api/tfs-sheet/route.ts's two-pass runMatch() call.
+   */
+  trackitStopsByPlate?: TrackitCandidateMap;
 };
 
 export type RunMatchResult = {
   rows: SheetRecord[];
   header: string[];
   summary: MatchSummary;
+  /**
+   * Distinct plates that reached the Step 4 leftover with NO
+   * trackitStopsByPlate entry to consult — every plate a caller without that
+   * argument would want to fetch /vehicleTravels for, to re-run with it on a
+   * second pass. Empty when nothing is eligible — the common case.
+   */
+  pendingTrackitPlates: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -399,7 +426,8 @@ type Work = {
     | typeof KEPT
     | typeof SWAP
     | typeof SWAP_OUT_OF_WINDOW
-    | typeof PLATE_TYPO;
+    | typeof PLATE_TYPO
+    | typeof TRACKIT_FALLBACK;
   real: string;
   /** set when input Chegada/Saída were rejected as an implausible pre-fill */
   placeholderNote: string;
@@ -587,10 +615,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
             w.conf = REVIEW;
             w.real = describeReal(plate);
           }
-        } else {
-          w.conf = REVIEW;
-          w.real = describeReal(plate);
         }
+        // else: no real stop at all for this row — leave w.conf === "" so
+        // Step 3 (swap) gets first refusal, then Step 4's TRACKiT fallback —
+        // same "our stops resolved nothing" leftover the Azambuja matcher's
+        // Step 1/2 leaves pending (candidates.length === 0) for its own
+        // Step 3/4.
       });
     }
   };
@@ -765,17 +795,25 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         : " Confirma antes de aceitar.");
   }
 
-  // Step 4 — whatever is left.
+  // Step 4 — whatever is left. "discrepancy"/"none" sources never resolved a
+  // plate (w.plate stays null), so tryTrackitFallback below naturally reports
+  // "not-attempted" for them without any special-casing — but their messages
+  // are richer than the generic describeReal, so they're still built
+  // explicitly. The plain "else" — a plate WAS resolved (sheet/id/fleet) but
+  // assignGroup found no stop of its own and Step 3's swap search also came
+  // up empty — is the one case eligible for the TRACKiT fallback.
+  const pendingTrackitPlates = new Set<string>();
   for (const w of works) {
     if (w.empty || w.conf) continue;
-    w.conf = REVIEW;
     if (w.source === "discrepancy") {
+      w.conf = REVIEW;
       w.real =
         `Matrícula divergente para o camião ${w.rawTruck}: ` +
         `ID indica ${w.idPlate}, fleet_trucks indica ${w.fleetPlate}. ` +
         `ID ${w.idPlate}: ${describeReal(w.idPlate)} | ` +
         `fleet ${w.fleetPlate}: ${describeReal(w.fleetPlate)}`;
     } else if (w.source === "none") {
+      w.conf = REVIEW;
       if (w.rawTruck && !w.rawPlate) {
         w.real = `Camião «${w.rawTruck}» sem matrícula (nem no ID, nem em fleet_trucks).`;
       } else if (!w.rawTruck && !w.rawPlate) {
@@ -784,7 +822,20 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         w.real = describeReal(w.plate);
       }
     } else {
-      w.real = describeReal(w.plate);
+      const baseNote = describeReal(w.plate);
+      const win = widenWindow(w.planIni, w.planFim, SWAP_WINDOW_PAD_MIN);
+      const outcome = tryTrackitFallback(
+        w.plate,
+        w.code,
+        (s) => inWindow(arrivalMin(s), win),
+        args.trackitStopsByPlate,
+        coLocatedGroups,
+      );
+      if (outcome.kind === "not-attempted" && w.plate) pendingTrackitPlates.add(w.plate);
+      const applied = applyTrackitOutcome(outcome, baseNote);
+      w.conf = applied.conf;
+      w.real = applied.note;
+      if (applied.stop) w.assignedStop = applied.stop;
     }
   }
 
@@ -797,6 +848,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let swap = 0;
   let swapOutOfWindow = 0;
   let plateTypo = 0;
+  let trackitFallback = 0;
   for (const w of works) {
     if (w.empty) {
       if (!(CONFIANCA_COL in w.out)) w.out[CONFIANCA_COL] = "";
@@ -856,6 +908,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else if (w.conf === SWAP) swap++;
     else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;
     else if (w.conf === PLATE_TYPO) plateTypo++;
+    else if (w.conf === TRACKIT_FALLBACK) trackitFallback++;
     else review++;
     if (w.source === "discrepancy") discrepancy++;
   }
@@ -921,7 +974,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + kept + swap + swapOutOfWindow + plateTypo,
+      total: ok + review + kept + swap + swapOutOfWindow + plateTypo + trackitFallback,
       ok,
       review,
       kept,
@@ -930,6 +983,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       swap,
       swapOutOfWindow,
       plateTypo,
+      trackitFallback,
     },
+    pendingTrackitPlates: [...pendingTrackitPlates],
   };
 }

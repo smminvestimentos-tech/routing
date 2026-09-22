@@ -20,6 +20,12 @@ export const SWAP_OUT_OF_WINDOW = "🔄❗ Possível troca (fora da janela)";
 // and a single look-alike plate (one character off) actually drove the route.
 // The story is "escreveram a matrícula mal", not "trocaram o camião".
 export const PLATE_TYPO = "🔤 Possível erro de matrícula";
+// A row our own `stops` couldn't resolve at all (no matching real stop),
+// filled instead from TRACKiT's /vehicleTravels as a SECOND, weaker source —
+// never chosen silently, always its own Confiança value distinct from "OK".
+// See src/lib/sheet-match/trackit-candidates.ts for how the candidate is
+// derived and src/app/api/{azambuja,tfs}-sheet/route.ts for where it's called.
+export const TRACKIT_FALLBACK = "🛰️ TRACKiT (sem paragem nossa) — confirmar";
 export const CONFIANCA_COL = "Confiança";
 export const REAL_COL = "Real";
 
@@ -43,6 +49,34 @@ export type DayStop = {
 /** A DayStop plus the matcher's "already handed to a row" flag. */
 export type WStop = DayStop & { assigned: boolean };
 
+// Why a plate ELIGIBLE for the TRACKiT fallback (see trackit-candidates.ts)
+// was never actually queried — surfaced verbatim in the row's "Real" note
+// (trackitSkipNote below) so a reviewer can tell "we tried and found nothing"
+// apart from "we didn't even try, and here's why".
+export type TrackitSkipReason = {
+  skipped: "cap" | "deadline" | "call-failed" | "no-vehicle-id";
+};
+
+export function trackitSkipNote(reason: TrackitSkipReason["skipped"]): string {
+  switch (reason) {
+    case "cap":
+      return "TRACKiT não consultado — limite de matrículas por upload atingido.";
+    case "deadline":
+      return "TRACKiT não consultado — tempo esgotado antes de chegar a esta matrícula.";
+    case "call-failed":
+      return "TRACKiT não consultado — falha ou tempo excedido a obter os dados.";
+    case "no-vehicle-id":
+      return "TRACKiT não consultado — não foi possível identificar o veículo TRACKiT desta matrícula.";
+  }
+}
+
+// How long an OPEN (no departedAt) stop is assumed to last for any interval-
+// overlap check — dedupeStops below, and trackit-candidates.ts's
+// excludeOverlappingRealStops (a TRACKiT-derived candidate overlapping a real
+// stop, open or closed, is excluded — see that module for why). Shared here
+// so both never drift apart on what "open" means for overlap purposes.
+export const OPEN_STOP_ASSUMED_MS = 2 * 3_600_000;
+
 // The sheet routes read `stops` across ALL trackit_accounts (one shared
 // fleet). A vehicle tracked by more than one account has each physical visit
 // detected once per account — slightly different arrived/departed each time —
@@ -57,8 +91,7 @@ export function dedupeStops(stops: DayStop[]): DayStop[] {
   }
   const endMs = (s: DayStop) => {
     const start = new Date(s.arrivedAt).getTime();
-    // treat an open stop as ~2h long for overlap purposes
-    return s.departedAt ? new Date(s.departedAt).getTime() : start + 2 * 3600_000;
+    return s.departedAt ? new Date(s.departedAt).getTime() : start + OPEN_STOP_ASSUMED_MS;
   };
   const out: DayStop[] = [];
   for (const arr of byVehicle.values()) {

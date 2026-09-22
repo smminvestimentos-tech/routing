@@ -67,6 +67,7 @@ import {
   REAL_COL,
   resolveMergedCode,
   REVIEW,
+  TRACKIT_FALLBACK,
   type MergedCodeEntry,
   type RouteStore,
   type SheetRecord,
@@ -76,6 +77,11 @@ import {
   type SwapRival,
   type WStop,
 } from "@/lib/sheet-match/common";
+import {
+  applyTrackitOutcome,
+  tryTrackitFallback,
+  type TrackitCandidateMap,
+} from "@/lib/sheet-match/trackit-candidates";
 
 export {
   CONFIANCA_COL,
@@ -85,6 +91,7 @@ export {
   SWAP,
   SWAP_OUT_OF_WINDOW,
   PLATE_TYPO,
+  TRACKIT_FALLBACK,
   dedupeStops,
   mergeFragmentedStops,
   normalizeDateTimeCell,
@@ -166,6 +173,8 @@ export type MatchSummary = {
   swapOutOfWindow: number;
   /** rows flagged "🔤 Possível erro de matrícula" (one-char plate slip) */
   plateTypo: number;
+  /** rows filled from TRACKiT /vehicleTravels because `stops` had nothing */
+  trackitFallback: number;
   /** distinct (ROTA) count and how many matched cleanly */
   routes: number;
   routesOk: number;
@@ -204,12 +213,27 @@ export type RunMatchArgs = {
   /** locations.code -> {lat,lng}. Feeds detectImplausibleSpeed (common.ts) —
    *  a code missing here is never speed-checked, not an assumption either way. */
   codeCoords?: ReadonlyMap<string, { lat: number; lng: number }>;
+  /**
+   * TRACKiT /vehicleTravels-derived fallback candidates, keyed by plate — only
+   * consulted for a group `stops` couldn't resolve at all (Step 4 leftover).
+   * Omitted (pass 1 / no I/O yet) -> behaves exactly as before this feature
+   * existed. See src/lib/sheet-match/trackit-candidates.ts and
+   * src/app/api/azambuja-sheet/route.ts's two-pass runMatch() call.
+   */
+  trackitStopsByPlate?: TrackitCandidateMap;
 };
 
 export type RunMatchResult = {
   rows: SheetRecord[];
   header: string[];
   summary: MatchSummary;
+  /**
+   * Distinct plates that reached the Step 4 leftover with NO
+   * trackitStopsByPlate entry to consult (i.e. every plate a caller without
+   * that argument would want to fetch /vehicleTravels for, to re-run with it
+   * on a second pass). Empty when nothing is eligible — the common case.
+   */
+  pendingTrackitPlates: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -527,7 +551,8 @@ type Work = {
     | typeof KEPT
     | typeof SWAP
     | typeof SWAP_OUT_OF_WINDOW
-    | typeof PLATE_TYPO;
+    | typeof PLATE_TYPO
+    | typeof TRACKIT_FALLBACK;
   real: string;
   /** set when input Chegada/Saída were rejected as an implausible pre-fill */
   placeholderNote: string;
@@ -969,16 +994,35 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   }
 
   // ----- Step 4: leftovers -----
+  // A group with no plate at all was already resolved to REVIEW back in Step
+  // 1 (`if (!g.plate) { setGroup(g, REVIEW, ...); continue; }`), so every
+  // group reaching here with g.conf === "" already has BOTH g.plate and
+  // g.code set — the `g.plate ?` guard below is defensive, not load-bearing.
+  //
+  // This is exactly "our stops resolved nothing for this group" — the one
+  // case eligible for the TRACKiT /vehicleTravels fallback (see
+  // trackit-candidates.ts). trackitStopsByPlate is undefined on pass 1 (no
+  // I/O yet), so tryTrackitFallback always reports "not-attempted" there —
+  // behaviour is byte-identical to before this feature existed; the plate is
+  // recorded in pendingTrackitPlates so route.ts knows to fetch it for pass 2.
+  const pendingTrackitPlates = new Set<string>();
   for (const g of groups) {
     if (g.conf !== "") continue;
-    setGroup(
-      g,
-      REVIEW,
-      null,
-      g.plate
-        ? describeReal(g.plate)
-        : "Sem matrícula utilizável para esta rota.",
+    if (!g.plate) {
+      setGroup(g, REVIEW, null, "Sem matrícula utilizável para esta rota.");
+      continue;
+    }
+    const baseNote = describeReal(g.plate);
+    const outcome = tryTrackitFallback(
+      g.plate,
+      g.code,
+      (s) => stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
+      args.trackitStopsByPlate,
+      coLocatedGroups,
     );
+    if (outcome.kind === "not-attempted") pendingTrackitPlates.add(g.plate);
+    const applied = applyTrackitOutcome(outcome, baseNote);
+    setGroup(g, applied.conf, applied.stop, applied.note);
   }
 
   // ----- write back -----
@@ -989,6 +1033,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let swap = 0;
   let swapOutOfWindow = 0;
   let plateTypo = 0;
+  let trackitFallback = 0;
   for (const w of works) {
     // Stamp the service day on every row (blank ones included) so a
     // re-uploaded output is never ambiguous about which day it is.
@@ -1060,6 +1105,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else if (w.conf === SWAP) swap++;
     else if (w.conf === SWAP_OUT_OF_WINDOW) swapOutOfWindow++;
     else if (w.conf === PLATE_TYPO) plateTypo++;
+    else if (w.conf === TRACKIT_FALLBACK) trackitFallback++;
     else review++;
   }
 
@@ -1115,7 +1161,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
-      total: ok + review + kept + swap + swapOutOfWindow + plateTypo,
+      total: ok + review + kept + swap + swapOutOfWindow + plateTypo + trackitFallback,
       ok,
       review,
       kept,
@@ -1123,8 +1169,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       swap,
       swapOutOfWindow,
       plateTypo,
+      trackitFallback,
       routes: routeMap.size,
       routesOk,
     },
+    pendingTrackitPlates: [...pendingTrackitPlates],
   };
 }
