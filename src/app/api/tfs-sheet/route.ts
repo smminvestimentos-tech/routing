@@ -15,7 +15,11 @@ import {
   type MergedCodeEntry,
   type SheetRecord,
 } from "@/lib/tfs-sheet/match";
-import { formatTrackitDate, resolveTrackitFallback } from "@/lib/sheet-match/trackit-fallback";
+import {
+  formatTrackitDate,
+  resolveTrackitFallback,
+  type TrackitFallbackDiagnostics,
+} from "@/lib/sheet-match/trackit-fallback";
 import type { LocationForMatch } from "@/lib/sheet-match/trackit-candidates";
 
 // Internal tool, no auth yet — same stance as the rest of /dashboard. Parses
@@ -366,13 +370,7 @@ export async function POST(request: NextRequest) {
     codeCoords,
   };
   let matched = runMatch(matchArgs);
-  let trackitDiagnostics: {
-    targeted: number;
-    attempted: number;
-    resolved: number;
-    cappedPlates: string[];
-    failedPlates: string[];
-  } | null = null;
+  let trackitDiagnostics: (TrackitFallbackDiagnostics & { resolved: number }) | null = null;
 
   if (matched.pendingTrackitPlates.length > 0) {
     const realStopsByVehicle = new Map<number, DayStop[]>();

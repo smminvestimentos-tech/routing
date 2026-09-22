@@ -62,6 +62,12 @@ export type TrackitFallbackDiagnostics = {
   cappedPlates: string[];
   /** matrículas com pelo menos uma chamada falhada/expirada */
   failedPlates: string[];
+  /**
+   * matrícula -> motivo exato da falha (mensagem da exceção, "budget
+   * exceeded", ou o timeout de TRACKIT_FALLBACK_CALL_TIMEOUT_MS) — só para
+   * as matrículas em failedPlates. Diagnóstico, nunca escrito na folha.
+   */
+  failedPlateReasons: Record<string, string>;
 };
 
 export type TrackitFallbackResult = {
@@ -138,6 +144,7 @@ export async function resolveTrackitFallback(
   }
 
   const failedPlates = new Set<string>();
+  const failedPlateReasons = new Map<string, string>();
   const travelsByPlate = new Map<string, RawTravel[]>();
   const successByPlate = new Set<string>();
 
@@ -159,6 +166,7 @@ export async function resolveTrackitFallback(
       for (const entry of entries) {
         if (Date.now() - fnStart > TRACKIT_FALLBACK_BUDGET_MS) {
           failedPlates.add(entry.plate);
+          failedPlateReasons.set(entry.plate, `prazo global excedido (>${TRACKIT_FALLBACK_BUDGET_MS}ms desde o início do pedido)`);
           continue;
         }
         const key = travelsCacheKey(accountId, entry.vehicleId, dateBegin, dateEnd);
@@ -170,8 +178,12 @@ export async function resolveTrackitFallback(
               TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
             )) as unknown as RawTravel[];
             setCachedTravels(key, travels);
-          } catch {
+          } catch (err) {
             failedPlates.add(entry.plate);
+            failedPlateReasons.set(
+              entry.plate,
+              `conta=${accountId} vehicleId=${entry.vehicleId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
             continue;
           }
         }
@@ -195,13 +207,21 @@ export async function resolveTrackitFallback(
     trackitStopsByPlate.set(entry.plate, excludeOverlappingRealStops(derived, real));
   }
 
+  // A plate with 2 accounts where one failed but the OTHER succeeded isn't a
+  // real failure — successByPlate is the source of truth for that, same as
+  // the trackitStopsByPlate assembly above.
+  const trulyFailedPlates = [...failedPlates].filter((p) => !successByPlate.has(p));
+
   return {
     trackitStopsByPlate,
     diagnostics: {
       targeted,
       attempted: plan.length,
       cappedPlates,
-      failedPlates: [...failedPlates],
+      failedPlates: trulyFailedPlates,
+      failedPlateReasons: Object.fromEntries(
+        trulyFailedPlates.map((p) => [p, failedPlateReasons.get(p) ?? "motivo desconhecido"]),
+      ),
     },
   };
 }
