@@ -248,7 +248,7 @@ export async function buildSheetWorkbook(
   // cells — bare "HH:MM[:SS]" (TFS) or "DD-MM-YYYY HH:MM" (Azambuja, whose
   // cycles can cross midnight; "/" also accepted — older exports and
   // transporter pre-fills used that separator before this app switched to
-  // "-") — mirroring parseClockMin/minutesBetweenTimeCells (common.ts) in
+  // "-") — mirroring parseClockMin/minutesBetweenKeptCells (common.ts) in
   // Excel-formula form. "" (via IFERROR) whenever either cell is blank or
   // doesn't parse, so a malformed cell never miscolors the row.
   if (chegadaL && saidaL) {

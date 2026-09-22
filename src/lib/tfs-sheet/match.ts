@@ -33,6 +33,7 @@
 //      in our tracking.
 
 import {
+  classifyKeptDuration,
   codeEq,
   codeKey,
   type CoLocatedGroups,
@@ -44,10 +45,11 @@ import {
   findVehicleSwap,
   fmtDuration,
   fmtHM,
+  type ImplausibleKeptReason,
   implausibleKeptNote,
   KEPT,
   mergeFragmentedStops,
-  minutesBetweenTimeCells,
+  minutesBetweenKeptCells,
   noGpsCoverageNote,
   normalizePlate,
   normalizeStoreCode,
@@ -146,6 +148,12 @@ export type MatchSummary = {
 export type RunMatchArgs = {
   day: string; // YYYY-MM-DD
   records: SheetRecord[];
+  /** same rows, read with raw:true — Excel serials as numbers (for the
+   *  KEPT-row duration-plausibility check). Optional; aligned to `records` by
+   *  index. TFS Chegada/Saída are normally bare "HH:MM" (no serial needed),
+   *  but this stays symmetric with the Azambuja matcher rather than assume
+   *  that never changes. */
+  rawRecords?: SheetRecord[];
   header: string[];
   cols: ResolvedColumns;
   stops: DayStop[];
@@ -169,6 +177,13 @@ export type RunMatchArgs = {
   mergedCodes?: readonly MergedCodeEntry[];
   /** same-site co-location groups (locations.colocated_with_id) */
   coLocatedGroups?: CoLocatedGroups;
+  /**
+   * locations.code -> locations.type ("loja", "armazem", …). Gates the
+   * KEPT-row plausibility check's stricter <5min threshold to actual stores —
+   * see classifyKeptDuration (common.ts). Missing/unknown code -> no stricter
+   * threshold applied (same as today), not an assumption either way.
+   */
+  codeTypes?: ReadonlyMap<string, string>;
 };
 
 export type RunMatchResult = {
@@ -388,11 +403,12 @@ type Work = {
 };
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
-  const { day, records, header, cols, fleetByTruck, platesWithGps } = args;
+  const { day, records, rawRecords, header, cols, fleetByTruck, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
   const coLocatedGroups = args.coLocatedGroups ?? [];
+  const codeTypes = args.codeTypes ?? new Map<string, string>();
   // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
   // into one effective stop BEFORE any candidate selection below — see
   // mergeFragmentedStops in common.ts for why.
@@ -468,11 +484,24 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const rawChegada = String(r[cols.chegadaCol] ?? "").trim();
     const rawSaida = String(r[cols.saidaCol] ?? "").trim();
     const bothFilled = !empty && rawChegada !== "" && rawSaida !== "";
-    const durMin = bothFilled ? minutesBetweenTimeCells(rawChegada, rawSaida) : null;
-    const implausible = bothFilled && durMin != null && durMin <= 0;
+    // durMin/implausibleReason: see classifyKeptDuration (common.ts) — FAIL
+    // CLOSED. A duration we can't even calculate (null) is treated as
+    // implausible, not plausible — the inverse of the original fa26052 rule,
+    // which trusted a null duration by default and is how BG-75-IP's
+    // 21-09-2026 burst (452/446/447/454/453/455 — a real, distinct delivery
+    // each, ~08:34-13:29) got written back as a fake same-minute "mantido".
+    const chegadaRaw = rawRecords?.[idx]?.[cols.chegadaCol];
+    const saidaRaw = rawRecords?.[idx]?.[cols.saidaCol];
+    const durMin = bothFilled
+      ? minutesBetweenKeptCells(rawChegada, rawSaida, chegadaRaw, saidaRaw, day)
+      : null;
+    const implausibleReason: ImplausibleKeptReason | null = bothFilled
+      ? classifyKeptDuration(durMin, codeTypes.get(code) ?? null)
+      : null;
+    const implausible = implausibleReason != null;
     const kept = bothFilled && !implausible;
-    const placeholderNote = implausible
-      ? implausibleKeptNote(rawChegada, rawSaida)
+    const placeholderNote = implausibleReason
+      ? implausibleKeptNote(rawChegada, rawSaida, implausibleReason, durMin)
       : "";
 
     return {

@@ -494,18 +494,20 @@ console.log("== runMatch: real bug — ROTA 185798003 / 7001 / AD-49-DH ==");
 }
 
 // ---------------------------------------------------------------------------
-// normalizeDateTimeCell — kept rows re-rendered as DD/MM/YYYY HH:MM.
+// normalizeDateTimeCell — kept rows re-rendered as DD-MM-YYYY HH:MM.
+// Moved to sheet-match/common.ts (2026-09-22); re-exported from
+// azambuja-sheet/match.ts, same import path as before.
 // ---------------------------------------------------------------------------
 console.log("== normalizeDateTimeCell ==");
 const SVC = "2026-09-09";
 // Excel serial for 2026-09-08 00:12 (days since 1899-12-30).
 const serial0812 = (Date.UTC(2026, 8, 8, 0, 12) - Date.UTC(1899, 11, 30)) / 86_400_000;
-ok("Excel serial -> DD/MM/YYYY HH:MM", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC) === "08/09/2026 00:12", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC));
-ok("our own format is left as-is", normalizeDateTimeCell("09/09/2026 06:26", "09/09/2026 06:26", SVC) === "09/09/2026 06:26");
-ok("DD/MM/YY string (no serial) -> full year", normalizeDateTimeCell("08/09/26 07:09", "08/09/26 07:09", SVC) === "08/09/2026 07:09");
-ok("D/M/YYYY without time -> 00:00", normalizeDateTimeCell("8/9/2026", "8/9/2026", SVC) === "08/09/2026 00:00");
-ok("HH:MM alone -> attach service day", normalizeDateTimeCell("06:26", "06:26", SVC) === "09/09/2026 06:26");
-ok("12h clock with PM", normalizeDateTimeCell("09/09/2026 1:05 PM", "09/09/2026 1:05 PM", SVC) === "09/09/2026 13:05");
+ok("Excel serial -> DD-MM-YYYY HH:MM", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC) === "08-09-2026 00:12", normalizeDateTimeCell("9/8/26 0:12", serial0812, SVC));
+ok("our own format is left as-is", normalizeDateTimeCell("09-09-2026 06:26", "09-09-2026 06:26", SVC) === "09-09-2026 06:26");
+ok("DD/MM/YY string (no serial) -> full year", normalizeDateTimeCell("08/09/26 07:09", "08/09/26 07:09", SVC) === "08-09-2026 07:09");
+ok("D/M/YYYY without time -> 00:00", normalizeDateTimeCell("8/9/2026", "8/9/2026", SVC) === "08-09-2026 00:00");
+ok("HH:MM alone -> attach service day", normalizeDateTimeCell("06:26", "06:26", SVC) === "09-09-2026 06:26");
+ok("12h clock with PM", normalizeDateTimeCell("09/09/2026 1:05 PM", "09/09/2026 1:05 PM", SVC) === "09-09-2026 13:05");
 ok("empty -> empty", normalizeDateTimeCell("", "", SVC) === "");
 ok("unparseable -> unchanged", normalizeDateTimeCell("mais ou menos agora", "mais ou menos agora", SVC) === "mais ou menos agora");
 
@@ -528,8 +530,8 @@ ok("unparseable -> unchanged", normalizeDateTimeCell("mais ou menos agora", "mai
   });
   const r = res.rows[0];
   ok("kept row: Confiança = mantido", String(r["Confiança"]).includes("mantido"));
-  ok("kept row: Chegada re-rendered DD/MM/YYYY", r["Hora Chegada"] === "08/09/2026 00:12", r["Hora Chegada"]);
-  ok("kept row: Saida re-rendered DD/MM/YYYY", r["Hora Saida"] === "08/09/2026 01:30", r["Hora Saida"]);
+  ok("kept row: Chegada re-rendered DD-MM-YYYY", r["Hora Chegada"] === "08-09-2026 00:12", r["Hora Chegada"]);
+  ok("kept row: Saida re-rendered DD-MM-YYYY", r["Hora Saida"] === "08-09-2026 01:30", r["Hora Saida"]);
   ok("kept row: MATRICULA untouched", r["MATRICULA"] === "AA-11-BB");
 }
 

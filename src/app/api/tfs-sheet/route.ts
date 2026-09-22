@@ -158,7 +158,9 @@ export async function POST(request: NextRequest) {
     // Every location's code/active/merged_into_id/colocated_with_id — resolves
     // a sheet code that still names a merged-away location (0019, 0030) to its
     // canonical code, and feeds the same-site co-location groups (0034).
-    supabase.from("locations").select("id, code, active, merged_into_id, colocated_with_id"),
+    // "type" feeds codeTypes below — gates the KEPT-row plausibility check's
+    // stricter <5min threshold to actual stores (loja), never armazém/CD.
+    supabase.from("locations").select("id, code, type, active, merged_into_id, colocated_with_id"),
   ]);
 
   if (stopsRes.error) {
@@ -253,6 +255,10 @@ export async function POST(request: NextRequest) {
   const coLocatedGroups = locationsRes.error
     ? []
     : coLocatedGroupsFromLocations(locationsRes.data ?? []);
+  // locations.code -> locations.type — see classifyKeptDuration (common.ts).
+  // Degrades to an empty map (no stricter threshold applied, today's
+  // behaviour) if the query failed, same stance as the others above.
+  const codeTypes = new Map<string, string>();
   if (!locationsRes.error) {
     const codeById = new Map<string, string>();
     for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
@@ -263,12 +269,14 @@ export async function POST(request: NextRequest) {
         const canonicalCode = codeById.get(l.merged_into_id);
         if (canonicalCode) mergedCodes.push({ code: l.code, canonicalCode });
       }
+      if (l.type) codeTypes.set(l.code, l.type);
     }
   }
 
   const { rows, header: outHeader, summary } = runMatch({
     day,
     records,
+    rawRecords: recordsRaw,
     header,
     cols,
     stops,
@@ -278,6 +286,7 @@ export async function POST(request: NextRequest) {
     activeCodes,
     mergedCodes,
     coLocatedGroups,
+    codeTypes,
   });
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"

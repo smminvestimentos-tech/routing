@@ -485,32 +485,162 @@ function minutesBetweenDMYHM(a: string, b: string): number | null {
   return (tb - ta) / 60_000;
 }
 
-// Best-effort minutes between two already-filled Chegada/Saída *display*
-// strings — tolerant of either the transporter's own full "DD/MM/YYYY HH:MM"
-// pre-fill or a bare "HH:MM" / Excel time-fraction cell (same calendar day
-// assumed). null when neither shape parses.
+// Render a Chegada/Saída cell as "DD-MM-YYYY HH:MM" (wall-clock — NO timezone
+// shift). Prefers the Excel serial from the workbook's raw pass (unambiguous);
+// falls back to parsing our own "DD-MM-YYYY HH:MM" (or the older "/"
+// separator), a "DD/MM/YY[YY] [HH:MM]" string (also accepting "." as the date
+// separator and a trailing "AM"/"PM"), or "HH:MM" alone (attached to
+// `serviceDay`). Unparseable input is returned unchanged.
 //
-// Used to sanity-check a row that arrives with BOTH times already filled
-// before trusting it verbatim (see KEPT in both matchers): a real delivery in
-// this fleet never takes zero minutes (see the duration audit behind the
-// Azambuja BG-75-IP investigation, 2026-09), so Saída <= Chegada is a strong
-// signal of an upstream placeholder — the transporter's own planning system
-// pre-filling both cells with the same value for a store that hasn't actually
-// been delivered yet — not a confirmed visit.
-export function minutesBetweenTimeCells(a: string, b: string): number | null {
-  const full = minutesBetweenDMYHM(a, b);
-  if (full != null) return full;
-  const ma = parseClockMin(a);
-  const mb = parseClockMin(b);
-  if (ma == null || mb == null) return null;
-  return mb - ma;
+// Shared by both matchers: originally Azambuja-only (kept rows are re-rendered
+// in this format there), but also the "source of truth" duration parser for
+// the KEPT-row plausibility check in both matchers (see
+// minutesBetweenKeptCells below) — deliberately reused rather than a
+// narrower parser of its own, so a shape THIS function already reads cleanly
+// (2-digit year, "." separator, 12h clock, an Excel datetime serial) can never
+// again defeat the plausibility check the way it did for BG-75-IP, 2026-09-21
+// (see classifyKeptDuration).
+export function normalizeDateTimeCell(
+  display: string,
+  raw: unknown,
+  serviceDay: string, // YYYY-MM-DD
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmt = (y: number, mo: number, d: number, h: number, mi: number) =>
+    `${pad(d)}-${pad(mo)}-${y} ${pad(h)}:${pad(mi)}`;
+
+  const serial =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? raw
+      : typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))
+        ? Number(raw)
+        : null;
+  if (serial != null && serial > 1 && serial < 200_000) {
+    const dt = new Date(
+      Date.UTC(1899, 11, 30) + Math.round(serial * 86_400_000),
+    );
+    return fmt(
+      dt.getUTCFullYear(),
+      dt.getUTCMonth() + 1,
+      dt.getUTCDate(),
+      dt.getUTCHours(),
+      dt.getUTCMinutes(),
+    );
+  }
+
+  const s = display.trim();
+  if (!s) return "";
+
+  const dmy = s.match(
+    /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2}))?\s*(AM|PM)?/i,
+  );
+  if (dmy) {
+    const [, dd, mm, yy, hh, mi, ap] = dmy;
+    let year = Number(yy);
+    if (year < 100) year += 2000;
+    let hour = hh ? Number(hh) : 0;
+    if (ap) {
+      const up = ap.toUpperCase();
+      if (up === "PM" && hour < 12) hour += 12;
+      if (up === "AM" && hour === 12) hour = 0;
+    }
+    return fmt(year, Number(mm), Number(dd), hour, mi ? Number(mi) : 0);
+  }
+
+  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hm) {
+    const [y, mo, d] = serviceDay.split("-").map(Number);
+    return fmt(y, mo, d, Number(hm[1]), Number(hm[2]));
+  }
+
+  return display;
+}
+
+// Minutes between two already-filled Chegada/Saída cells, for the KEPT-row
+// plausibility check (see classifyKeptDuration below). Routes BOTH cells
+// through normalizeDateTimeCell first — the same, more permissive parser the
+// write-back path already trusts to reshape these exact cells — then diffs
+// the two normalised "DD-MM-YYYY HH:MM" strings with minutesBetweenDMYHM.
+//
+// This replaces an earlier, narrower parser (minutesBetweenTimeCells, fixed
+// "DD/MM/YYYY HH:MM" or bare "HH:MM" only) that returned null — "can't tell"
+// — for a shape normalizeDateTimeCell already reads correctly (2-digit year,
+// "." separator, 12h clock, an Excel serial). That null was then treated as
+// "plausible, trust it" by the caller, which is what actually let 6 real
+// deliveries through as a false "mantido" for BG-75-IP, 2026-09-21: the
+// duration WAS calculable, just not by that narrower parser. Fixed here at
+// the source (a single, shared, better parser) rather than by loosening the
+// caller's fail-open branch alone — see classifyKeptDuration for that half of
+// the fix.
+//
+// null when either cell doesn't normalise to a full date+time (an entirely
+// unparseable cell, or a bare "HH:MM" with no `serviceDay` to anchor it to —
+// normalizeDateTimeCell needs a non-empty serviceDay for that fallback).
+export function minutesBetweenKeptCells(
+  chegadaDisplay: string,
+  saidaDisplay: string,
+  chegadaRaw: unknown,
+  saidaRaw: unknown,
+  serviceDay: string,
+): number | null {
+  const a = normalizeDateTimeCell(chegadaDisplay, chegadaRaw, serviceDay);
+  const b = normalizeDateTimeCell(saidaDisplay, saidaRaw, serviceDay);
+  return minutesBetweenDMYHM(a, b);
+}
+
+// Minimum plausible minutes for a KEPT (Chegada/Saída pre-filled) row at a
+// STORE ("loja") — the same 5-minute threshold as the 🟣 short-stop VISUAL
+// rule in xlsx-out.ts, reused here for consistency rather than invented fresh.
+// Deliberately NOT applied to 'armazem' / 'centro_distribuicao' (migration
+// 0035: a real, near-stationary warehouse touch legitimately closes in 0min —
+// close_and_persist_stop's own zero-duration floor for those types), nor to
+// any other/unknown location type (no fleet-wide evidence there yet — default
+// to the loose >0 rule rather than invent an unverified one), nor to our own
+// GPS-matched "OK" rows (already validated by the real stop-detection, not
+// this heuristic).
+export const LOJA_MIN_PLAUSIBLE_DURATION_MIN = 5;
+
+export type ImplausibleKeptReason =
+  | "unparseable" // duration not calculable at all (see minutesBetweenKeptCells)
+  | "non_positive" // Saída <= Chegada — the original BG-75-IP shape
+  | "too_short_for_store"; // 0 < duration < 5min at a 'loja'
+
+// Classifies a KEPT-candidate row's duration as implausible (an upstream
+// placeholder, not a confirmed visit) or plausible (trust it). null durMin —
+// "can't tell" — is now itself implausible: FAIL-CLOSED, not fail-open. The
+// original bug (fa26052) was fail-open here: `durMin != null && durMin <= 0`
+// let a null (unparseable) duration slip through as "plausible" by default,
+// which is exactly how BG-75-IP's 21-09-2026 burst (452/446/447/454/453/455)
+// got kept verbatim as fake deliveries.
+export function classifyKeptDuration(
+  durMin: number | null,
+  locationType: string | null | undefined,
+): ImplausibleKeptReason | null {
+  if (durMin == null) return "unparseable";
+  if (durMin <= 0) return "non_positive";
+  if (locationType === "loja" && durMin < LOJA_MIN_PLAUSIBLE_DURATION_MIN) {
+    return "too_short_for_store";
+  }
+  return null;
 }
 
 // Caption for a row whose input Chegada/Saída were rejected as an implausible
-// (zero or negative duration) pre-fill rather than trusted as KEPT.
-export function implausibleKeptNote(rawChegada: string, rawSaida: string): string {
+// pre-fill rather than trusted as KEPT — see classifyKeptDuration for the 3
+// reasons this fires.
+export function implausibleKeptNote(
+  rawChegada: string,
+  rawSaida: string,
+  reason: ImplausibleKeptReason,
+  durMin: number | null,
+): string {
+  const why =
+    reason === "unparseable"
+      ? "não foi possível calcular a duração (formato de data/hora não reconhecido)"
+      : reason === "too_short_for_store"
+        ? `duração demasiado curta para uma loja (${durMin}min, mínimo ${LOJA_MIN_PLAUSIBLE_DURATION_MIN}min)`
+        : "sem duração real";
   return (
-    `Ficheiro trazia Chegada e Saída já preenchidas mas sem duração real ` +
+    `Ficheiro trazia Chegada e Saída já preenchidas mas ${why} ` +
     `(${rawChegada} → ${rawSaida}) — provável placeholder do sistema de ` +
     `planeamento, não uma entrega confirmada. Tratada como não confirmada ` +
     `e sujeita ao emparelhamento normal.`

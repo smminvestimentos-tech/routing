@@ -25,13 +25,17 @@ import {
   runMatch as runAzMatch,
 } from "@/lib/azambuja-sheet/match";
 import {
+  classifyKeptDuration,
   codeEq,
   codeKey,
   type CoLocatedGroups,
   findPlateTypo,
   FRAGMENT_MERGE_GAP_MIN,
   isEditDistance1,
+  LOJA_MIN_PLAUSIBLE_DURATION_MIN,
   mergeFragmentedStops,
+  minutesBetweenKeptCells,
+  normalizeDateTimeCell,
   resolveMergedCode,
 } from "@/lib/sheet-match/common";
 
@@ -389,6 +393,194 @@ ok(
   );
   ok("Azambuja implausible: E66 (no real stop) -> REVIEW, times blanked, not 14:43/14:43", r.rows[1]["Confiança"] === REVIEW && r.rows[1]["Hora Chegada"] === "" && r.rows[1]["Hora Saida"] === "", r.rows[1]);
   ok("Azambuja implausible: E66 Real documents the rejected placeholder", typeof r.rows[1]["Real"] === "string" && (r.rows[1]["Real"] as string).includes("14:43"), r.rows[1]["Real"]);
+}
+
+// ---------------------------------------------------------------------------
+// classifyKeptDuration / minutesBetweenKeptCells — regression coverage for
+// the fail-open gap behind BG-75-IP's 2026-09-21 RECURRENCE (a regression of
+// the fa26052 fix, not a fresh bug): the plausibility check used a narrower
+// date parser (minutesBetweenTimeCells) than the one the write-back path
+// already trusted to reshape these exact cells (normalizeDateTimeCell). A
+// cell shape the wider parser read cleanly but the narrower one could not
+// came back durMin=null, and the OLD rule (`durMin != null && durMin <= 0`)
+// treated null as "plausible, trust it" — fail-open. 452/446/447/454/453/455
+// all landed on "✅ Já preenchido (mantido)" that way despite being 6 real,
+// distinct deliveries (confirmed via Transpogest, ~08:34-13:29), each on the
+// input sheet as a same-minute Chegada=Saída placeholder.
+// ---------------------------------------------------------------------------
+{
+  const SVC = "2026-09-21";
+  // The 4 shapes normalizeDateTimeCell reads correctly (and the write-back
+  // path already relied on) but the old narrower parser returned null for —
+  // each written as the exact same-value placeholder BG-75-IP arrived with.
+  const placeholderShapes: Array<[string, string]> = [
+    ["2-digit year (\"21-09-26 14:14\")", "21-09-26 14:14"],
+    ["\".\" date separator (\"21.09.2026 14:14\")", "21.09.2026 14:14"],
+    ["M/D + AM/PM, no raw serial (\"9/21/26 2:14 PM\")", "9/21/26 2:14 PM"],
+  ];
+  for (const [label, cell] of placeholderShapes) {
+    const durMin = minutesBetweenKeptCells(cell, cell, undefined, undefined, SVC);
+    ok(`minutesBetweenKeptCells reads ${label} — was null under the old parser`, durMin === 0, durMin);
+    ok(`classifyKeptDuration rejects ${label} (Chegada === Saída)`, classifyKeptDuration(durMin, null) === "non_positive", durMin);
+  }
+
+  // Excel serial: an earlier report in this investigation claimed
+  // normalizeDateTimeCell mis-decoded a serial as the wrong calendar day
+  // ("06-09-2026" for what should have been "21-09-2026") — that turned out
+  // to be a WRONG TEST FIXTURE (serial 46271 really is 2026-09-06, not
+  // 2026-09-21), not a parser bug. Verified here against the CORRECT serial
+  // for 2026-09-21 14:14, so this doesn't go unchecked a second time.
+  const serial21Sep1414 =
+    (Date.UTC(2026, 8, 21, 14, 14) - Date.UTC(1899, 11, 30)) / 86_400_000;
+  ok(
+    "Excel serial decodes to the right calendar day (2026-09-21, not 09-06)",
+    normalizeDateTimeCell(String(serial21Sep1414), serial21Sep1414, SVC) === "21-09-2026 14:14",
+    normalizeDateTimeCell(String(serial21Sep1414), serial21Sep1414, SVC),
+  );
+  const durSerial = minutesBetweenKeptCells(
+    String(serial21Sep1414), String(serial21Sep1414), serial21Sep1414, serial21Sep1414, SVC,
+  );
+  ok("minutesBetweenKeptCells reads the Excel-serial placeholder (0min)", durSerial === 0, durSerial);
+  ok("classifyKeptDuration rejects the Excel-serial placeholder", classifyKeptDuration(durSerial, null) === "non_positive");
+
+  // A cell shape genuinely NEITHER parser can read -> durMin stays null ->
+  // FAIL CLOSED (implausible), never the old fail-open "trust it" default.
+  const garbage = minutesBetweenKeptCells(
+    "mais ou menos ao almoço", "mais ou menos ao almoço", undefined, undefined, SVC,
+  );
+  ok("minutesBetweenKeptCells: truly unparseable -> null", garbage === null, garbage);
+  ok("classifyKeptDuration: null duration -> 'unparseable' (fail-closed, not fail-open)", classifyKeptDuration(garbage, null) === "unparseable");
+}
+
+// ---------------------------------------------------------------------------
+// classifyKeptDuration — the 5th rule (2026-09-22 fix): duration < 5min at a
+// 'loja' is ALSO implausible, same threshold as the 🟣 short-stop VISUAL rule
+// (xlsx-out.ts). NOT applied to 'armazem'/'centro_distribuicao' (0035: a real
+// near-stationary warehouse touch legitimately closes in 0min), nor to an
+// unresolved/unknown location type (no evidence there yet).
+// ---------------------------------------------------------------------------
+{
+  ok("classifyKeptDuration: 4min at a loja -> too_short_for_store", classifyKeptDuration(4, "loja") === "too_short_for_store");
+  ok(
+    `classifyKeptDuration: exactly ${LOJA_MIN_PLAUSIBLE_DURATION_MIN}min at a loja -> plausible (strict <5 boundary)`,
+    classifyKeptDuration(LOJA_MIN_PLAUSIBLE_DURATION_MIN, "loja") === null,
+  );
+  ok("classifyKeptDuration: 1min at an armazem -> plausible (0035 exception)", classifyKeptDuration(1, "armazem") === null);
+  ok("classifyKeptDuration: 1min at a centro_distribuicao -> plausible (0035 exception)", classifyKeptDuration(1, "centro_distribuicao") === null);
+  ok("classifyKeptDuration: 1min, unresolved/unknown type -> plausible (no unverified assumption)", classifyKeptDuration(1, null) === null);
+  ok("classifyKeptDuration: 0min anywhere -> non_positive regardless of type", classifyKeptDuration(0, "armazem") === "non_positive");
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end regression — BG-75-IP, 2026-09-21 (real rota 185884946/47/48):
+// 6 distinct store deliveries (452/446/447/454/453/455), each with its own
+// GPS-confirmed time spread across the morning, all landed in the uploaded
+// file as a same-minute Chegada=Saída placeholder — in the SAME upload,
+// Plataforma Maia (7004, an armazém pass-through) legitimately closing in
+// minutes. Both must be told apart correctly. (Reproduced on this test
+// file's fixed `day`/`iso()`, not the literal 2026-09-21 — the store codes,
+// shapes and vehicle are the real reported ones.)
+// ---------------------------------------------------------------------------
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const rota = "185884946";
+  const mk = (code: string, ch: string, sa: string): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code, MATRICULA: "BG-75-IP",
+    "Hora Chegada": ch, "Hora Saida": sa, CICLO: "Noturno", TIPO: "D",
+  });
+  const lojaCodes = ["452", "446", "447", "454", "453", "455"];
+  const records: SheetRecord[] = [
+    mk("7004", "09-09-2026 14:10", "09-09-2026 14:14"), // Plataforma Maia (armazém), legit 4min
+    ...lojaCodes.map((c) => mk(c, "09-09-2026 14:14", "09-09-2026 14:14")),
+  ];
+  const azCols = resolveAzColumns(azHeader);
+  // Real GPS: Plataforma Maia's own short touch, plus the 6 stores' ACTUAL
+  // distinct times, spread across the morning (per the Transpogest cross-check
+  // in the original report).
+  const stops: DayStop[] = [
+    { id: "w0", vehicleId: 75, plate: "BG75IP", code: "7004", arrivedAt: iso("14:10"), departedAt: iso("14:14") },
+    { id: "w1", vehicleId: 75, plate: "BG75IP", code: "452", arrivedAt: iso("08:34"), departedAt: iso("08:52") },
+    { id: "w2", vehicleId: 75, plate: "BG75IP", code: "446", arrivedAt: iso("09:15"), departedAt: iso("09:33") },
+    { id: "w3", vehicleId: 75, plate: "BG75IP", code: "447", arrivedAt: iso("10:02"), departedAt: iso("10:20") },
+    { id: "w4", vehicleId: 75, plate: "BG75IP", code: "454", arrivedAt: iso("11:10"), departedAt: iso("11:28") },
+    { id: "w5", vehicleId: 75, plate: "BG75IP", code: "453", arrivedAt: iso("12:40"), departedAt: iso("12:58") },
+    { id: "w6", vehicleId: 75, plate: "BG75IP", code: "455", arrivedAt: iso("13:11"), departedAt: iso("13:29") },
+  ];
+  const codeTypes = new Map<string, string>([
+    ["7004", "armazem"],
+    ...lojaCodes.map((c): [string, string] => [c, "loja"]),
+  ]);
+  const r = runAzMatch({
+    day, records, header: azHeader, cols: azCols, stops,
+    platesWithGps: new Set(["BG75IP"]),
+    pingWindowByPlate: new Map([["BG75IP", { min: Date.parse(iso("06:00")), max: Date.parse(iso("20:00")) }]]),
+    codeTypes,
+  });
+  console.log("\nAzambuja (BG-75-IP real regression) summary:", JSON.stringify(r.summary));
+  const byCode = new Map(r.rows.map((row) => [String(row["N_LOJA"]), row]));
+
+  ok("BG-75-IP regression: Plataforma Maia (armazém, 4min) stays KEPT", byCode.get("7004")?.["Confiança"] === KEPT, byCode.get("7004"));
+  for (const c of lojaCodes) {
+    const row = byCode.get(c)!;
+    ok(`BG-75-IP regression: loja ${c} NOT kept as the fake 14:14 placeholder`, row["Confiança"] !== KEPT, row);
+    ok(`BG-75-IP regression: loja ${c} resolves OK from its OWN real GPS stop`, row["Confiança"] === "OK" && row["Hora Chegada"] !== "09-09-2026 14:14", row);
+  }
+  ok("BG-75-IP regression: summary.kept === 1 (only the legitimate armazém row)", r.summary.kept === 1, r.summary);
+}
+
+// ---------------------------------------------------------------------------
+// New threshold specifically (not just the old <=0 rule): a 'loja' row with a
+// TECHNICALLY POSITIVE but <5min duration must ALSO be rejected — the same
+// duration at an 'armazem' code, same upload, must NOT be. Proves the new
+// rule is what's catching this shape, not just the pre-existing durMin<=0 one.
+// ---------------------------------------------------------------------------
+{
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const mk = (code: string, ch: string, sa: string): SheetRecord => ({
+    ROTA: "R-threshold", N_LOJA: code, NOME: code, MATRICULA: "BG-75-IP",
+    "Hora Chegada": ch, "Hora Saida": sa, CICLO: "Noturno", TIPO: "D",
+  });
+  const records: SheetRecord[] = [
+    mk("7004", "09-09-2026 14:10", "09-09-2026 14:14"), // armazém, 4min -> legit
+    mk("452", "09-09-2026 14:14", "09-09-2026 14:18"), // loja, 4min -> too short
+  ];
+  const azCols = resolveAzColumns(azHeader);
+  const stops: DayStop[] = [
+    { id: "x0", vehicleId: 75, plate: "BG75IP", code: "7004", arrivedAt: iso("14:10"), departedAt: iso("14:14") },
+    { id: "x1", vehicleId: 75, plate: "BG75IP", code: "452", arrivedAt: iso("08:34"), departedAt: iso("08:52") },
+  ];
+  const codeTypes = new Map([["7004", "armazem"], ["452", "loja"]]);
+  const r = runAzMatch({
+    day, records, header: azHeader, cols: azCols, stops,
+    platesWithGps: new Set(["BG75IP"]),
+    pingWindowByPlate: new Map([["BG75IP", { min: Date.parse(iso("06:00")), max: Date.parse(iso("20:00")) }]]),
+    codeTypes,
+  });
+  const byCode = new Map(r.rows.map((row) => [String(row["N_LOJA"]), row]));
+  ok("threshold: armazém 4min (durMin > 0) stays KEPT — 0035 exception", byCode.get("7004")?.["Confiança"] === KEPT, byCode.get("7004"));
+  ok("threshold: loja 4min (durMin > 0, would pass the OLD <=0 rule) is NOT kept", byCode.get("452")?.["Confiança"] !== KEPT, byCode.get("452"));
+  ok("threshold: loja 4min resolves OK from its own real GPS stop instead", byCode.get("452")?.["Confiança"] === "OK" && byCode.get("452")?.["Hora Chegada"] !== "09-09-2026 14:14", byCode.get("452"));
+}
+
+// ---------------------------------------------------------------------------
+// Same fail-open gap, symmetric fix on the TFS matcher (tfs-sheet/match.ts) —
+// not just Azambuja. A 2-digit-year placeholder must be rejected there too.
+// ---------------------------------------------------------------------------
+{
+  const recs = [
+    { ...tfsRow(1, "E16", "Azambuja", "08:00", "10:00"), "Matrícula da Viatura": "12AB34", "Hora de Chegada": "21-09-26 14:14", "Hora de Saída": "21-09-26 14:14" },
+  ];
+  const stops: DayStop[] = [
+    { id: "y1", vehicleId: 90, plate: "12AB34", code: "E16", arrivedAt: iso("08:12"), departedAt: iso("08:40") },
+  ];
+  const r = runTfsMatch({
+    day, records: recs, header: tfsHeader, cols: tfsCols, stops,
+    fleetByTruck: new Map(),
+    platesWithGps: new Set(["12AB34"]),
+    pingWindowByPlate: new Map([["12AB34", { min: new Date(iso("00:00")).getTime(), max: new Date(iso("23:59")).getTime() }]]),
+  });
+  ok("TFS: 2-digit-year placeholder is NOT kept (old parser returned null -> was kept)", r.rows[0]["Confiança"] !== KEPT, r.rows[0]);
+  ok("TFS: 2-digit-year placeholder resolves OK from the real stop instead", r.rows[0]["Confiança"] === "OK" && r.rows[0]["Hora de Chegada"] === "08:12", r.rows[0]);
 }
 
 // ---------------------------------------------------------------------------

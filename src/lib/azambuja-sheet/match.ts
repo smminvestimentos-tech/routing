@@ -34,6 +34,7 @@
 //      showing what our data actually has for that route's plate that day.
 
 import {
+  classifyKeptDuration,
   codeEq,
   codeKey,
   type CoLocatedGroups,
@@ -46,12 +47,14 @@ import {
   fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
+  type ImplausibleKeptReason,
   implausibleKeptNote,
   KEPT,
   lisbonEpoch,
   mergeFragmentedStops,
-  minutesBetweenTimeCells,
+  minutesBetweenKeptCells,
   noGpsCoverageNote,
+  normalizeDateTimeCell,
   normalizePlate,
   normalizeStoreCode,
   parseClockMin,
@@ -83,6 +86,7 @@ export {
   PLATE_TYPO,
   dedupeStops,
   mergeFragmentedStops,
+  normalizeDateTimeCell,
   parseServiceDay,
 };
 export type { CoLocatedGroups, DayStop, MergedCodeEntry, SheetRecord };
@@ -189,6 +193,13 @@ export type RunMatchArgs = {
   mergedCodes?: readonly MergedCodeEntry[];
   /** same-site co-location groups (locations.colocated_with_id) */
   coLocatedGroups?: CoLocatedGroups;
+  /**
+   * locations.code -> locations.type ("loja", "armazem", …). Gates the
+   * KEPT-row plausibility check's stricter <5min threshold to actual stores —
+   * see classifyKeptDuration (common.ts). Missing/unknown code -> no stricter
+   * threshold applied (same as today), not an assumption either way.
+   */
+  codeTypes?: ReadonlyMap<string, string>;
 };
 
 export type RunMatchResult = {
@@ -419,66 +430,10 @@ export function stopInWindow(
   return !Number.isFinite(d) || d < hiMs;
 }
 
-// Render a Chegada/Saída cell as "DD-MM-YYYY HH:MM" (wall-clock — NO timezone
-// shift). Prefers the Excel serial from the workbook's raw pass (unambiguous);
-// falls back to parsing our own "DD-MM-YYYY HH:MM" (or the older "/"
-// separator), a "DD/MM/YY[YY] [HH:MM]" string, or "HH:MM" alone (attached to
-// `serviceDay`). Unparseable input is returned unchanged.
-export function normalizeDateTimeCell(
-  display: string,
-  raw: unknown,
-  serviceDay: string, // YYYY-MM-DD
-): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const fmt = (y: number, mo: number, d: number, h: number, mi: number) =>
-    `${pad(d)}-${pad(mo)}-${y} ${pad(h)}:${pad(mi)}`;
-
-  const serial =
-    typeof raw === "number" && Number.isFinite(raw)
-      ? raw
-      : typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))
-        ? Number(raw)
-        : null;
-  if (serial != null && serial > 1 && serial < 200_000) {
-    const dt = new Date(
-      Date.UTC(1899, 11, 30) + Math.round(serial * 86_400_000),
-    );
-    return fmt(
-      dt.getUTCFullYear(),
-      dt.getUTCMonth() + 1,
-      dt.getUTCDate(),
-      dt.getUTCHours(),
-      dt.getUTCMinutes(),
-    );
-  }
-
-  const s = display.trim();
-  if (!s) return "";
-
-  const dmy = s.match(
-    /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2}))?\s*(AM|PM)?/i,
-  );
-  if (dmy) {
-    const [, dd, mm, yy, hh, mi, ap] = dmy;
-    let year = Number(yy);
-    if (year < 100) year += 2000;
-    let hour = hh ? Number(hh) : 0;
-    if (ap) {
-      const up = ap.toUpperCase();
-      if (up === "PM" && hour < 12) hour += 12;
-      if (up === "AM" && hour === 12) hour = 0;
-    }
-    return fmt(year, Number(mm), Number(dd), hour, mi ? Number(mi) : 0);
-  }
-
-  const hm = s.match(/^(\d{1,2}):(\d{2})/);
-  if (hm) {
-    const [y, mo, d] = serviceDay.split("-").map(Number);
-    return fmt(y, mo, d, Number(hm[1]), Number(hm[2]));
-  }
-
-  return display;
-}
+// normalizeDateTimeCell moved to sheet-match/common.ts (2026-09-22) — it's now
+// also the source-of-truth duration parser for the KEPT-row plausibility
+// check, shared with the TFS matcher. Re-exported below for existing callers
+// (scripts/test-azambuja-window.ts).
 
 // ---------------------------------------------------------------------------
 // Safety check: one ROTA, one service day
@@ -600,6 +555,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const activeCodes = args.activeCodes ?? [];
   const mergedCodes = args.mergedCodes ?? [];
   const coLocatedGroups = args.coLocatedGroups ?? [];
+  const codeTypes = args.codeTypes ?? new Map<string, string>();
   // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
   // into one effective stop BEFORE any candidate selection below — see
   // mergeFragmentedStops in common.ts for why.
@@ -655,11 +611,25 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // system pre-filling both cells with a placeholder for a store that
     // hasn't actually been delivered yet. Treat it as NOT kept: fall through
     // to normal matching against our real stops, same as a blank row.
-    const durMin = bothFilled ? minutesBetweenTimeCells(rawChegada, rawSaida) : null;
-    const implausible = bothFilled && durMin != null && durMin <= 0;
+    //
+    // durMin/implausibleReason: see classifyKeptDuration (common.ts) — FAIL
+    // CLOSED. A duration we can't even calculate (null) is treated as
+    // implausible, not plausible — the inverse of the original fa26052 rule,
+    // which trusted a null duration by default and is how BG-75-IP's
+    // 21-09-2026 burst (452/446/447/454/453/455 — a real, distinct delivery
+    // each, ~08:34-13:29) got written back as a fake same-minute "mantido".
+    const chegadaRaw = rawRecords?.[idx]?.[cols.chegadaCol];
+    const saidaRaw = rawRecords?.[idx]?.[cols.saidaCol];
+    const durMin = bothFilled
+      ? minutesBetweenKeptCells(rawChegada, rawSaida, chegadaRaw, saidaRaw, day)
+      : null;
+    const implausibleReason: ImplausibleKeptReason | null = bothFilled
+      ? classifyKeptDuration(durMin, codeTypes.get(code) ?? null)
+      : null;
+    const implausible = implausibleReason != null;
     const kept = bothFilled && !implausible;
-    const placeholderNote = implausible
-      ? implausibleKeptNote(rawChegada, rawSaida)
+    const placeholderNote = implausibleReason
+      ? implausibleKeptNote(rawChegada, rawSaida, implausibleReason, durMin)
       : "";
 
     const out: SheetRecord = { ...r };
