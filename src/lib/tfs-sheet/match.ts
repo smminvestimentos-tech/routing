@@ -73,6 +73,7 @@ import {
   SWAP_OUT_OF_WINDOW,
   SWAP_WINDOW_PAD_MIN,
   type SwapRival,
+  VV_COL,
   widenWindow,
   type WStop,
 } from "@/lib/sheet-match/common";
@@ -862,6 +863,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (w.kept) {
       w.out[CONFIANCA_COL] = KEPT;
       w.out[REAL_COL] = "";
+      w.out[VV_COL] = w.plate ?? "";
       kept++;
       continue;
     }
@@ -883,6 +885,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         ? w.swapPlate
         : w.plate;
     if (cols.plateCol && plateOut) w.out[cols.plateCol] = plateOut;
+    // Planned plate, captured BEFORE the substitution above — w.plate is
+    // null exactly on "discrepancy"/"none" rows, which is also exactly when
+    // VV should stay empty per spec (no plate could be identified).
+    w.out[VV_COL] = w.plate ?? "";
     // Always (re)write the two time columns so the output reflects only our
     // matching: filled when a stop was matched, blank otherwise. A row that
     // fell through here because its own pre-filled values were rejected as an

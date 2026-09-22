@@ -19,6 +19,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildSheetWorkbook,
+  FILL_ORANGE,
   ZZ_COL,
   YY_COL,
   XX_COL,
@@ -34,6 +35,7 @@ import {
   PLATE_TYPO,
   noGpsCoverageNote,
   type SheetRecord,
+  VV_COL,
 } from "@/lib/sheet-match/common";
 
 let pass = 0;
@@ -48,7 +50,7 @@ function ok(name: string, cond: boolean, extra?: unknown) {
   }
 }
 
-type Cf = { ref: string; rules: { type?: string; formulae?: string[] }[] };
+type Cf = { ref: string; rules: { type?: string; formulae?: string[]; priority?: number; style?: unknown }[] };
 const cfsOf = (ws: ExcelJS.Worksheet) =>
   (ws as unknown as { conditionalFormattings: Cf[] }).conditionalFormattings;
 
@@ -107,9 +109,14 @@ const rows: SheetRecord[] = [
   /* 15 */ row({ "Matrícula da Viatura": "00KK00", "Código de Loja": "94", "Hora de Chegada": "15:00", "Hora de Saída": "15:00", [CONFIANCA_COL]: "OK" }), // 0min warehouse (code94) -> purple, no exception for CDs
   // --- 🔘 conflito de horários sobrepostos (5ª regra) ---
   /* 16 */ row({ "Matrícula da Viatura": "33IV96", "Código de Loja": "7001", "Hora de Chegada": "02:54", "Hora de Saída": "03:34", [CONFIANCA_COL]: "OK", [REAL_COL]: "⚠️ Conflito: sobrepõe-se à linha 7005 (Auchan Congelados, 02:50–03:10) — mesma viatura, horários fisicamente incompatíveis. Confirma qual está correto." }),
+  // --- 🟧 troca de viatura (VV = matrícula planeada) ---
+  /* 17 */ row({ "Matrícula da Viatura": "44DD45", [VV_COL]: "44DD44", "Hora de Chegada": "09:10", "Hora de Saída": "09:35", [CONFIANCA_COL]: SWAP, [REAL_COL]: "Camião 500 planeado como 44DD44, mas 44DD45 esteve em E00…" }), // pending (ZZ=Matrícula, Confiança<>OK) -> red wins, NOT orange
+  /* 18 */ row({ "Matrícula da Viatura": "44DD45", [VV_COL]: "44DD44", "Hora de Chegada": "09:10", "Hora de Saída": "09:35", [CONFIANCA_COL]: "OK" }), // swap ACCEPTED -> orange
+  /* 19 */ row({ "Matrícula da Viatura": "11AA11", [VV_COL]: "11AA11", "Hora de Chegada": "08:00", "Hora de Saída": "08:20", [CONFIANCA_COL]: "OK" }), // no swap -> NOT orange
+  /* 20 */ row({ "Matrícula da Viatura": "11-AA-11", [VV_COL]: "11AA11", "Hora de Chegada": "08:00", "Hora de Saída": "08:20", [CONFIANCA_COL]: "OK" }), // same plate, just hyphenated -> NOT orange (tolerant comparison)
 ];
-const LAST = rows.length + 1; // 16
-const suggestionRowNums = [5, 6, 7, 13];
+const LAST = rows.length + 1; // 20
+const suggestionRowNums = [5, 6, 7, 13, 17];
 const gpsRowNums = [8, 9];
 const shortStopRowNums = [11, 12, 15]; // purple expected
 const notShortStopRowNums = [2, 3, 13, 14, 16]; // purple NOT expected (13 pending-suppressed, 14 boundary, 16 conflict-suppressed)
@@ -121,6 +128,7 @@ async function main() {
     plateColName: "Matrícula da Viatura",
     chegadaColName: "Hora de Chegada",
     saidaColName: "Hora de Saída",
+    truckColName: "Nº Camião",
     sheetName: "TFS",
   });
   const buf = Buffer.from(b64, "base64");
@@ -134,9 +142,9 @@ async function main() {
   ok("exceljs re-opens the file, sheet 'TFS'", !!ws && wb.worksheets.length === 1);
 
   const hdr = (ws.getRow(1).values as unknown[]).slice(1).map((v) => String(v));
-  ok("ZZ / YY / XX / WW appended, in order", hdr.slice(-4).join(",") === `${ZZ_COL},${YY_COL},${XX_COL},${WW_COL}`, hdr);
+  ok("ZZ / YY / XX / WW / VV appended, in order", hdr.slice(-5).join(",") === `${ZZ_COL},${YY_COL},${XX_COL},${WW_COL},${VV_COL}`, hdr);
   const colIdx = (name: string) => hdr.indexOf(name) + 1;
-  for (const c of [ZZ_COL, YY_COL, XX_COL, WW_COL]) {
+  for (const c of [ZZ_COL, YY_COL, XX_COL, WW_COL, VV_COL]) {
     ok(`${c} column hidden`, ws.getColumn(colIdx(c)).hidden === true);
   }
 
@@ -146,17 +154,34 @@ async function main() {
   ok("YY/XX snapshot the OK row's times", cellAt(2, YY_COL) === "08:00" && cellAt(2, XX_COL) === "08:20");
   ok("YY/XX blank on the no-data REVIEW + GPS rows", [4, 8, 9].every((r) => cellAt(r, YY_COL) === "" && cellAt(r, XX_COL) === ""));
   ok("OK / KEPT rows keep their times & Confiança verbatim", cellAt(2, "Hora de Chegada") === "08:00" && cellAt(3, CONFIANCA_COL) === KEPT);
+  ok(
+    "VV holds the PLANNED plate even on a swap row where Matrícula was overwritten (a)",
+    cellAt(17, VV_COL) === "44DD44" && cellAt(17, "Matrícula da Viatura") === "44DD45",
+    { vv: cellAt(17, VV_COL), plate: cellAt(17, "Matrícula da Viatura") },
+  );
+  ok(
+    "VV survives the swap even once accepted (Confiança -> OK), still ≠ Matrícula",
+    cellAt(18, VV_COL) === "44DD44" && cellAt(18, "Matrícula da Viatura") === "44DD45",
+  );
+  ok("VV == Matrícula (normalised) on a non-swap row", cellAt(19, VV_COL) === "11AA11" && cellAt(19, "Matrícula da Viatura") === "11AA11");
 
   // ---- conditional formatting ----
   const cfs = cfsOf(ws);
-  ok("8 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 8, cfs.map((c) => c.ref));
+  ok("9 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 9, cfs.map((c) => c.ref));
+  ok(
+    "the swap rule has the LOWEST priority (highest number) of every rule in the sheet",
+    Math.max(...cfs.flatMap((c) => c.rules).map((r) => r.priority ?? -1)) === 9,
+    cfs.flatMap((c) => c.rules).map((r) => r.priority),
+  );
 
-  // Layout: C=Matrícula, E=Chegada, F=Saída, G=Confiança, H=Real, I=ZZ, J=YY, K=XX, L=WW.
+  // Layout: B=Nº Camião, C=Matrícula, E=Chegada, F=Saída, G=Confiança, H=Real,
+  // I=ZZ, J=YY, K=XX, L=WW, M=VV.
   const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
   const amberChe = cfFor(`E2:E${LAST}`);
   const amberSai = cfFor(`F2:F${LAST}`);
   const redSugg = cfFor(`C2:C${LAST} G2:G${LAST}`);
   const redGps = cfFor(`C2:C${LAST}`);
+  const orangeSwap = cfFor(`B2:B${LAST} C2:C${LAST}`);
   const timeCfs = cfs.filter((c) => c.ref === `E2:E${LAST} F2:F${LAST}`);
   // "Conflito" is also a substring of the blue/purple rules' own NOT(...)
   // exclusions below, so a loose .includes("Conflito") would ambiguously
@@ -171,6 +196,7 @@ async function main() {
   ok("gray conflict rule present on Chegada + Saída", !!grayConflict, timeCfs);
   ok("blue implausible-speed rule present on Chegada + Saída", !!blueSpeed, timeCfs);
   ok("purple short-stop sqref = Chegada + Saída", !!purpleTimes, cfs.map((c) => c.ref));
+  ok("orange swap sqref = Nº Camião + Matrícula", !!orangeSwap, cfs.map((c) => c.ref));
 
   const fChe = amberChe?.rules[0]?.formulae?.[0] ?? "";
   const fSai = amberSai?.rules[0]?.formulae?.[0] ?? "";
@@ -179,6 +205,7 @@ async function main() {
   const fGray = grayConflict?.formulae?.[0] ?? "";
   const fBlue = blueSpeed?.formulae?.[0] ?? "";
   const fPurple = purpleTimes?.formulae?.[0] ?? "";
+  const fOrange = orangeSwap?.rules[0]?.formulae?.[0] ?? "";
   ok("amber Chegada formula", fChe === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""))', fChe);
   ok("amber Saída formula", fSai === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""))', fSai);
   ok("red suggestion formula", fSugg === 'AND($I2<>"",$C2=$I2,$G2<>"OK")', fSugg);
@@ -194,6 +221,23 @@ async function main() {
     "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending, in conflict, implausibly fast, OR TRACKiT-fallback",
     fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))),NOT(ISNUMBER(SEARCH("Velocidade implausível",$H2))),NOT(ISNUMBER(SEARCH("TRACKiT",$G2))))',
     fPurple,
+  );
+  ok(
+    "orange formula compares Matrícula (C) to VV (M), tolerant of hyphen/case, and yields to the two red rules",
+    fOrange ===
+      'AND($M2<>"",$C2<>"",SUBSTITUTE(UPPER(TRIM($C2)),"-","")<>SUBSTITUTE(UPPER(TRIM($M2)),"-",""),' +
+        'NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("cobertura GPS",$H2))))',
+    fOrange,
+  );
+  ok(
+    "orange style is FILL_ORANGE, bold text",
+    (() => {
+      const style = orangeSwap?.rules[0]?.style as
+        | { fill?: { fgColor?: { argb?: string } }; font?: { bold?: boolean } }
+        | undefined;
+      return style?.fill?.fgColor?.argb === FILL_ORANGE && style?.font?.bold === true;
+    })(),
+    orangeSwap?.rules[0]?.style,
   );
   ok("no CF paints a whole-row range", cfs.every((c) => !/(^|\s)A2:/.test(c.ref)), cfs.map((c) => c.ref));
 
@@ -251,16 +295,31 @@ async function main() {
   ok("exactly 0min (warehouse/CD, code94) -> purple (no location exception)", purpleOn({ ww: 0, zz: "", plate: "00KK00", conf: "OK" }) === true);
   ok("blank WW (row without both times) -> not purple", purpleOn({ ww: "", zz: "", plate: "33CC33", conf: REVIEW }) === false);
 
+  // *** 🟧 vehicle-swap orange ***
+  const orangeOn = (st: { plate: string; vv: string; zz: string; conf: string; real?: string }) => {
+    const pending = st.zz !== "" && st.plate === st.zz && st.conf !== "OK";
+    const noGps = redGpsOn(st.real ?? "");
+    const norm = (s: string) => s.toUpperCase().replace(/-/g, "").trim();
+    return st.vv !== "" && st.plate !== "" && norm(st.plate) !== norm(st.vv) && !pending && !noGps;
+  };
+  ok("swap still pending -> NOT orange (red keeps priority)", orangeOn({ plate: "44DD45", vv: "44DD44", zz: "44DD45", conf: SWAP }) === false);
+  ok("swap accepted (Confiança -> OK) -> orange", orangeOn({ plate: "44DD45", vv: "44DD44", zz: "44DD45", conf: "OK" }) === true);
+  ok("no swap, same plate -> not orange", orangeOn({ plate: "11AA11", vv: "11AA11", zz: "", conf: "OK" }) === false);
+  ok("same plate, different formatting (hyphens) -> not orange", orangeOn({ plate: "11-AA-11", vv: "11AA11", zz: "", conf: "OK" }) === false);
+  ok("manual edit to a genuinely different plate -> orange", orangeOn({ plate: "99ZZ99", vv: "11AA11", zz: "", conf: "OK" }) === true);
+  ok("no-GPS row also differs from VV -> NOT orange (red keeps priority)", orangeOn({ plate: "72XR33", vv: "11AA11", zz: "", conf: REVIEW, real: noGpsCoverageNote("72XR33", false) }) === false);
+  ok("empty VV (never identified) -> never orange", orangeOn({ plate: "99ZZ99", vv: "", zz: "", conf: "OK" }) === false);
+
   // ---- data validation ----
   const dvAt = (r: number) => ws.getCell(r, colIdx(CONFIANCA_COL)).dataValidation;
-  ok("dropdown ['OK'] on exactly the suggestion rows", suggestionRowNums.every((r) => dvAt(r)?.type === "list") && [2, 3, 4, 8, 9, 10, 11, 12, 14, 15, 16].every((r) => !dvAt(r)));
+  ok("dropdown ['OK'] on exactly the suggestion rows", suggestionRowNums.every((r) => dvAt(r)?.type === "list") && [2, 3, 4, 8, 9, 10, 11, 12, 14, 15, 16, 18, 19, 20].every((r) => !dvAt(r)));
   void gpsRowNums;
   void shortStopRowNums;
   void notShortStopRowNums;
 
   // ---- SheetJS still reads it back ----
   const rr = XLSX.utils.sheet_to_json<SheetRecord>(XLSX.read(buf, { type: "buffer" }).Sheets.TFS, { raw: false, defval: "", blankrows: false });
-  ok("SheetJS re-reads the file, all rows + tech cols", rr.length === rows.length && [ZZ_COL, YY_COL, XX_COL, WW_COL].every((c) => c in rr[0]));
+  ok("SheetJS re-reads the file, all rows + tech cols", rr.length === rows.length && [ZZ_COL, YY_COL, XX_COL, WW_COL, VV_COL].every((c) => c in rr[0]));
 
   // ===========================================================================
   // Azambuja-shaped workbook — different column names; same rules must apply.
@@ -277,6 +336,10 @@ async function main() {
     // 🟣 crosses midnight — exactly the shape 0035/fmtDateTimeLisbon exists
     // for; the WW formula must read the DATE part too, not just the time.
     azRow({ "Hora Chegada": "09-09-2026 23:58", "Hora Saida": "10-09-2026 00:01", [CONFIANCA_COL]: "OK" }),
+    // 🟧 swap accepted — MATRICULA (AD-90-DF) differs from the planned VV
+    // (AD-90-DE, the sheet's row default) — no "Nº Camião" column exists on
+    // this layout, so the swap range should cover MATRICULA alone.
+    azRow({ MATRICULA: "AD-90-DF", [VV_COL]: "AD90DE", [CONFIANCA_COL]: "OK" }),
   ];
   const azB64 = await buildSheetWorkbook({
     rows: azRows, header: azHeader,
@@ -294,6 +357,8 @@ async function main() {
   const jL = azWs.getColumn(azHdr.indexOf(REAL_COL) + 1).letter;
   const gL = azWs.getColumn(azHdr.indexOf("Hora Chegada") + 1).letter;
   const hL = azWs.getColumn(azHdr.indexOf("Hora Saida") + 1).letter;
+  const iL = azWs.getColumn(azHdr.indexOf(CONFIANCA_COL) + 1).letter;
+  const kL = azWs.getColumn(azHdr.indexOf(ZZ_COL) + 1).letter;
   const azCfs = cfsOf(azWs);
   const azGps = azCfs.find((c) => c.ref === `${dL}2:${dL}${azLast}`);
   ok("Azambuja: no-GPS red rule lands on the MATRICULA column", !!azGps, azCfs.map((c) => c.ref));
@@ -302,7 +367,30 @@ async function main() {
     azGps?.rules[0]?.formulae?.[0] === `ISNUMBER(SEARCH("cobertura GPS",$${jL}2))`,
     azGps?.rules[0]?.formulae?.[0],
   );
-  ok("Azambuja: ZZ/YY/XX/WW appended & hidden", ["ZZ", "YY", "XX", "WW"].every((c) => azWs.getColumn(azHdr.indexOf(c) + 1).hidden === true));
+  ok("Azambuja: ZZ/YY/XX/WW/VV appended & hidden", ["ZZ", "YY", "XX", "WW", "VV"].every((c) => azWs.getColumn(azHdr.indexOf(c) + 1).hidden === true));
+
+  const azCellAt = (r: number, name: string) => String(azWs.getCell(r, azHdr.indexOf(name) + 1).value ?? "");
+  ok(
+    "Azambuja: VV holds the planned plate on the swap row, distinct from MATRICULA",
+    azCellAt(6, VV_COL) === "AD90DE" && azCellAt(6, "MATRICULA") === "AD-90-DF",
+    { vv: azCellAt(6, VV_COL), plate: azCellAt(6, "MATRICULA") },
+  );
+  // Both the red no-GPS rule and the orange swap rule share this exact
+  // single-column ref on this layout (no "Nº Camião" to widen orange's
+  // range) — two separate addConditionalFormatting() calls, two separate
+  // entries; disambiguate by formula content (orange references VV).
+  const azVvL = azWs.getColumn(azHdr.indexOf(VV_COL) + 1).letter;
+  const azOrange = azCfs.find(
+    (c) => c.ref === `${dL}2:${dL}${azLast}` && c.rules.some((r) => r.formulae?.[0]?.includes(`$${azVvL}2`)),
+  );
+  ok("Azambuja: orange swap sqref is MATRICULA-only (no truck-number column on this layout)", !!azOrange, azCfs.map((c) => c.ref));
+  ok(
+    "Azambuja: orange formula compares MATRICULA to VV, yields to the two red rules (own ZZ/Confiança letters)",
+    azOrange?.rules[0]?.formulae?.[0] ===
+      `AND($${azVvL}2<>"",$${dL}2<>"",SUBSTITUTE(UPPER(TRIM($${dL}2)),"-","")<>SUBSTITUTE(UPPER(TRIM($${azVvL}2)),"-",""),` +
+        `NOT(AND($${kL}2<>"",$${dL}2=$${kL}2,$${iL}2<>"OK")),NOT(ISNUMBER(SEARCH("cobertura GPS",$${jL}2))))`,
+    azOrange?.rules[0]?.formulae?.[0],
+  );
 
   const azTimeCfs = azCfs.filter((c) => c.ref === `${gL}2:${gL}${azLast} ${hL}2:${hL}${azLast}`);
   // Same ambiguity note as the TFS block above: anchor on the formula's

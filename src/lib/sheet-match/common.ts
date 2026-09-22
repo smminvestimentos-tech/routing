@@ -28,6 +28,18 @@ export const PLATE_TYPO = "🔤 Possível erro de matrícula";
 export const TRACKIT_FALLBACK = "🛰️ TRACKiT (sem paragem nossa) — confirmar";
 export const CONFIANCA_COL = "Confiança";
 export const REAL_COL = "Real";
+// Hidden technical column carrying the PLANNED plate (before any swap/typo
+// substitution overwrites the visible Matrícula cell) — written by each
+// matcher below, since by the time a row reaches xlsx-out.ts the original
+// value may already be gone. xlsx-out.ts positions/hides/widens it the same
+// dynamic way as ZZ/YY/XX/WW (its own TECH_COLS), but — unlike those, which
+// are synthesized entirely inside xlsx-out.ts from data still present on the
+// row — VV's value has to come from here, because match.ts is the only place
+// the planned plate still exists pre-substitution. That's also why this one
+// constant lives in common.ts rather than next to ZZ/YY/XX/WW in
+// xlsx-out.ts: xlsx-out.ts may depend on match.ts's output shape, but
+// match.ts must stay "pure, no xlsx" and can't import from xlsx-out.ts.
+export const VV_COL = "VV";
 
 // How far outside the planned delivery window a real stop may still be counted
 // as "the same visit" when looking for a vehicle swap.

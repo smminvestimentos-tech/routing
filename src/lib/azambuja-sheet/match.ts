@@ -75,6 +75,7 @@ import {
   SWAP_OUT_OF_WINDOW,
   SWAP_WINDOW_PAD_MIN,
   type SwapRival,
+  VV_COL,
   type WStop,
 } from "@/lib/sheet-match/common";
 import {
@@ -1063,6 +1064,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       );
       w.out[CONFIANCA_COL] = KEPT;
       w.out[REAL_COL] = "";
+      // Kept rows never go through grouping (no swap/typo logic touches
+      // them), so there's no g.plate to inherit from — the row's own
+      // resolved plate IS the planned one.
+      w.out[VV_COL] = w.plate ?? "";
       kept++;
       continue;
     }
@@ -1092,6 +1097,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     ) {
       w.out[cols.plateCol] = w.swapPlate;
     }
+    // Planned plate, captured BEFORE the substitution above — g.plate (not
+    // w.plate) because a row with a blank own MATRICULA can inherit its
+    // group's/route's plate (see the sibling/route inheritance in the
+    // group-building step above), and findVehicleSwap itself treats g.plate
+    // as "the planned vehicle" for detecting a swap in the first place.
+    w.out[VV_COL] = (groupMap.get(w.groupKey)?.plate ?? w.plate) ?? "";
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
     // A row whose input Chegada/Saída were rejected as an implausible pre-fill
     // (see placeholderNote above) always carries that explanation — prepended

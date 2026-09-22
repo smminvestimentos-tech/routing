@@ -405,6 +405,7 @@ export async function POST(request: NextRequest) {
     plateColName: cols.plateCol ?? "",
     chegadaColName: cols.chegadaCol,
     saidaColName: cols.saidaCol,
+    truckColName: cols.truckCol ?? undefined,
     sheetName: "TFS",
   });
 

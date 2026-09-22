@@ -83,6 +83,19 @@
 //     defensivo dos outros. 🟣 (paragem curta) cede a este quando ambos se
 //     aplicam: saber que o dado vem de uma fonte não confirmada é mais
 //     acionável do que saber que é curto.
+//
+//   • 🟧 laranja (FFF8CBAD), texto a negrito, em «Nº Camião» + «Matrícula da
+//     Viatura» (TFS) / só «Matrícula» (Azambuja — sem coluna de nº de
+//     camião) sempre que a matrícula atual difere da PLANEADA (comparação
+//     tolerante a hífens/espaços/maiúsculas). A matrícula planeada vive numa
+//     coluna técnica oculta nova, «VV» (ver VV_COL, common.ts) — escrita
+//     pelos matchers, não por aqui, porque numa linha de troca a matrícula
+//     original já foi substituída antes da linha chegar a este módulo. Reage
+//     tanto às nossas próprias sugestões (aceites) como a uma edição manual
+//     futura, porque é formatação condicional, não uma cor estática. Prioridade
+//     mais baixa de todas — cede explicitamente (NOT()) às duas regras
+//     vermelhas que também pintam a Matrícula (sugestão pendente, sem
+//     cobertura GPS), mesmo estilo defensivo já usado entre 🟢/🔘/🔵/🟣.
 
 import ExcelJS from "exceljs";
 import {
@@ -92,6 +105,7 @@ import {
   SWAP,
   SWAP_OUT_OF_WINDOW,
   type SheetRecord,
+  VV_COL,
 } from "@/lib/sheet-match/common";
 
 // Hidden helper columns, appended after the real data. Frozen at build time so
@@ -108,7 +122,10 @@ export const XX_COL = "XX";
 // re-evaluates whenever the user edits either one. "" when either cell is
 // blank or unparseable. Backs the 🟣 short-stop rule below.
 export const WW_COL = "WW";
-const TECH_COLS = [ZZ_COL, YY_COL, XX_COL, WW_COL] as const;
+// VV itself is defined in common.ts (VV_COL), not here — see the file-level
+// comment above and common.ts's own comment on VV_COL for why. It's still a
+// TECH_COL for every positioning/hiding/width purpose in this file.
+const TECH_COLS = [ZZ_COL, YY_COL, XX_COL, WW_COL, VV_COL] as const;
 const TECH_COL_SET: ReadonlySet<string> = new Set(TECH_COLS);
 
 // Light tints — dark enough to read at a glance, light enough to keep the cell
@@ -126,6 +143,9 @@ export const FILL_SPEED = "FF9DC3E6";
 // above, so "unconfirmed second-source data" reads differently at a glance
 // from "short stop" (🟣) or "data problem" (🔘/🔵).
 export const FILL_TRACKIT = "FFB6E3C6";
+// Vehicle-swap rule (🟧, 2026-09-22) — distinct orange, not used by any other
+// rule in this palette.
+export const FILL_ORANGE = "FFF8CBAD";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
@@ -150,13 +170,19 @@ export type BuildSheetWorkbookArgs = {
   chegadaColName: string;
   /** resolved departure column header ("Hora de Saída" / "Hora Saida") */
   saidaColName: string;
+  /**
+   * resolved truck-number column header ("Nº Camião") — TFS only. Undefined
+   * on Azambuja (no such column there); the 🟧 swap rule's range then covers
+   * just the Matrícula column instead of Nº Camião + Matrícula.
+   */
+  truckColName?: string;
   sheetName?: string;
 };
 
 export async function buildSheetWorkbook(
   args: BuildSheetWorkbookArgs,
 ): Promise<string> {
-  const { rows, header, plateColName, chegadaColName, saidaColName } = args;
+  const { rows, header, plateColName, chegadaColName, saidaColName, truckColName } = args;
 
   const outHeader = [
     ...header,
@@ -262,6 +288,8 @@ export async function buildSheetWorkbook(
   const yyL = letter(YY_COL)!;
   const xxL = letter(XX_COL)!;
   const wwL = letter(WW_COL)!;
+  const vvL = letter(VV_COL)!;
+  const truckL = truckColName ? letter(truckColName) : null;
 
   // Hide the technical columns.
   for (const c of TECH_COLS) {
@@ -314,6 +342,8 @@ export async function buildSheetWorkbook(
       fgColor: { argb },
     },
   });
+  // Same fill, bold text — only the 🟧 swap rule below uses this.
+  const solidBold = (argb: string) => ({ ...solid(argb), font: { bold: true } });
 
   // A `sqref` that lists just the given columns' data rows, e.g. "C2:C8 G2:G8".
   // OOXML allows a space-separated multi-range sqref; exceljs writes it through
@@ -488,6 +518,39 @@ export async function buildSheetWorkbook(
             `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}),NOT(${speed}),NOT(${trackit}))`,
           ],
           style: solid(FILL_PURPLE),
+        },
+      ],
+    });
+  }
+
+  // 🟧 vehicle swap: current Matrícula differs from the PLANNED one (hidden
+  // VV column, written by the matcher — see VV_COL, common.ts). Range is
+  // Nº Camião + Matrícula on TFS, just Matrícula on Azambuja (colsRef drops
+  // the null truckL on its own). Comparison ignores hyphens/spaces/case.
+  // Lowest priority of every rule in this file — explicit NOT() against the
+  // two red rules that also paint Matrícula (pending suggestion, no GPS
+  // coverage), same defensive style as 🟢/🔘/🔵/🟣 above: reacting to a user
+  // picking "OK" or hand-correcting the plate is the whole point (it's
+  // conditional formatting, not a static fill), so it must never fight the
+  // reds that take priority while a suggestion is still unconfirmed.
+  if (plateL && vvL) {
+    const pending =
+      confL && plateL
+        ? `AND($${zzL}2<>"",$${plateL}2=$${zzL}2,$${confL}2<>"OK")`
+        : "FALSE";
+    const noGpsRed = realL ? `ISNUMBER(SEARCH("cobertura GPS",$${realL}2))` : "FALSE";
+    ws.addConditionalFormatting({
+      ref: colsRef(truckL, plateL),
+      rules: [
+        {
+          type: "expression",
+          priority: 9,
+          formulae: [
+            `AND($${vvL}2<>"",$${plateL}2<>"",` +
+              `SUBSTITUTE(UPPER(TRIM($${plateL}2)),"-","")<>SUBSTITUTE(UPPER(TRIM($${vvL}2)),"-",""),` +
+              `NOT(${pending}),NOT(${noGpsRed}))`,
+          ],
+          style: solidBold(FILL_ORANGE),
         },
       ],
     });
