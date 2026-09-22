@@ -223,7 +223,11 @@ export async function POST(request: NextRequest) {
     // canonical code, and feeds the same-site co-location groups (0034).
     // "type" feeds codeTypes below — gates the KEPT-row plausibility check's
     // stricter <5min threshold to actual stores (loja), never armazém/CD.
-    supabase.from("locations").select("id, code, type, active, merged_into_id, colocated_with_id"),
+    // "latitude, longitude" feed codeCoords — the consecutive-stop
+    // implausible-speed check (detectImplausibleSpeed, common.ts).
+    supabase
+      .from("locations")
+      .select("id, code, type, latitude, longitude, active, merged_into_id, colocated_with_id"),
   ]);
 
   if (stopsRes.error) {
@@ -311,9 +315,12 @@ export async function POST(request: NextRequest) {
     ? []
     : coLocatedGroupsFromLocations(locationsRes.data ?? []);
   // locations.code -> locations.type — see classifyKeptDuration (common.ts).
-  // Degrades to an empty map (no stricter threshold applied, today's
-  // behaviour) if the query failed, same stance as the others above.
+  // locations.code -> {lat,lng} — see detectImplausibleSpeed (common.ts).
+  // Both degrade to an empty map (no stricter threshold / no speed check
+  // applied, today's behaviour) if the query failed, same stance as the
+  // others above.
   const codeTypes = new Map<string, string>();
+  const codeCoords = new Map<string, { lat: number; lng: number }>();
   if (!locationsRes.error) {
     const codeById = new Map<string, string>();
     for (const l of locationsRes.data ?? []) codeById.set(l.id, l.code);
@@ -325,6 +332,9 @@ export async function POST(request: NextRequest) {
         if (canonicalCode) mergedCodes.push({ code: l.code, canonicalCode });
       }
       if (l.type) codeTypes.set(l.code, l.type);
+      if (l.latitude != null && l.longitude != null) {
+        codeCoords.set(l.code, { lat: l.latitude, lng: l.longitude });
+      }
     }
   }
 
@@ -341,6 +351,7 @@ export async function POST(request: NextRequest) {
     mergedCodes,
     coLocatedGroups,
     codeTypes,
+    codeCoords,
   });
 
   // Keep the transporter's original sheet name when it's a valid one (it

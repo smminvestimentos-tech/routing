@@ -56,8 +56,23 @@
 //     same row) whenever «Real» flags a physical schedule conflict ("Conflito").
 //     Fires when two rows of the same route and vehicle plate have overlapping
 //     time windows at different store codes (not co-located/merged). Takes
-//     precedence over 🟣 (short stop). Both times and Confiança values are kept
-//     verbatim as calculated/maintained.
+//     precedence over 🟣 (short stop) AND over 🔵 (implausible speed, below —
+//     if a row somehow carries both notes, this is the one that wins the
+//     cell). Both times and Confiança values are kept verbatim as
+//     calculated/maintained.
+//
+//   • 🔵 azul (FF9DC3E6) on «Hora de Chegada» AND «Hora de Saída» (both cells,
+//     same row) whenever «Real» flags implausible travel speed ("Velocidade
+//     implausível"). A DIFFERENT problem from 🔘: not two overlapping windows
+//     on one route, but two CONSECUTIVE stops anywhere in the vehicle's whole
+//     day (any route/leg) whose Saída->Chegada gap implies a speed no truck
+//     can sustain (2026-09-22). Deliberately its own color rather than folding
+//     into 🔘 — the two call for different fixes (which store is right, vs.
+//     which time is mistyped) and reusing 🔘's already-tested exact formula
+//     string would mean rewriting those tests for no functional gain. Yields
+//     to 🔘 when a row somehow carries both notes (NOT("Conflito") in its own
+//     formula, not just priority number — same defensive style as 🟣 below).
+//     Takes precedence over 🟣 (short stop).
 
 import ExcelJS from "exceljs";
 import {
@@ -92,6 +107,9 @@ const FILL_AMBER = "FFFFE699";
 const FILL_RED = "FFF4B6B0";
 const FILL_PURPLE = "FFDCC6F2";
 export const FILL_DARK_GRAY = "FFA6A6A6";
+// Implausible-speed rule (🔵, 2026-09-22) — distinct blue, confirmed with the
+// user, kept apart from the reds/oranges/yellows already in the palette above.
+export const FILL_SPEED = "FF9DC3E6";
 // Header row fill — matches the transporter's own export exactly
 // (Ficheiro_Horários_TFS_12-09-2026.xlsx, confirmed FFC000 / ARGB FFFFC000).
 const FILL_HEADER = "FFFFC000";
@@ -361,7 +379,7 @@ export async function buildSheetWorkbook(
   // 🔘 conflito de horários sobrepostos: Chegada + Saída pintadas a cinzento
   // escuro quando «Real» menciona "Conflito" (mesma rota + viatura com paragens
   // fisicamente incompatíveis em lojas diferentes). Tem prioridade sobre o
-  // roxo de paragem curta.
+  // azul de velocidade implausível e sobre o roxo de paragem curta.
   if (chegadaL && saidaL && realL) {
     ws.addConditionalFormatting({
       ref: colsRef(chegadaL, saidaL),
@@ -376,10 +394,33 @@ export async function buildSheetWorkbook(
     });
   }
 
+  // 🔵 velocidade implausível entre paragens consecutivas do mesmo veículo
+  // (dia inteiro, não só a mesma rota — distinto do 🔘 acima): Chegada +
+  // Saída pintadas de azul quando «Real» menciona "Velocidade implausível".
+  // NOT("Conflito") explícito para o 🔘 manter prioridade caso uma linha
+  // acumule as duas notas (mesmo estilo defensivo do 🟣 abaixo, não confia só
+  // no número de priority).
+  if (chegadaL && saidaL && realL) {
+    ws.addConditionalFormatting({
+      ref: colsRef(chegadaL, saidaL),
+      rules: [
+        {
+          type: "expression",
+          priority: 6,
+          formulae: [
+            `AND(ISNUMBER(SEARCH("Velocidade implausível",$${realL}2)),NOT(ISNUMBER(SEARCH("Conflito",$${realL}2))))`,
+          ],
+          style: solid(FILL_SPEED),
+        },
+      ],
+    });
+  }
+
   // 🟣 short stop (< 5 min): painted on Chegada + Saída together, keyed off
   // the live WW duration. Suppressed while the row is still an unconfirmed
   // suggestion (same "plate cell == ZZ and Confiança <> OK" test as the red
-  // rule above) OR when the row is in conflict (🔘 cinzento escuro keeps priority).
+  // rule above) OR when the row is in conflict (🔘) or implausibly fast (🔵)
+  // — both keep priority over 🟣.
   if (chegadaL && saidaL) {
     const pending =
       confL && plateL
@@ -388,14 +429,17 @@ export async function buildSheetWorkbook(
     const conflict = realL
       ? `ISNUMBER(SEARCH("Conflito",$${realL}2))`
       : "FALSE";
+    const speed = realL
+      ? `ISNUMBER(SEARCH("Velocidade implausível",$${realL}2))`
+      : "FALSE";
     ws.addConditionalFormatting({
       ref: colsRef(chegadaL, saidaL),
       rules: [
         {
           type: "expression",
-          priority: 6,
+          priority: 7,
           formulae: [
-            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}))`,
+            `AND(ISNUMBER($${wwL}2),$${wwL}2>=0,$${wwL}2<5,NOT(${pending}),NOT(${conflict}),NOT(${speed}))`,
           ],
           style: solid(FILL_PURPLE),
         },

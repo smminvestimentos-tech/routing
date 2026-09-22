@@ -31,8 +31,10 @@ import {
   type CoLocatedGroups,
   findPlateTypo,
   FRAGMENT_MERGE_GAP_MIN,
+  haversineKm,
   isEditDistance1,
   LOJA_MIN_PLAUSIBLE_DURATION_MIN,
+  MAX_PLAUSIBLE_SPEED_KMH,
   mergeFragmentedStops,
   minutesBetweenKeptCells,
   normalizeDateTimeCell,
@@ -1488,6 +1490,165 @@ ok(
   ok("TFS conflict: row B97 flags conflict in Real", typeof r.rows[1]["Real"] === "string" && r.rows[1]["Real"].includes("⚠️ Conflito: sobrepõe-se à linha E89 (Continente Cascais, 08:30–09:15)"), r.rows[1]["Real"]);
   ok("TFS conflict: row E89 conf KEPT unchanged", r.rows[0]["Confiança"] === KEPT);
   ok("TFS conflict: row B97 conf KEPT unchanged", r.rows[1]["Confiança"] === KEPT);
+}
+
+// ---------------------------------------------------------------------------
+// Case 5: implausible speed between a vehicle's own CONSECUTIVE stops
+// (day-wide — crosses ROUTES on purpose, unlike Case 4's conflict rule,
+// which is scoped to one route). Two fictional locations ~30km apart, same
+// longitude, so the haversine distance has a closed form (R * Δlat_rad
+// exactly — no linear-degrees approximation error): the 3 sub-cases below
+// derive their exact minute gaps from the REAL distance haversineKm computes,
+// not a hand-typed approximation, so a boundary case actually lands on the
+// boundary regardless of floating-point noise in the trig.
+// ---------------------------------------------------------------------------
+{
+  const EARTH_R_KM = 6371;
+  const SYN_DISTANCE_KM = 30;
+  const dLatDeg = (SYN_DISTANCE_KM / EARTH_R_KM) * (180 / Math.PI);
+  const SYN_A = { lat: 38.7, lng: -9.0 };
+  const SYN_B = { lat: 38.7 + dLatDeg, lng: -9.0 };
+  const syntheticDistanceKm = haversineKm(SYN_A.lat, SYN_A.lng, SYN_B.lat, SYN_B.lng);
+  ok(
+    `synthetic pair really is ~${SYN_DISTANCE_KM}km apart (sanity check on the construction, not the code under test)`,
+    Math.abs(syntheticDistanceKm - SYN_DISTANCE_KM) < 0.01,
+    syntheticDistanceKm,
+  );
+  const codeCoords = new Map([
+    ["SYN-A", SYN_A],
+    ["SYN-B", SYN_B],
+  ]);
+
+  // baseHour:baseMin + addMin -> "HH:MM", via real arithmetic (not string
+  // concat) so a case that happens to cross an hour boundary stays correct.
+  const fmtHHMM = (addMin: number) => {
+    const total = 8 * 60 + addMin; // base: 08:00
+    const h = Math.floor(total / 60) % 24;
+    const m = total % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
+
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const azCols = resolveAzColumns(azHeader);
+  // Rows are "mantido" (both times pre-filled with a plausible 10min stop
+  // duration each) — deliberately NOT "OK" rows, to also confirm the rule
+  // fires on kept rows, same as scheduleConflict already does.
+  const mkSpeedRow = (rota: string, code: string, addMin: number): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code, MATRICULA: "SP-EE-DD",
+    "Hora Chegada": `09-09-2026 ${fmtHHMM(addMin)}`,
+    "Hora Saida": `09-09-2026 ${fmtHHMM(addMin + 10)}`,
+    CICLO: "08:00 | 20:00", TIPO: "C",
+  });
+
+  // gapMin = the Saída_A -> Chegada_B gap the 3 sub-cases vary. Two different
+  // ROTAs on purpose — proves the rule crosses routes, which the
+  // route-scoped conflict rule (Case 4) never would.
+  const runSpeedCase = (gapMin: number) => {
+    const records: SheetRecord[] = [
+      mkSpeedRow("SPD-R1", "SYN-A", 0), // 08:00 -> 08:10
+      mkSpeedRow("SPD-R2", "SYN-B", 10 + gapMin), // chegada = 08:10 + gapMin
+    ];
+    return runAzMatch({
+      day, records, header: azHeader, cols: azCols, stops: [],
+      platesWithGps: new Set(),
+      pingWindowByPlate: new Map(),
+      codeCoords,
+    });
+  };
+
+  const hasSpeedNote = (v: unknown) => typeof v === "string" && v.includes("⚠️ Velocidade implausível");
+
+  // Sub-case 1: clearly implausible (~20min gap -> ~90km/h, well over 50).
+  {
+    const gapMin = Math.round((syntheticDistanceKm / 90) * 60);
+    const r = runSpeedCase(gapMin);
+    ok(`speed [dispara]: gap chosen for ~90km/h is ${gapMin}min`, gapMin > 0 && gapMin < 30, gapMin);
+    ok("speed [dispara]: row A (SYN-A) flags implausible speed in Real", hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+    ok("speed [dispara]: row B (SYN-B) flags implausible speed in Real", hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+    ok("speed [dispara]: note names both codes", typeof r.rows[0]["Real"] === "string" && (r.rows[0]["Real"] as string).includes("SYN-A") && (r.rows[0]["Real"] as string).includes("SYN-B"), r.rows[0]["Real"]);
+    ok("speed [dispara]: note states the >50km/h limit", typeof r.rows[0]["Real"] === "string" && (r.rows[0]["Real"] as string).includes(`exceder ${MAX_PLAUSIBLE_SPEED_KMH}km/h`), r.rows[0]["Real"]);
+    ok("speed [dispara]: Confiança untouched (still mantido), rule only annotates Real", r.rows[0]["Confiança"] === KEPT && r.rows[1]["Confiança"] === KEPT, [r.rows[0]["Confiança"], r.rows[1]["Confiança"]]);
+  }
+
+  // Sub-case 2: plausible, comfortably within the limit (~45min -> ~40km/h).
+  {
+    const gapMin = Math.round((syntheticDistanceKm / 40) * 60);
+    const r = runSpeedCase(gapMin);
+    ok(`speed [não dispara]: gap chosen for ~40km/h is ${gapMin}min`, gapMin > 30, gapMin);
+    ok("speed [não dispara]: row A (SYN-A) Real has NO speed note", !hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+    ok("speed [não dispara]: row B (SYN-B) Real has NO speed note", !hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+  }
+
+  // Sub-case 3: the boundary itself, EXACTLY 50km/h (36min for a 30km gap) —
+  // must NOT fire (strict >, same convention as every other threshold rule
+  // in this codebase: exactly-at-the-limit is plausible).
+  {
+    const gapMin = Math.round((syntheticDistanceKm / MAX_PLAUSIBLE_SPEED_KMH) * 60);
+    const r = runSpeedCase(gapMin);
+    ok(`speed [limite]: gap for exactly ${MAX_PLAUSIBLE_SPEED_KMH}km/h is ${gapMin}min`, gapMin === 36, gapMin);
+    ok("speed [limite]: row A (SYN-A) Real has NO speed note (exactly at the limit is plausible)", !hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+    ok("speed [limite]: row B (SYN-B) Real has NO speed note (exactly at the limit is plausible)", !hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+  }
+
+  // Same-location pairs never trip the rule, however far apart in time —
+  // zero distance, regardless of gap.
+  {
+    const records: SheetRecord[] = [
+      mkSpeedRow("SPD-R3", "SYN-A", 0), // 08:00 -> 08:10
+      mkSpeedRow("SPD-R4", "SYN-A", 500), // same code, 08h10min later
+    ];
+    const r = runAzMatch({
+      day, records, header: azHeader, cols: azCols, stops: [],
+      platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords,
+    });
+    ok("speed: same code, huge time gap -> never flagged (zero distance)", !hasSpeedNote(r.rows[0]["Real"]) && !hasSpeedNote(r.rows[1]["Real"]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
+  }
+
+  // Missing coordinates for one of the codes -> no unverified assumption,
+  // never flagged (mirrors codeTypes' "unknown -> no assumption" stance).
+  {
+    const records: SheetRecord[] = [
+      mkSpeedRow("SPD-R5", "SYN-A", 0),
+      mkSpeedRow("SPD-R6", "SYN-NOCOORD", 30), // 20min gap, would be ~90km/h IF we knew where it was
+    ];
+    const r = runAzMatch({
+      day, records, header: azHeader, cols: azCols, stops: [],
+      platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords,
+    });
+    ok("speed: unknown coordinates for one code -> not flagged (no unverified assumption)", !hasSpeedNote(r.rows[0]["Real"]) && !hasSpeedNote(r.rows[1]["Real"]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
+  }
+
+  // TFS matcher: same rule, confirms the wiring (RunMatchArgs.codeCoords,
+  // the detectImplausibleSpeed call site) also works on that matcher.
+  {
+    const spdDay = "2026-09-09";
+    const spdTfsHeader = [
+      "Dia do Serviço", "Nº Camião", "Matrícula da Viatura", "Ordem de Entrega",
+      "Código de Loja", "Designação da Loja", "Janela Início", "Janela Fim",
+      "Hora de Chegada", "Hora de Saída", "ID",
+    ];
+    const spdTfsCols = resolveTfsColumns(spdTfsHeader);
+    const gapMin = Math.round((syntheticDistanceKm / 90) * 60); // ~90km/h
+    const mkTfsSpeedRow = (ordem: number, code: string, addMin: number): SheetRecord => ({
+      "Dia do Serviço": spdDay, "Nº Camião": "700", "Matrícula da Viatura": "SP-EE-DD",
+      "Ordem de Entrega": String(ordem), "Código de Loja": code, "Designação da Loja": code,
+      "Janela Início": "08:00", "Janela Fim": "20:00",
+      "Hora de Chegada": fmtHHMM(addMin), "Hora de Saída": fmtHHMM(addMin + 10),
+      ID: "TFS-700-SPEEDD-1ªRota-09/09/2026",
+    });
+    const records: SheetRecord[] = [
+      mkTfsSpeedRow(1, "SYN-A", 0),
+      mkTfsSpeedRow(2, "SYN-B", 10 + gapMin),
+    ];
+    const r = runTfsMatch({
+      day: spdDay, records, header: spdTfsHeader, cols: spdTfsCols, stops: [],
+      fleetByTruck: new Map(), platesWithGps: new Set(), pingWindowByPlate: new Map(),
+      codeCoords,
+    });
+    ok("TFS speed [dispara]: row A (SYN-A) flags implausible speed in Real", hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+    ok("TFS speed [dispara]: row B (SYN-B) flags implausible speed in Real", hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+    ok("TFS speed [dispara]: Confiança untouched (still mantido)", r.rows[0]["Confiança"] === KEPT && r.rows[1]["Confiança"] === KEPT);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

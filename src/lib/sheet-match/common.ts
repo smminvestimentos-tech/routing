@@ -1361,3 +1361,195 @@ export function detectScheduleConflicts(params: {
       : combinedNote;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Physical speed plausibility between consecutive stops (6th visual rule:
+// distinct blue, xlsx-out.ts) — 2026-09-22.
+//
+// Different in kind from the schedule-conflict rule above: that one catches
+// two OVERLAPPING windows on the same ROUTE. This one catches two
+// NON-overlapping stops, anywhere in the vehicle's whole DAY (any route, any
+// leg), whose travel time between them is physically impossible — Saída_A ->
+// Chegada_B implies a speed no truck can sustain. Applies to every row
+// regardless of how its times got there (OK / mantido / accepted suggestion)
+// — a same-vehicle same-day pair is either physically possible or it isn't,
+// independent of which matching path produced each half of it.
+// ---------------------------------------------------------------------------
+
+// Great-circle distance in km. A local copy rather than importing
+// src/lib/geo.ts's (unexported, meters-based) helper — this file is pure, no
+// DB/framework, and promises to stay self-contained.
+export function haversineKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// No truck in this fleet can sustain more than this between two stops —
+// confirmed with the user, 2026-09-22 (the rule's own spec initially named
+// both 50 and 80; 50 is the one that stuck).
+export const MAX_PLAUSIBLE_SPEED_KMH = 50;
+
+// Caption stamped on the "Real" column of both rows in an implausible-speed
+// pair. `code`/`otherCode` are in chronological order (code = the EARLIER
+// stop, otherCode = the LATER one) — always the same order on both flagged
+// rows, unlike scheduleConflictNote's "the other one" phrasing, so the two
+// notes read identically wherever they land.
+export function implausibleSpeedNote(params: {
+  code: string;
+  otherCode: string;
+  distanceKm: number;
+  minutes: number;
+  speedKmh: number;
+}): string {
+  const { code, otherCode, distanceKm, minutes, speedKmh } = params;
+  return (
+    `⚠️ Velocidade implausível: ${distanceKm.toFixed(1)}km entre ${code} e ` +
+    `${otherCode} em ${Math.round(minutes)}min (${speedKmh.toFixed(1)}km/h) — ` +
+    `camião não pode exceder ${MAX_PLAUSIBLE_SPEED_KMH}km/h. Confirma os horários.`
+  );
+}
+
+export type DetectImplausibleSpeedItem = {
+  idx: number;
+  out: SheetRecord;
+  plate: string | null;
+  code: string;
+};
+
+/**
+ * Flags physically-impossible travel between a vehicle's own CONSECUTIVE
+ * stops, day-wide (not scoped to one route, unlike detectScheduleConflicts).
+ * Pure in terms of schedule/geometry: only annotates `REAL_COL`; never
+ * touches Chegada, Saída, or Confiança.
+ */
+export function detectImplausibleSpeed(params: {
+  items: DetectImplausibleSpeedItem[];
+  chegadaCol: string;
+  saidaCol: string;
+  defaultDay: string;
+  coLocatedGroups: CoLocatedGroups;
+  /** locations.code -> {lat,lng}. A code missing here is never checked —
+   *  no unverified assumption, same stance as codeTypes elsewhere. */
+  codeCoords: ReadonlyMap<string, { lat: number; lng: number }>;
+  maxSpeedKmh?: number;
+}): void {
+  const {
+    items,
+    chegadaCol,
+    saidaCol,
+    defaultDay,
+    coLocatedGroups,
+    codeCoords,
+  } = params;
+  const maxSpeedKmh = params.maxSpeedKmh ?? MAX_PLAUSIBLE_SPEED_KMH;
+
+  type ParsedItem = DetectImplausibleSpeedItem & {
+    plate: string;
+    startMs: number;
+    endMs: number;
+  };
+
+  const parsed: ParsedItem[] = [];
+  for (const it of items) {
+    if (!it.plate || !it.code) continue;
+    const chegadaStr = String(it.out[chegadaCol] ?? "").trim();
+    const saidaStr = String(it.out[saidaCol] ?? "").trim();
+    if (!chegadaStr || !saidaStr) continue;
+
+    const startMs = parseTimeCellToEpochMs(chegadaStr, defaultDay);
+    const endMs = parseTimeCellToEpochMs(saidaStr, defaultDay);
+    if (startMs == null || endMs == null || endMs < startMs) continue;
+
+    const normPlate = normalizePlate(it.plate);
+    if (!normPlate) continue;
+
+    parsed.push({ ...it, plate: normPlate, startMs, endMs });
+  }
+
+  // Group by plate ONLY — day-wide, every route/leg together, unlike the
+  // (plate, route) grouping the schedule-conflict rule uses above.
+  const byPlate = new Map<string, ParsedItem[]>();
+  for (const it of parsed) {
+    const list = byPlate.get(it.plate);
+    if (list) list.push(it);
+    else byPlate.set(it.plate, [it]);
+  }
+
+  type Visit = {
+    code: string;
+    startMs: number;
+    endMs: number;
+    rows: ParsedItem[];
+  };
+
+  for (const group of byPlate.values()) {
+    // Collapse sheet rows that share ONE physical visit (same site, same
+    // exact window — e.g. Azambuja's C+D pair sharing one Chegada/Saída) so
+    // "consecutive" is judged between VISITS, not raw rows: otherwise only
+    // whichever row happened to land next to the boundary in sort order
+    // would get flagged, leaving its group-mates untouched.
+    const visits: Visit[] = [];
+    for (const it of group) {
+      const existing = visits.find(
+        (v) =>
+          v.startMs === it.startMs &&
+          v.endMs === it.endMs &&
+          codeEq(v.code, it.code, coLocatedGroups),
+      );
+      if (existing) existing.rows.push(it);
+      else visits.push({ code: it.code, startMs: it.startMs, endMs: it.endMs, rows: [it] });
+    }
+    visits.sort((a, b) => a.startMs - b.startMs);
+
+    for (let i = 0; i + 1 < visits.length; i++) {
+      const a = visits[i];
+      const b = visits[i + 1];
+
+      // Same site (incl. co-located/merged) -> zero distance, never a
+      // speed problem, no matter how far apart in time.
+      if (codeEq(a.code, b.code, coLocatedGroups)) continue;
+
+      const availableMin = (b.startMs - a.endMs) / 60_000;
+      // <=0: overlapping or out-of-order across two different routes/legs —
+      // a different anomaly (not "too fast", genuinely no available time to
+      // divide by). Out of scope for this rule; left unflagged here.
+      if (availableMin <= 0) continue;
+
+      const coordA = codeCoords.get(a.code);
+      const coordB = codeCoords.get(b.code);
+      if (!coordA || !coordB) continue;
+
+      const distanceKm = haversineKm(coordA.lat, coordA.lng, coordB.lat, coordB.lng);
+      // Rounded to 1 decimal BEFORE the threshold check, same precision the
+      // note displays — a genuine exactly-at-the-limit case (e.g. distance
+      // and time both round real-world numbers) must never get flagged over
+      // floating-point noise in the haversine trig (order of 1e-13 km/h) that
+      // the user would never see reflected in the note anyway.
+      const speedKmh = Math.round((distanceKm / (availableMin / 60)) * 10) / 10;
+      if (speedKmh <= maxSpeedKmh) continue;
+
+      const note = implausibleSpeedNote({
+        code: a.code,
+        otherCode: b.code,
+        distanceKm,
+        minutes: availableMin,
+        speedKmh,
+      });
+      for (const row of [...a.rows, ...b.rows]) {
+        const existing = String(row.out[REAL_COL] ?? "").trim();
+        row.out[REAL_COL] = existing ? `${note} ${existing}` : note;
+      }
+    }
+  }
+}

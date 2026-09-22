@@ -149,7 +149,7 @@ async function main() {
 
   // ---- conditional formatting ----
   const cfs = cfsOf(ws);
-  ok("6 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 6, cfs.map((c) => c.ref));
+  ok("7 conditional-format rules present", cfs.flatMap((c) => c.rules).length === 7, cfs.map((c) => c.ref));
 
   // Layout: C=Matrícula, E=Chegada, F=Saída, G=Confiança, H=Real, I=ZZ, J=YY, K=XX, L=WW.
   const cfFor = (ref: string) => cfs.find((c) => c.ref === ref);
@@ -158,13 +158,18 @@ async function main() {
   const redSugg = cfFor(`C2:C${LAST} G2:G${LAST}`);
   const redGps = cfFor(`C2:C${LAST}`);
   const timeCfs = cfs.filter((c) => c.ref === `E2:E${LAST} F2:F${LAST}`);
-  const grayConflict = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Conflito"));
+  // "Conflito" is also a substring of the blue/purple rules' own NOT(...)
+  // exclusions below, so a loose .includes("Conflito") would ambiguously
+  // match any of the three — anchor on the formula's START, unique to gray.
+  const grayConflict = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.startsWith('ISNUMBER(SEARCH("Conflito"'));
+  const blueSpeed = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Velocidade implausível"));
   const purpleTimes = timeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("$L2<5"));
   ok("amber Chegada sqref = E-column only", !!amberChe, cfs.map((c) => c.ref));
   ok("amber Saída sqref = F-column only", !!amberSai, cfs.map((c) => c.ref));
   ok("red suggestion sqref = Matrícula + Confiança", !!redSugg, cfs.map((c) => c.ref));
   ok("red no-GPS sqref = Matrícula column ONLY (not Confiança)", !!redGps, cfs.map((c) => c.ref));
   ok("gray conflict rule present on Chegada + Saída", !!grayConflict, timeCfs);
+  ok("blue implausible-speed rule present on Chegada + Saída", !!blueSpeed, timeCfs);
   ok("purple short-stop sqref = Chegada + Saída", !!purpleTimes, cfs.map((c) => c.ref));
 
   const fChe = amberChe?.rules[0]?.formulae?.[0] ?? "";
@@ -172,6 +177,7 @@ async function main() {
   const fSugg = redSugg?.rules[0]?.formulae?.[0] ?? "";
   const fGps = redGps?.rules[0]?.formulae?.[0] ?? "";
   const fGray = grayConflict?.formulae?.[0] ?? "";
+  const fBlue = blueSpeed?.formulae?.[0] ?? "";
   const fPurple = purpleTimes?.formulae?.[0] ?? "";
   ok("amber Chegada formula", fChe === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""))', fChe);
   ok("amber Saída formula", fSai === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""))', fSai);
@@ -180,8 +186,13 @@ async function main() {
   ok("red no-GPS formula does NOT reference the plate cell ($C) — a plate delete can't hide it", !/\$C\d/.test(fGps), fGps);
   ok('gray conflict formula = ISNUMBER(SEARCH("Conflito",$H2))', fGray === 'ISNUMBER(SEARCH("Conflito",$H2))', fGray);
   ok(
-    "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending OR in conflict",
-    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))))',
+    'blue speed formula = SEARCH("Velocidade implausível") AND NOT SEARCH("Conflito") — gray keeps priority',
+    fBlue === 'AND(ISNUMBER(SEARCH("Velocidade implausível",$H2)),NOT(ISNUMBER(SEARCH("Conflito",$H2))))',
+    fBlue,
+  );
+  ok(
+    "purple formula keys off WW (<5, >=0) and suppresses while suggestion pending, in conflict, OR implausibly fast",
+    fPurple === 'AND(ISNUMBER($L2),$L2>=0,$L2<5,NOT(AND($I2<>"",$C2=$I2,$G2<>"OK")),NOT(ISNUMBER(SEARCH("Conflito",$H2))),NOT(ISNUMBER(SEARCH("Velocidade implausível",$H2))))',
     fPurple,
   );
   ok("no CF paints a whole-row range", cfs.every((c) => !/(^|\s)A2:/.test(c.ref)), cfs.map((c) => c.ref));
@@ -294,9 +305,20 @@ async function main() {
   ok("Azambuja: ZZ/YY/XX/WW appended & hidden", ["ZZ", "YY", "XX", "WW"].every((c) => azWs.getColumn(azHdr.indexOf(c) + 1).hidden === true));
 
   const azTimeCfs = azCfs.filter((c) => c.ref === `${gL}2:${gL}${azLast} ${hL}2:${hL}${azLast}`);
-  const azConflict = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Conflito"));
+  // Same ambiguity note as the TFS block above: anchor on the formula's
+  // START so the blue rule's own NOT("Conflito") clause can't be mistaken
+  // for the gray rule itself.
+  const azConflict = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.startsWith('ISNUMBER(SEARCH("Conflito"'));
   ok("Azambuja: conflict gray rule on Hora Chegada + Hora Saida", !!azConflict);
   ok("Azambuja: conflict formula keys off Real", azConflict?.formulae?.[0] === `ISNUMBER(SEARCH("Conflito",$${jL}2))`);
+
+  const azBlue = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes("Velocidade implausível"));
+  ok("Azambuja: blue implausible-speed rule on Hora Chegada + Hora Saida", !!azBlue, azTimeCfs);
+  ok(
+    "Azambuja: blue speed formula keys off Real, yields to Conflito",
+    azBlue?.formulae?.[0] === `AND(ISNUMBER(SEARCH("Velocidade implausível",$${jL}2)),NOT(ISNUMBER(SEARCH("Conflito",$${jL}2))))`,
+    azBlue?.formulae?.[0],
+  );
 
   const azWwL = azWs.getColumn(azHdr.indexOf(WW_COL) + 1).letter;
   const azPurple = azTimeCfs.flatMap((c) => c.rules).find((r) => r.formulae?.[0]?.includes(`$${azWwL}2`));

@@ -40,6 +40,7 @@ import {
   CONFIANCA_COL,
   type DayStop,
   dedupeStops,
+  detectImplausibleSpeed,
   detectScheduleConflicts,
   findPlateTypo,
   findVehicleSwap,
@@ -184,6 +185,9 @@ export type RunMatchArgs = {
    * threshold applied (same as today), not an assumption either way.
    */
   codeTypes?: ReadonlyMap<string, string>;
+  /** locations.code -> {lat,lng}. Feeds detectImplausibleSpeed (common.ts) —
+   *  a code missing here is never speed-checked, not an assumption either way. */
+  codeCoords?: ReadonlyMap<string, { lat: number; lng: number }>;
 };
 
 export type RunMatchResult = {
@@ -409,6 +413,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const mergedCodes = args.mergedCodes ?? [];
   const coLocatedGroups = args.coLocatedGroups ?? [];
   const codeTypes = args.codeTypes ?? new Map<string, string>();
+  const codeCoords = args.codeCoords ?? new Map<string, { lat: number; lng: number }>();
   // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
   // into one effective stop BEFORE any candidate selection below — see
   // mergeFragmentedStops in common.ts for why.
@@ -888,6 +893,28 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     saidaCol: cols.saidaCol,
     defaultDay: day,
     coLocatedGroups,
+  });
+
+  // 6th visual signaling rule: physical speed plausibility between a
+  // vehicle's own CONSECUTIVE stops, day-wide (every route/leg together, not
+  // scoped to one route like the conflict rule above). Stamps a distinct
+  // warning in REAL_COL; leaves times and Confiança untouched.
+  detectImplausibleSpeed({
+    items: works
+      .filter((w) => !w.empty)
+      .map((w) => ({
+        idx: w.idx,
+        out: w.out,
+        plate: cols.plateCol && w.out[cols.plateCol]
+          ? String(w.out[cols.plateCol]).trim()
+          : w.swapPlate || w.plate,
+        code: w.code,
+      })),
+    chegadaCol: cols.chegadaCol,
+    saidaCol: cols.saidaCol,
+    defaultDay: day,
+    coLocatedGroups,
+    codeCoords,
   });
 
   return {
