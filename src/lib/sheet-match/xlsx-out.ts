@@ -16,6 +16,10 @@
 //     confirmada) whose time gets cleared by accident goes amber again even
 //     though Confiança still says "OK". Fill the cell back in and only its own
 //     fill clears. Only those two cells are painted, never the whole row.
+//     Also (c) filled but invalid: the live WW duration is under -60min or
+//     over 7 days while the OTHER time cell has a date — a hand-edit that
+//     left the date out on an Azambuja row. Lands on the date-less cell only;
+//     never on TFS (bare HH:MM on both sides). See the rule itself below.
 //
 //     Two more hidden technical columns back this: «YY» = the Chegada we wrote,
 //     «XX» = the Saída we wrote (blank only for genuine "Rever" rows with no
@@ -42,7 +46,7 @@
 //     legitimate for matching purposes, a human reviewer should still SEE it,
 //     because a real short stop sometimes hides fragmentation (confirmed
 //     2026-09). Only fires once both cells hold something Excel can parse as a
-//     time (bare "HH:MM…" or the Azambuja "DD-MM-YYYY HH:MM" shape) — a row
+//     time (bare "HH:MM…" or the Azambuja "DD-MM-YYYY HH:MM[:SS]" shape) — a row
 //     still stuck on "⚠️ Rever manualmente" has blank times and never lights
 //     up. A hidden technical column «WW» carries the live duration in minutes
 //     (an Excel formula, not a snapshot, so it re-evaluates as the user edits
@@ -307,20 +311,35 @@ export async function buildSheetWorkbook(
 
   // Populate WW with a live formula per row: minutes between Chegada and
   // Saída, tolerant of both time shapes this app ever writes into those
-  // cells — bare "HH:MM[:SS]" (TFS) or "DD-MM-YYYY HH:MM" (Azambuja, whose
-  // cycles can cross midnight; "/" also accepted — older exports and
+  // cells — bare "HH:MM[:SS]" (TFS) or "DD-MM-YYYY HH:MM[:SS]" (Azambuja,
+  // whose cycles can cross midnight; "/" also accepted — older exports and
   // transporter pre-fills used that separator before this app switched to
   // "-") — mirroring parseClockMin/minutesBetweenKeptCells (common.ts) in
   // Excel-formula form. "" (via IFERROR) whenever either cell is blank or
   // doesn't parse, so a malformed cell never miscolors the row.
+  //
+  // ROUND to 2 decimals, not 0: Azambuja cells carry the GPS's real seconds,
+  // so the duration is fractional, and 🟣's "<5" must mean under 5 REAL
+  // minutes (4m40s = 4.67 is short; rounding to 0 would make it 5 and hide
+  // it). 2 decimals, not none, only to drop float noise from the
+  // DATEVALUE+TIMEVALUE day-fraction arithmetic (…4.999999999 vs 5).
+  // Whole-minute cells (TFS, transporter-typed values) still yield integers.
+  //
+  // ISNUMBER branch first: once the user edits one of these cells by hand,
+  // Excel (pt-PT) auto-converts the typed "09-09-2026 06:26:50" / "06:26"
+  // into a real date/time serial — already the value we want, but SEARCH/
+  // TIMEVALUE on a number errors, so without this WW went "" and 🟣 switched
+  // off at exactly the moment a manual correction most needs re-checking
+  // (same "always react to edits" stance as the other rules in this file).
   if (chegadaL && saidaL) {
     const serial = (colL: string, row: number) => {
       const cell = `$${colL}${row}`;
       const timePart = `TRIM(MID(${cell},FIND(" ",${cell})+1,20))`;
       return (
+        `IF(ISNUMBER(${cell}),${cell},` +
         `IF(OR(ISNUMBER(SEARCH("/",${cell})),ISNUMBER(SEARCH("-",${cell}))),` +
         `DATEVALUE(LEFT(${cell},FIND(" ",${cell})-1))+TIMEVALUE(${timePart}),` +
-        `TIMEVALUE(${cell}))`
+        `TIMEVALUE(${cell})))`
       );
     };
     for (let i = 0; i < rows.length; i++) {
@@ -329,7 +348,7 @@ export async function buildSheetWorkbook(
       const saiCell = `$${saidaL}${row}`;
       const formula =
         `IFERROR(IF(OR(${cheCell}="",${saiCell}=""),"",` +
-        `ROUND((${serial(saidaL, row)}-${serial(chegadaL, row)})*1440,0)),"")`;
+        `ROUND((${serial(saidaL, row)}-${serial(chegadaL, row)})*1440,2)),"")`;
       ws.getCell(`${wwL}${row}`).value = { formula };
     }
   }
@@ -362,12 +381,30 @@ export async function buildSheetWorkbook(
   //   • its snapshot column (YY / XX) is non-empty — i.e. we had put a value
   //     there and it has since been deleted. This is the safety net for an
   //     already-resolved row whose time gets wiped by accident.
+  // …or, filled but INVALID (2026-09-23): the live WW duration is absurd —
+  // under -60min or over 7 days — AND the OTHER time cell carries a date.
+  // That's a hand-edit that left out the date on an Azambuja row (typed
+  // "06:30" next to "09-09-2026 06:26:14"): WW then reads that bare time as
+  // day 0 of 1900, which comes out hugely negative when it's the Saída and
+  // hugely positive when it's the Chegada (hence both bounds, not just <-60).
+  // "The other cell has a date" is what lands the amber on the culprit only
+  // (the date-less cell — its dated partner doesn't pass, because ITS other
+  // cell has no date), paints both when both are dated but inverted by over an
+  // hour, and never fires on TFS, whose cells are bare "HH:MM" on both sides
+  // (so a legitimate midnight-crossing TFS stop, negative WW, stays unmarked).
+  // A dated cell is one whose text has "/" or "-", or an Excel serial >= 1
+  // (a bare time Excel converted is a day fraction < 1).
+  const hasDate = (cell: string) =>
+    `IF(ISNUMBER(${cell}),${cell}>=1,OR(ISNUMBER(SEARCH("/",${cell})),ISNUMBER(SEARCH("-",${cell}))))`;
   if (confL) {
     ([
-      [chegadaL, yyL],
-      [saidaL, xxL],
-    ] as const).forEach(([cellL, snapL], i) => {
+      [chegadaL, yyL, saidaL],
+      [saidaL, xxL, chegadaL],
+    ] as const).forEach(([cellL, snapL, otherL], i) => {
       if (!cellL) return;
+      const invalid = otherL
+        ? `,AND($${cellL}2<>"",ISNUMBER($${wwL}2),OR($${wwL}2<-60,$${wwL}2>10080),${hasDate(`$${otherL}2`)})`
+        : "";
       ws.addConditionalFormatting({
         ref: `${cellL}2:${cellL}${lastRow}`,
         rules: [
@@ -376,7 +413,7 @@ export async function buildSheetWorkbook(
             priority: i + 1,
             formulae: [
               `OR(AND(ISNUMBER(SEARCH("Rever",$${confL}2)),$${cellL}2=""),` +
-                `AND($${snapL}2<>"",$${cellL}2=""))`,
+                `AND($${snapL}2<>"",$${cellL}2="")${invalid})`,
             ],
             style: solid(FILL_AMBER),
           },

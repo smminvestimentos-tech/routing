@@ -206,8 +206,8 @@ async function main() {
   const fBlue = blueSpeed?.formulae?.[0] ?? "";
   const fPurple = purpleTimes?.formulae?.[0] ?? "";
   const fOrange = orangeSwap?.rules[0]?.formulae?.[0] ?? "";
-  ok("amber Chegada formula", fChe === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""))', fChe);
-  ok("amber Saída formula", fSai === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""))', fSai);
+  ok("amber Chegada formula", fChe === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$E2=""),AND($J2<>"",$E2=""),AND($E2<>"",ISNUMBER($L2),OR($L2<-60,$L2>10080),IF(ISNUMBER($F2),$F2>=1,OR(ISNUMBER(SEARCH("/",$F2)),ISNUMBER(SEARCH("-",$F2))))))', fChe);
+  ok("amber Saída formula", fSai === 'OR(AND(ISNUMBER(SEARCH("Rever",$G2)),$F2=""),AND($K2<>"",$F2=""),AND($F2<>"",ISNUMBER($L2),OR($L2<-60,$L2>10080),IF(ISNUMBER($E2),$E2>=1,OR(ISNUMBER(SEARCH("/",$E2)),ISNUMBER(SEARCH("-",$E2))))))', fSai);
   ok("red suggestion formula", fSugg === 'AND($I2<>"",$C2=$I2,$G2<>"OK")', fSugg);
   ok('red no-GPS formula = ISNUMBER(SEARCH("cobertura GPS",$H2))', fGps === 'ISNUMBER(SEARCH("cobertura GPS",$H2))', fGps);
   ok("red no-GPS formula does NOT reference the plate cell ($C) — a plate delete can't hide it", !/\$C\d/.test(fGps), fGps);
@@ -250,11 +250,20 @@ async function main() {
   ok("WW formula references that row's own Chegada/Saída cells", /\$E11.*\$F11|\$F11.*\$E11/.test(wwFormulaAt(11)), wwFormulaAt(11));
 
   // ---- behavioural sim ----
-  const amberOn = (formula: string, st: { conf: string; chegada: string; saida: string; yy: string; xx: string }) => {
-    const isChe = formula.includes("$E2");
+  // Which column a rule belongs to: its OWN blank test ($E2="" / $F2=""). Not
+  // just "mentions $E2" — the Saída rule references the Chegada cell too since
+  // the invalid-duration clause (it checks whether the OTHER cell has a date).
+  // chegada/saida may be a number: an Excel serial left by a hand edit.
+  type AmberSt = { conf: string; chegada: string | number; saida: string | number; yy: string; xx: string; ww?: number | "" };
+  const amberOn = (formula: string, st: AmberSt) => {
+    const isChe = formula.includes('$E2="")');
     const cell = isChe ? st.chegada : st.saida;
+    const other = isChe ? st.saida : st.chegada;
     const snap = isChe ? st.yy : st.xx;
-    return cell === "" && (/rever/i.test(st.conf) || snap !== "");
+    const hasDate = (v: string | number) => (typeof v === "number" ? v >= 1 : /[/-]/.test(v));
+    const missing = cell === "" && (/rever/i.test(st.conf) || snap !== "");
+    const invalid = cell !== "" && typeof st.ww === "number" && (st.ww < -60 || st.ww > 10080) && hasDate(other);
+    return missing || invalid;
   };
   const redGpsOn = (realText: string) => /cobertura gps/i.test(realText); // mirrors SEARCH("cobertura GPS",$H)
   const grayConflictOn = (realText: string) => /conflito/i.test(realText); // mirrors SEARCH("Conflito",$H)
@@ -265,6 +274,21 @@ async function main() {
   const okRow = { conf: "OK", chegada: "08:00", saida: "08:20", yy: "08:00", xx: "08:20" };
   ok("OK row intact -> neither amber", !amberOn(fChe, okRow) && !amberOn(fSai, okRow));
   ok("OK row, Chegada deleted -> Chegada amber (Confiança still OK)", amberOn(fChe, { ...okRow, chegada: "" }) && !amberOn(fSai, { ...okRow, chegada: "" }));
+
+  // Filled but INVALID (hand edit left the date out, Azambuja). WW values are
+  // what the real WW formula yields for these cells (checked in Excel).
+  const azOk = { conf: "OK", chegada: "09-09-2026 06:26:14", saida: "09-09-2026 07:09:03", yy: "x", xx: "x", ww: 42.82 };
+  ok("invalid: dated row, normal WW -> neither amber", !amberOn(fChe, azOk) && !amberOn(fSai, azOk));
+  const bareSai = { ...azOk, saida: 0.2708333 /* typed "06:30" */, ww: -66634740.0 };
+  ok("invalid: Saída typed without date (WW hugely negative) -> ONLY Saída amber", amberOn(fSai, bareSai) && !amberOn(fChe, bareSai));
+  const bareChe = { ...azOk, chegada: 0.2708333, ww: 66634781.0 };
+  ok("invalid: Chegada typed without date (WW hugely POSITIVE) -> ONLY Chegada amber", amberOn(fChe, bareChe) && !amberOn(fSai, bareChe));
+  const inverted = { ...azOk, saida: "09-09-2026 05:00:00", ww: -86.23 };
+  ok("invalid: both dated but inverted by >1h -> both amber", amberOn(fChe, inverted) && amberOn(fSai, inverted));
+  const smallNeg = { ...azOk, saida: "09-09-2026 06:00:00", ww: -26.23 };
+  ok("invalid: small negative (>= -60) is NOT flagged", !amberOn(fChe, smallNeg) && !amberOn(fSai, smallNeg));
+  const tfsMidnight = { conf: "OK", chegada: "23:50", saida: "00:10", yy: "x", xx: "x", ww: -1420 };
+  ok("invalid: TFS bare-time midnight crossing (WW -1420) is NOT flagged", !amberOn(fChe, tfsMidnight) && !amberOn(fSai, tfsMidnight));
 
   // *** the no-GPS-coverage red (72XR33/B67-style) ***
   ok("no-GPS Real text -> plate cell red (everSeen=false branch)", redGpsOn(noGpsCoverageNote("72XR33", false)) === true);

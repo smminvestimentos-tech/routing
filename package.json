@@ -11,6 +11,7 @@
     "test:sheet-workbook": "tsx scripts/test-sheet-workbook.ts",
     "test:azambuja-window": "tsx scripts/test-azambuja-window.ts",
     "test:trackit-fallback": "tsx scripts/test-trackit-fallback.ts",
+    "test:azambuja-seconds": "tsx scripts/test-azambuja-seconds.ts",
     "import:locations": "tsx scripts/import-locations.ts",
     "import:fleet-trucks": "tsx scripts/import-fleet-trucks.ts",
     "backfill:azambuja-pings": "tsx --conditions=react-server scripts/backfill-azambuja-pings.ts"

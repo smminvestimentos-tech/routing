@@ -390,12 +390,12 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
   );
   ok(
     '"02:00 | 14:00" row: skips the midnight-crossing stop, takes the 23:59 in-day one',
-    byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09/09/2026 23:59"),
+    byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09-09-2026 23:59"),
     byLoja["7005"]["Hora Chegada"],
   );
   ok(
     '"13:30 | 01:30+1" row: DOES match its 23:50 -> 10/09 01:00 stop (explicit +1)',
-    byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Saida"]).includes("10/09/2026 01:00"),
+    byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Saida"]).includes("10-09-2026 01:00"),
     byLoja["7009"]["Hora Saida"],
   );
 }

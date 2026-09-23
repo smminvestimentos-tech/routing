@@ -468,26 +468,31 @@ function lisbonDayOf(iso: string): string {
   return LISBON_YMD.format(new Date(iso));
 }
 
-const DMY_HM = new Intl.DateTimeFormat("en-GB", {
+const DMY_HMS = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Lisbon",
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
+  second: "2-digit",
   hour12: false,
 });
 
-// ISO timestamp -> "DD-MM-YYYY HH:MM" in Portugal wall-clock. "" for
+// ISO timestamp -> "DD-MM-YYYY HH:MM:SS" in Portugal wall-clock. "" for
 // null/invalid. Used for sheets whose delivery cycles cross midnight (Azambuja),
 // where a bare "HH:MM" is ambiguous about which calendar day it belongs to.
+// The seconds are the GPS stop's real ones (stops.arrived_at/departed_at are
+// second-precise; the sub-second part is truncated), never a fixed ":00" — a
+// value with seconds in the sheet always means "came from our GPS", while a
+// transporter-typed value kept verbatim stays "HH:MM" (normalizeDateTimeCell).
 export function fmtDateTimeLisbon(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const p: Record<string, string> = {};
-  for (const part of DMY_HM.formatToParts(d)) p[part.type] = part.value;
-  return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute}`;
+  for (const part of DMY_HMS.formatToParts(d)) p[part.type] = part.value;
+  return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute}:${p.second}`;
 }
 
 // A clock value -> minutes since midnight. Handles "HH:MM", an Excel day
@@ -511,18 +516,27 @@ export function parseClockMin(v: unknown): number | null {
   return asFraction(Number(s.replace(",", ".")));
 }
 
-// Minutes between two "DD/MM/YYYY HH:MM" or "DD-MM-YYYY HH:MM" strings
-// (b - a), or null if either doesn't match that shape. Both separators are
-// accepted so a re-uploaded "conferido" file (written with "-") and an
-// older export or transporter pre-fill (written with "/") both round-trip.
+// Minutes between two "DD/MM/YYYY HH:MM[:SS]" or "DD-MM-YYYY HH:MM[:SS]"
+// strings (b - a), or null if either doesn't match that shape. Both
+// separators are accepted so a re-uploaded "conferido" file (written with "-")
+// and an older export or transporter pre-fill (written with "/") both
+// round-trip. Seconds are optional (our GPS-matched cells carry them,
+// transporter-typed kept cells don't), so the result can be fractional.
 function minutesBetweenDMYHM(a: string, b: string): number | null {
   const parse = (s: string) => {
     const m = s
       .trim()
-      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})$/);
+      .match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (!m) return null;
-    const [, d, mo, y, h, mi] = m;
-    return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+    const [, d, mo, y, h, mi, sec] = m;
+    return Date.UTC(
+      Number(y),
+      Number(mo) - 1,
+      Number(d),
+      Number(h),
+      Number(mi),
+      sec ? Number(sec) : 0,
+    );
   };
   const ta = parse(a);
   const tb = parse(b);
@@ -530,12 +544,19 @@ function minutesBetweenDMYHM(a: string, b: string): number | null {
   return (tb - ta) / 60_000;
 }
 
-// Render a Chegada/Saída cell as "DD-MM-YYYY HH:MM" (wall-clock — NO timezone
-// shift). Prefers the Excel serial from the workbook's raw pass (unambiguous);
-// falls back to parsing our own "DD-MM-YYYY HH:MM" (or the older "/"
-// separator), a "DD/MM/YY[YY] [HH:MM]" string (also accepting "." as the date
-// separator and a trailing "AM"/"PM"), or "HH:MM" alone (attached to
-// `serviceDay`). Unparseable input is returned unchanged.
+// Render a Chegada/Saída cell as "DD-MM-YYYY HH:MM[:SS]" (wall-clock — NO
+// timezone shift). Prefers the Excel serial from the workbook's raw pass
+// (unambiguous); falls back to parsing our own "DD-MM-YYYY HH:MM[:SS]" (or
+// the older "/" separator), a "DD/MM/YY[YY] [HH:MM[:SS]]" string (also
+// accepting "." as the date separator and a trailing "AM"/"PM"), or
+// "HH:MM[:SS]" alone (attached to `serviceDay`). Unparseable input is
+// returned unchanged.
+//
+// Seconds are kept only when the input HAS them (our own GPS-matched export,
+// re-uploaded as a "conferido" file) and never invented: a transporter's
+// "08/09/2026 20:58" stays "…20:58", so seconds in the sheet always mean
+// "came from our GPS". An Excel serial (a cell Excel re-parsed as a date once
+// the user edited it) gets seconds only when its fraction isn't a whole minute.
 //
 // Shared by both matchers: originally Azambuja-only (kept rows are re-rendered
 // in this format there), but also the "source of truth" duration parser for
@@ -551,8 +572,16 @@ export function normalizeDateTimeCell(
   serviceDay: string, // YYYY-MM-DD
 ): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  const fmt = (y: number, mo: number, d: number, h: number, mi: number) =>
-    `${pad(d)}-${pad(mo)}-${y} ${pad(h)}:${pad(mi)}`;
+  const fmt = (
+    y: number,
+    mo: number,
+    d: number,
+    h: number,
+    mi: number,
+    sec?: number,
+  ) =>
+    `${pad(d)}-${pad(mo)}-${y} ${pad(h)}:${pad(mi)}` +
+    (sec != null ? `:${pad(sec)}` : "");
 
   const serial =
     typeof raw === "number" && Number.isFinite(raw)
@@ -561,15 +590,19 @@ export function normalizeDateTimeCell(
         ? Number(raw)
         : null;
   if (serial != null && serial > 1 && serial < 200_000) {
+    // Rounded to the nearest SECOND, not ms: a serial is a float day count, so
+    // 06:26:14 can come back as …06:26:13.9999 and would otherwise truncate.
     const dt = new Date(
-      Date.UTC(1899, 11, 30) + Math.round(serial * 86_400_000),
+      Date.UTC(1899, 11, 30) + Math.round(serial * 86_400) * 1000,
     );
+    const sec = dt.getUTCSeconds();
     return fmt(
       dt.getUTCFullYear(),
       dt.getUTCMonth() + 1,
       dt.getUTCDate(),
       dt.getUTCHours(),
       dt.getUTCMinutes(),
+      sec !== 0 ? sec : undefined,
     );
   }
 
@@ -577,10 +610,10 @@ export function normalizeDateTimeCell(
   if (!s) return "";
 
   const dmy = s.match(
-    /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2}))?\s*(AM|PM)?/i,
+    /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*(AM|PM)?/i,
   );
   if (dmy) {
-    const [, dd, mm, yy, hh, mi, ap] = dmy;
+    const [, dd, mm, yy, hh, mi, ss, ap] = dmy;
     let year = Number(yy);
     if (year < 100) year += 2000;
     let hour = hh ? Number(hh) : 0;
@@ -589,13 +622,27 @@ export function normalizeDateTimeCell(
       if (up === "PM" && hour < 12) hour += 12;
       if (up === "AM" && hour === 12) hour = 0;
     }
-    return fmt(year, Number(mm), Number(dd), hour, mi ? Number(mi) : 0);
+    return fmt(
+      year,
+      Number(mm),
+      Number(dd),
+      hour,
+      mi ? Number(mi) : 0,
+      ss ? Number(ss) : undefined,
+    );
   }
 
-  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  const hm = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (hm) {
     const [y, mo, d] = serviceDay.split("-").map(Number);
-    return fmt(y, mo, d, Number(hm[1]), Number(hm[2]));
+    return fmt(
+      y,
+      mo,
+      d,
+      Number(hm[1]),
+      Number(hm[2]),
+      hm[3] ? Number(hm[3]) : undefined,
+    );
   }
 
   return display;
@@ -605,7 +652,8 @@ export function normalizeDateTimeCell(
 // plausibility check (see classifyKeptDuration below). Routes BOTH cells
 // through normalizeDateTimeCell first — the same, more permissive parser the
 // write-back path already trusts to reshape these exact cells — then diffs
-// the two normalised "DD-MM-YYYY HH:MM" strings with minutesBetweenDMYHM.
+// the two normalised "DD-MM-YYYY HH:MM[:SS]" strings with minutesBetweenDMYHM
+// (fractional when seconds are present).
 //
 // This replaces an earlier, narrower parser (minutesBetweenTimeCells, fixed
 // "DD/MM/YYYY HH:MM" or bare "HH:MM" only) that returned null — "can't tell"
@@ -1240,9 +1288,10 @@ export { normalizePlate };
 // ---------------------------------------------------------------------------
 
 // Parse a Chegada/Saída cell string into epoch ms (Lisbon wall-clock).
-// Tolerant of "DD/MM/YYYY HH:MM" or "DD-MM-YYYY HH:MM" (either separator —
-// our own export used "/" before, "-" now, and a re-uploaded file may carry
-// either), bare "HH:MM", or ISO timestamp.
+// Tolerant of "DD/MM/YYYY HH:MM[:SS]" or "DD-MM-YYYY HH:MM[:SS]" (either
+// separator — our own export used "/" before, "-" now, and a re-uploaded file
+// may carry either; seconds present on GPS-matched Azambuja cells, absent on
+// transporter-typed ones), bare "HH:MM[:SS]", or ISO timestamp.
 export function parseTimeCellToEpochMs(
   v: unknown,
   defaultDay?: string,
@@ -1250,18 +1299,21 @@ export function parseTimeCellToEpochMs(
   if (v == null || v === "") return null;
   const s = String(v).trim();
   const dmyMatch = s.match(
-    /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})$/,
+    /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/,
   );
   if (dmyMatch) {
-    const [, d, mo, y, h, mi] = dmyMatch;
+    const [, d, mo, y, h, mi, sec] = dmyMatch;
     const ymd = `${y}-${pad2(mo)}-${pad2(d)}`;
-    return lisbonEpoch(ymd, Number(h) * 60 + Number(mi));
+    return (
+      lisbonEpoch(ymd, Number(h) * 60 + Number(mi)) +
+      (sec ? Number(sec) * 1000 : 0)
+    );
   }
-  const hmMatch = s.match(/^(\d{1,2}):(\d{2})/);
+  const hmMatch = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (hmMatch) {
     const min = Number(hmMatch[1]) * 60 + Number(hmMatch[2]);
     const day = defaultDay || "2000-01-01";
-    return lisbonEpoch(day, min);
+    return lisbonEpoch(day, min) + (hmMatch[3] ? Number(hmMatch[3]) * 1000 : 0);
   }
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) return d.getTime();

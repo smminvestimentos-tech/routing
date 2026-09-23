@@ -519,7 +519,7 @@ console.log("\n== real-data regression: BG-96-ID / 2026-09-21 (vehicle_id=106241
   ok("real case pass2: resolves to TRACKIT_FALLBACK using the real candidate", pass2.rows[0]["Confiança"] === TRACKIT_FALLBACK, pass2.rows[0]);
   ok(
     "real case pass2: Chegada/Saída match the real vehicleTravels-derived window (Lisbon)",
-    pass2.rows[0]["Hora Chegada"] === "21-09-2026 04:35" && pass2.rows[0]["Hora Saida"] === "21-09-2026 05:10",
+    pass2.rows[0]["Hora Chegada"] === "21-09-2026 04:35:00" && pass2.rows[0]["Hora Saida"] === "21-09-2026 05:10:00",
     pass2.rows[0],
   );
 }

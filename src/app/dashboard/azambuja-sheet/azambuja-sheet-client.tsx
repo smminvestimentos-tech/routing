@@ -309,8 +309,9 @@ export function AzambujaSheetClient() {
         <p className="mt-3">
           O ficheiro devolvido traz <strong>Hora Chegada</strong> /{" "}
           <strong>Hora Saida</strong> preenchidas com{" "}
-          <strong>data + hora de Lisboa</strong> (DD-MM-AAAA HH:MM — os ciclos
-          atravessam a meia-noite, a hora sozinha seria ambígua) e as colunas{" "}
+          <strong>data + hora de Lisboa</strong> (DD-MM-AAAA HH:MM:SS, com os
+          segundos reais do GPS — os ciclos atravessam a meia-noite, a hora
+          sozinha seria ambígua) e as colunas{" "}
           <strong>Confiança</strong>, <strong>Real</strong> e{" "}
           <strong>Dia Serviço</strong> (para poder recarregar o ficheiro
           conferido sem ambiguidade quanto ao dia). A <strong>MATRICULA</strong>{" "}
