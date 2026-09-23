@@ -27,6 +27,17 @@ import type { DayStop, TrackitSkipReason, WStop } from "./common";
 // veículo em 2 contas (ex. BG-96-ID) é tratada por inteiro ou fica de fora
 // por inteiro, nunca parcialmente (quebraria a nota "não consultado", que é
 // por matrícula/linha).
+// Limite dinâmico: o cap de matrículas elegíveis para fallback é calculado
+// em função do tempo disponível (maxDuration da rota - margem de segurança - tempo decorrido)
+// a dividir pelo timeout por chamada. Nunca é um número arbitrário fixo.
+export const DEFAULT_MAX_DURATION_MS = 150_000;
+export const ROUTE_SAFETY_MARGIN_MS = 35_000;
+
+// Timeout por chamada getVehicleTravels(): as chamadas reais demoram 23-26s
+// com picos observados até 55s. 55s previne abortos prematuros em picos lentos.
+export const TRACKIT_FALLBACK_CALL_TIMEOUT_MS = 55_000;
+
+// Mantido para compatibilidade de referência / imports legados:
 export const MAX_TRACKIT_FALLBACK_PLATES = 6;
 // Deixa ~50s dos 150s de maxDuration para o resto do pedido (construir o
 // workbook, etc.) — ver route.ts.
@@ -36,6 +47,29 @@ export const TRACKIT_FALLBACK_BUDGET_MS = 100_000;
 // mais que 60s para UMA chamada) para que um único veículo lento nunca coma o
 // orçamento inteiro pensado para até MAX_TRACKIT_FALLBACK_PLATES veículos.
 export const TRACKIT_FALLBACK_CALL_TIMEOUT_MS = 25_000;
+
+/**
+ * Calcula dinamicamente quantas matrículas cabem sequencialmente no tempo restante
+ * do pedido sem risco de timeout HTTP da rota (Vercel maxDuration).
+ */
+export function computeTrackitFallbackCap(params: {
+  fnStart: number;
+  maxDurationMs?: number;
+  safetyMarginMs?: number;
+  callTimeoutMs?: number;
+  now?: number;
+}): number {
+  const {
+    fnStart,
+    maxDurationMs = DEFAULT_MAX_DURATION_MS,
+    safetyMarginMs = ROUTE_SAFETY_MARGIN_MS,
+    callTimeoutMs = TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
+    now = Date.now(),
+  } = params;
+  const elapsedMs = Math.max(0, now - fnStart);
+  const availableBudgetMs = Math.max(0, maxDurationMs - safetyMarginMs - elapsedMs);
+  return Math.floor(availableBudgetMs / callTimeoutMs);
+}
 
 export type TrackitFallbackInput = {
   /** matrículas elegíveis, na ordem em que apareceram na folha (pass 1) */
@@ -51,6 +85,12 @@ export type TrackitFallbackInput = {
   dateEnd: string;
   /** Date.now() no início do pedido HTTP — para o prazo global */
   fnStart: number;
+  /** maxDuration da rota em milissegundos (default 150_000ms) */
+  maxDurationMs?: number;
+  /** margem de segurança reservada para matching pass 2 e ExcelJS (default 35_000ms) */
+  safetyMarginMs?: number;
+  /** timeout por chamada individual (default TRACKIT_FALLBACK_CALL_TIMEOUT_MS) */
+  callTimeoutMs?: number;
 };
 
 export type TrackitFallbackDiagnostics = {
@@ -58,6 +98,8 @@ export type TrackitFallbackDiagnostics = {
   targeted: number;
   /** matrículas para as quais pelo menos uma chamada foi mesmo feita */
   attempted: number;
+  /** cap dinâmico calculado para este pedido */
+  cap: number;
   /** matrículas cortadas só pelo cap (não por prazo/erro) */
   cappedPlates: string[];
   /** matrículas com pelo menos uma chamada falhada/expirada */
@@ -110,14 +152,26 @@ export async function resolveTrackitFallback(
     dateBegin,
     dateEnd,
     fnStart,
+    maxDurationMs = DEFAULT_MAX_DURATION_MS,
+    safetyMarginMs = ROUTE_SAFETY_MARGIN_MS,
+    callTimeoutMs = TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
   } = input;
 
   const trackitStopsByPlate = new Map<string, WStop[] | TrackitSkipReason>();
   const configured = new Map(getConfiguredAccounts().map((a) => [a.id, a]));
 
+  const cap = computeTrackitFallbackCap({
+    fnStart,
+    maxDurationMs,
+    safetyMarginMs,
+    callTimeoutMs,
+  });
+
   const targeted = pendingPlates.length;
   const eligible = pendingPlates.slice(0, MAX_TRACKIT_FALLBACK_PLATES);
   const cappedPlates = pendingPlates.slice(MAX_TRACKIT_FALLBACK_PLATES);
+  const eligible = pendingPlates.slice(0, cap);
+  const cappedPlates = pendingPlates.slice(cap);
   for (const plate of cappedPlates) trackitStopsByPlate.set(plate, { skipped: "cap" });
 
   // Resolve vehicleId + contas utilizáveis primeiro, para uma matrícula sem
@@ -160,13 +214,20 @@ export async function resolveTrackitFallback(
     }
   }
 
+  const deadlineMs = fnStart + (maxDurationMs - safetyMarginMs);
+
   await Promise.all(
     [...byAccount.entries()].map(async ([accountId, entries]) => {
       const account = configured.get(accountId)!;
       for (const entry of entries) {
         if (Date.now() - fnStart > TRACKIT_FALLBACK_BUDGET_MS) {
+        if (Date.now() >= deadlineMs) {
           failedPlates.add(entry.plate);
           failedPlateReasons.set(entry.plate, `prazo global excedido (>${TRACKIT_FALLBACK_BUDGET_MS}ms desde o início do pedido)`);
+          failedPlateReasons.set(
+            entry.plate,
+            `prazo global excedido (restavam menos de ${Math.round(safetyMarginMs / 1000)}s da margem)`,
+          );
           continue;
         }
         const key = travelsCacheKey(accountId, entry.vehicleId, dateBegin, dateEnd);
@@ -176,6 +237,7 @@ export async function resolveTrackitFallback(
             travels = (await withTimeout(
               getVehicleTravels(account, entry.vehicleId, dateBegin, dateEnd),
               TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
+              callTimeoutMs,
             )) as unknown as RawTravel[];
             setCachedTravels(key, travels);
           } catch (err) {
@@ -217,6 +279,7 @@ export async function resolveTrackitFallback(
     diagnostics: {
       targeted,
       attempted: plan.length,
+      cap,
       cappedPlates,
       failedPlates: trulyFailedPlates,
       failedPlateReasons: Object.fromEntries(

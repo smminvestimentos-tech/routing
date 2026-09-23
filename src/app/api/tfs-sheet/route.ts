@@ -389,6 +389,7 @@ export async function POST(request: NextRequest) {
       dateBegin: formatTrackitDate(new Date(dayStart).getTime()),
       dateEnd: formatTrackitDate(new Date(dayEnd).getTime()),
       fnStart,
+      maxDurationMs: maxDuration * 1000,
     });
 
     matched = runMatch({ ...matchArgs, trackitStopsByPlate });

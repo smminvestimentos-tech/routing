@@ -35,6 +35,9 @@ import {
   isEditDistance1,
   LOJA_MIN_PLAUSIBLE_DURATION_MIN,
   MAX_PLAUSIBLE_SPEED_KMH,
+  MAX_PLAUSIBLE_SPEED_LONG_KMH,
+  LONG_DISTANCE_KM,
+  getMaxPlausibleSpeedKmh,
   mergeFragmentedStops,
   minutesBetweenKeptCells,
   normalizeDateTimeCell,
@@ -1616,6 +1619,100 @@ ok(
       platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords,
     });
     ok("speed: unknown coordinates for one code -> not flagged (no unverified assumption)", !hasSpeedNote(r.rows[0]["Real"]) && !hasSpeedNote(r.rows[1]["Real"]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
+  }
+
+  // Long-distance trips (>100km): highway threshold MAX_PLAUSIBLE_SPEED_LONG_KMH (80km/h).
+  {
+    ok("getMaxPlausibleSpeedKmh: <=100km returns 50", getMaxPlausibleSpeedKmh(100) === 50);
+    ok("getMaxPlausibleSpeedKmh: >100km returns 80", getMaxPlausibleSpeedKmh(100.1) === 80);
+    ok("getMaxPlausibleSpeedKmh: custom override respected", getMaxPlausibleSpeedKmh(250, 45) === 45);
+
+    // Real-world regression: 7003 -> 26 (246.0km in 219min = 67.4km/h)
+    // Legitimate highway trip in Portugal that previously false-positive flagged under the 50km/h ceiling.
+    const DIST_246_KM = 246;
+    const dLat246 = (DIST_246_KM / EARTH_R_KM) * (180 / Math.PI);
+    const COORD_7003 = { lat: 38.0, lng: -8.0 };
+    const COORD_26 = { lat: 38.0 + dLat246, lng: -8.0 };
+    const longCoords = new Map([
+      ["7003", COORD_7003],
+      ["26", COORD_26],
+    ]);
+    const dist246Computed = haversineKm(COORD_7003.lat, COORD_7003.lng, COORD_26.lat, COORD_26.lng);
+    ok("long speed: synthetic 7003->26 distance is ~246km", Math.abs(dist246Computed - 246) < 0.1, dist246Computed);
+
+    // Real case: 219 min gap -> 67.4 km/h (< 80km/h) -> must NOT fire.
+    {
+      const records: SheetRecord[] = [
+        mkSpeedRow("SPD-L1", "7003", 0), // 08:00 -> 08:10
+        mkSpeedRow("SPD-L2", "26", 10 + 219), // arrival 219 min after departure of 7003
+      ];
+      const r = runAzMatch({
+        day, records, header: azHeader, cols: azCols, stops: [],
+        platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords: longCoords,
+      });
+      ok("real case 7003->26 (246km, 219min, 67.4km/h): row 7003 has NO speed note", !hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+      ok("real case 7003->26 (246km, 219min, 67.4km/h): row 26 has NO speed note", !hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+    }
+
+    // Impossible long-distance speed: 246km in 120min = 123km/h (> 80km/h) -> DOES fire.
+    {
+      const records: SheetRecord[] = [
+        mkSpeedRow("SPD-L3", "7003", 0), // 08:00 -> 08:10
+        mkSpeedRow("SPD-L4", "26", 10 + 120), // arrival 120 min after departure -> 123km/h
+      ];
+      const r = runAzMatch({
+        day, records, header: azHeader, cols: azCols, stops: [],
+        platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords: longCoords,
+      });
+      ok("impossible long trip (246km in 120min = 123km/h): row 7003 flags implausible speed", hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+      ok("impossible long trip (246km in 120min = 123km/h): row 26 flags implausible speed", hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
+      ok("impossible long trip note states the >80km/h limit", typeof r.rows[0]["Real"] === "string" && (r.rows[0]["Real"] as string).includes(`exceder ${MAX_PLAUSIBLE_SPEED_LONG_KMH}km/h`), r.rows[0]["Real"]);
+    }
+
+    // Boundary at exactly 100km: distance <= 100km uses base limit (50km/h).
+    {
+      const dLat100 = (100.0 / EARTH_R_KM) * (180 / Math.PI);
+      const COORD_100A = { lat: 38.0, lng: -8.0 };
+      const COORD_100B = { lat: 38.0 + dLat100, lng: -8.0 };
+      const boundCoords = new Map([
+        ["BND-A", COORD_100A],
+        ["BND-B", COORD_100B],
+      ]);
+      // 100km in 100min = 60km/h (> 50km/h base limit).
+      // Since distance is exactly 100.0km (not > 100), it uses 50km/h limit and must fire.
+      const records: SheetRecord[] = [
+        mkSpeedRow("SPD-B1", "BND-A", 0),
+        mkSpeedRow("SPD-B2", "BND-B", 10 + 100),
+      ];
+      const r = runAzMatch({
+        day, records, header: azHeader, cols: azCols, stops: [],
+        platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords: boundCoords,
+      });
+      ok("boundary at 100.0km (60km/h): uses 50km/h limit -> flags speed", hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+      ok("boundary at 100.0km: note states 50km/h limit", typeof r.rows[0]["Real"] === "string" && (r.rows[0]["Real"] as string).includes("exceder 50km/h"), r.rows[0]["Real"]);
+    }
+
+    // Just above 100km (101km): distance > 100km uses 80km/h limit.
+    {
+      const dLat101 = (101.0 / EARTH_R_KM) * (180 / Math.PI);
+      const COORD_101A = { lat: 38.0, lng: -8.0 };
+      const COORD_101B = { lat: 38.0 + dLat101, lng: -8.0 };
+      const boundCoords101 = new Map([
+        ["BND-101A", COORD_101A],
+        ["BND-101B", COORD_101B],
+      ]);
+      // 101km in 101min = 60km/h (<= 80km/h highway limit).
+      // Since distance is 101km (> 100), it uses 80km/h limit and must NOT fire.
+      const records: SheetRecord[] = [
+        mkSpeedRow("SPD-B3", "BND-101A", 0),
+        mkSpeedRow("SPD-B4", "BND-101B", 10 + 101),
+      ];
+      const r = runAzMatch({
+        day, records, header: azHeader, cols: azCols, stops: [],
+        platesWithGps: new Set(), pingWindowByPlate: new Map(), codeCoords: boundCoords101,
+      });
+      ok("trip at 101.0km (60km/h): uses 80km/h limit -> NO speed note", !hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
+    }
   }
 
   // TFS matcher: same rule, confirms the wiring (RunMatchArgs.codeCoords,

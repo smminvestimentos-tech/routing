@@ -151,6 +151,10 @@ export class TrackitError extends Error {
 // tripping the timeout and burning all 3 retries (~60s) before eventually
 // succeeding. vehicleTravels is ~15s server-side, comfortably inside 30s too.
 const REQUEST_TIMEOUT_MS = 30_000;
+// 60s: vehicleTravels calls take 23-26s on average, with observed peaks up to
+// 55s, and large-fleet payloads (/vehiclesForUser) can take 20-30s. A 60s timeout
+// prevents premature aborts on slow responses before the fallback caller's timeout.
+const REQUEST_TIMEOUT_MS = 60_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 500;
 

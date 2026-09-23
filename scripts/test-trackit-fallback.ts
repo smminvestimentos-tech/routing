@@ -40,6 +40,12 @@ import {
   type RawTravel,
   type TrackitCandidateMap,
 } from "@/lib/sheet-match/trackit-candidates";
+import {
+  computeTrackitFallbackCap,
+  DEFAULT_MAX_DURATION_MS,
+  ROUTE_SAFETY_MARGIN_MS,
+  TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
+} from "@/lib/sheet-match/trackit-fallback";
 
 let pass = 0;
 let fail = 0;
@@ -522,6 +528,61 @@ console.log("\n== real-data regression: BG-96-ID / 2026-09-21 (vehicle_id=106241
     pass2.rows[0]["Hora Chegada"] === "21-09-2026 04:35:00" && pass2.rows[0]["Hora Saida"] === "21-09-2026 05:10:00",
     pass2.rows[0],
   );
+}
+
+// ---------------------------------------------------------------------------
+console.log("== computeTrackitFallbackCap ==");
+{
+  const t0 = 1_000_000;
+
+  // 1. Standard route (150s maxDuration, 35s safety margin, 55s timeout, 5s elapsed)
+  // Available: 150 - 35 - 5 = 110s. Floor(110 / 55) = 2.
+  const cap1 = computeTrackitFallbackCap({
+    fnStart: t0,
+    maxDurationMs: 150_000,
+    safetyMarginMs: 35_000,
+    callTimeoutMs: 55_000,
+    now: t0 + 5_000,
+  });
+  ok("standard route (150s, 5s elapsed) -> cap = 2", cap1 === 2, cap1);
+
+  // 2. Standard route with 0s elapsed: Available: 150 - 35 = 115s. Floor(115 / 55) = 2.
+  const cap2 = computeTrackitFallbackCap({
+    fnStart: t0,
+    maxDurationMs: 150_000,
+    safetyMarginMs: 35_000,
+    callTimeoutMs: 55_000,
+    now: t0,
+  });
+  ok("standard route (150s, 0s elapsed) -> cap = 2", cap2 === 2, cap2);
+
+  // 3. Extended route (300s maxDuration, like sync/travels):
+  // Available: 300 - 35 - 5 = 260s. Floor(260 / 55) = 4.
+  const cap3 = computeTrackitFallbackCap({
+    fnStart: t0,
+    maxDurationMs: 300_000,
+    safetyMarginMs: 35_000,
+    callTimeoutMs: 55_000,
+    now: t0 + 5_000,
+  });
+  ok("extended route (300s, 5s elapsed) -> cap = 4", cap3 === 4, cap3);
+
+  // 4. Exhausted time: elapsed 125s into 150s route (already in safety margin territory)
+  // Available: 150 - 35 - 125 = -10 -> Math.max(0, -10) = 0. Floor(0 / 55) = 0.
+  const cap4 = computeTrackitFallbackCap({
+    fnStart: t0,
+    maxDurationMs: 150_000,
+    safetyMarginMs: 35_000,
+    callTimeoutMs: 55_000,
+    now: t0 + 125_000,
+  });
+  ok("time exhausted into margin -> cap = 0", cap4 === 0, cap4);
+
+  // 5. Default parameters when omitted
+  const cap5 = computeTrackitFallbackCap({
+    fnStart: Date.now(),
+  });
+  ok("default params (150s maxDuration, 35s margin, 55s timeout, 0s elapsed) -> cap = 2", cap5 === 2, cap5);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

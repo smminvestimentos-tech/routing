@@ -444,6 +444,7 @@ export async function POST(request: NextRequest) {
       dateBegin: formatTrackitDate(loMs),
       dateEnd: formatTrackitDate(hiMs),
       fnStart,
+      maxDurationMs: maxDuration * 1000,
     });
 
     matched = runMatch({ ...matchArgs, trackitStopsByPlate });

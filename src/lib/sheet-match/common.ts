@@ -1495,7 +1495,18 @@ export function haversineKm(
 // No truck in this fleet can sustain more than this between two stops —
 // confirmed with the user, 2026-09-22 (the rule's own spec initially named
 // both 50 and 80; 50 is the one that stuck).
+// Base speed limit between consecutive stops (urban/regional, distance <= 100km)
+// and highway speed limit for long-haul transits (straight-line distance > 100km).
+// Confirmed with user: long highway stretches sustain higher speeds (up to the
+// 90km/h truck speed governor), whereas shorter trips cannot exceed 50km/h.
 export const MAX_PLAUSIBLE_SPEED_KMH = 50;
+export const MAX_PLAUSIBLE_SPEED_LONG_KMH = 80;
+export const LONG_DISTANCE_KM = 100;
+
+export function getMaxPlausibleSpeedKmh(distanceKm: number, customLimit?: number): number {
+  if (customLimit != null) return customLimit;
+  return distanceKm > LONG_DISTANCE_KM ? MAX_PLAUSIBLE_SPEED_LONG_KMH : MAX_PLAUSIBLE_SPEED_KMH;
+}
 
 // Caption stamped on the "Real" column of both rows in an implausible-speed
 // pair. `code`/`otherCode` are in chronological order (code = the EARLIER
@@ -1508,12 +1519,16 @@ export function implausibleSpeedNote(params: {
   distanceKm: number;
   minutes: number;
   speedKmh: number;
+  limitKmh?: number;
 }): string {
   const { code, otherCode, distanceKm, minutes, speedKmh } = params;
+  const { code, otherCode, distanceKm, minutes, speedKmh, limitKmh } = params;
+  const limit = limitKmh ?? getMaxPlausibleSpeedKmh(distanceKm);
   return (
     `⚠️ Velocidade implausível: ${distanceKm.toFixed(1)}km entre ${code} e ` +
     `${otherCode} em ${Math.round(minutes)}min (${speedKmh.toFixed(1)}km/h) — ` +
     `camião não pode exceder ${MAX_PLAUSIBLE_SPEED_KMH}km/h. Confirma os horários.`
+    `camião não pode exceder ${limit}km/h. Confirma os horários.`
   );
 }
 
@@ -1635,6 +1650,8 @@ export function detectImplausibleSpeed(params: {
       // the user would never see reflected in the note anyway.
       const speedKmh = Math.round((distanceKm / (availableMin / 60)) * 10) / 10;
       if (speedKmh <= maxSpeedKmh) continue;
+      const effectiveMaxSpeed = getMaxPlausibleSpeedKmh(distanceKm, params.maxSpeedKmh);
+      if (speedKmh <= effectiveMaxSpeed) continue;
 
       const note = implausibleSpeedNote({
         code: a.code,
@@ -1642,6 +1659,7 @@ export function detectImplausibleSpeed(params: {
         distanceKm,
         minutes: availableMin,
         speedKmh,
+        limitKmh: effectiveMaxSpeed,
       });
       for (const row of [...a.rows, ...b.rows]) {
         const existing = String(row.out[REAL_COL] ?? "").trim();
