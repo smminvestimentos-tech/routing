@@ -303,23 +303,67 @@ export function resolveColumns(header: string[]): ResolvedColumns {
 
 // CICLO looks like "20:00-1 | 08:00" (start 20:00 the day before, end 08:00),
 // "08:00 | 20:00" (same day), "12:30 | 00:30+1" (ends after midnight), or a
-// free-text label ("Noturno", "Crossdocking peixe") we can't use.
+// free-text label ("Noturno", "Diurno") we can't use — bar the few in
+// FREE_TEXT_CICLO_EQUIVALENTS below, measured and mapped to a real window.
 
 const CICLO_RE =
   /^(\d{1,2}:\d{2})\s*([+-]\d)?\s*\|\s*(\d{1,2}:\d{2})\s*([+-]\d)?$/;
 
+// Free-text CICLO labels that DO have a stable real-world window, measured
+// from our own stops (read-only, 6 service days: 09/10/11/18/21/22-09-2026 —
+// each route anchored on its own planned STORES, loading = the last planned
+// warehouse departure before the first delivery). Mapped to the equivalent
+// time-window CICLO so they get the same day-aware window as a written one.
+// Values are the observed envelope rounded — NOT padded: groupWindowMs already
+// adds CICLO_PAD_MS (3h) on BOTH ends of a "…-1" window, so padding here would
+// apply it twice. Checked against the neighbouring service days (no overlap
+// with the previous day's end or the next day's loading).
+//
+//   "Crossdocking peixe" — loading at Salvesen/Peniche 22:39-1 … 04:28
+//     (median ~23:04-1), deliveries done by 07:34. Before this, the strict
+//     00:00–24:00 day cut the 23:00-1 loading: 14 of the 19 "Rever" 7003 rows
+//     of 22/09 had the vehicle AT 7003, located, just the evening before.
+//     -> "22:30-1 | 07:30"  (effective 19:30-1 .. 10:30)
+//   "Viatura dos Congelados -mantem" — 7001->7002 transfer from 20:44-1,
+//     loading 23:33-1, deliveries 01:22 … 07:24 (one route 09:50–11:00).
+//     Thin sample: 8 routes, 7 of them the same truck (20-TR-87).
+//     -> "20:30-1 | 08:00"  (effective 17:30-1 .. 11:00)
+//
+// "Noturno" is deliberately NOT here: despite the name it's night LOADING and
+// morning/early-afternoon deliveries of the service day itself (median first
+// delivery 07:40, last 10:25; ~95% inside 00:00–24:00), which the strict
+// service-day default already covers. Other labels: too few routes to fix one.
+const FREE_TEXT_CICLO_EQUIVALENTS: ReadonlyMap<string, string> = new Map([
+  ["crossdocking peixe", "22:30-1 | 07:30"],
+  ["viatura dos congelados -mantem", "20:30-1 | 08:00"],
+]);
+
+// Case-, accent- and spacing-insensitive key for FREE_TEXT_CICLO_EQUIVALENTS
+// ("Viatura dos Congelados - mantém" == "viatura dos congelados -mantem").
+function freeTextCicloKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s*-\s*/g, " -")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Shared parse of a time-window CICLO. Returns the two ends as minutes since
 // midnight plus which calendar day each falls on relative to the SERVICE day
 // (0 = service day, -1 = the day before, +1 = the day after). null for a
-// free-text CICLO. A wrap with no explicit marker ("20:00 | 08:00") is read as
-// starting the previous day, same as an explicit "-1".
+// free-text CICLO — except the labels in FREE_TEXT_CICLO_EQUIVALENTS, read as
+// their equivalent window. A wrap with no explicit marker ("20:00 | 08:00") is
+// read as starting the previous day, same as an explicit "-1".
 function matchCiclo(raw: unknown): {
   startOffsetDays: number;
   startMin: number;
   endOffsetDays: number;
   endMin: number;
 } | null {
-  const m = String(raw ?? "").trim().match(CICLO_RE);
+  const s = String(raw ?? "").trim();
+  const m = (FREE_TEXT_CICLO_EQUIVALENTS.get(freeTextCicloKey(s)) ?? s).match(CICLO_RE);
   if (!m) return null;
   const [, iniHM, iniOff, fimHM, fimOff] = m;
   const startMin = parseClockMin(iniHM);
@@ -377,8 +421,10 @@ const CICLO_PAD_MS = 3 * 3_600_000;
 
 // Epoch-ms [lo, hi) bounds a single CICLO's real stops may fall in, on `day`.
 //
-//   • free-text CICLO ("Crossdocking peixe", "Noturno") -> the strict service
-//     day, 00:00–24:00. NOTHING outside it — there's no HH:MM at all to bound
+//   • free-text CICLO ("Noturno", "Diurno") -> the strict service
+//     day, 00:00–24:00. (The labels in FREE_TEXT_CICLO_EQUIVALENTS —
+//     "Crossdocking peixe", "Viatura dos Congelados -mantem" — are NOT free
+//     text here: they're read as their mapped "…-1 | …" window below.) NOTHING outside it — there's no HH:MM at all to bound
 //     by, so the calendar day is the only signal we have.
 //   • same-day window ("02:00 | 14:00", "11:30 | 23:30") -> also the strict
 //     service day. The hours are informative but a same-day route's stops
@@ -396,17 +442,27 @@ const CICLO_PAD_MS = 3 * 3_600_000;
 // treats its hours as informative-only and spans the full service day; any
 // window that reaches past a calendar boundary has both ends bounded by the
 // CICLO's own times (± pad).
+//
+// depHiMs — how late a stop that ARRIVED inside [loMs, hiMs) may DEPART (see
+// stopInWindow). Equal to hiMs everywhere except a "…-1 | …" window ending on
+// the service day, where it's the END of the service day: a truck that arrives
+// in-window and then parks (real case, 2026-09-23: "Crossdocking peixe"
+// AC-99-DS / 03-QA-31 back at Peniche 7007 ~06:30, parked until ~21:20, every
+// day) belongs to this route even though it leaves after the shift's end+pad.
+// The ARRIVAL stays bounded by hiMs (so the next evening's loading, and the
+// 2026-09-11 AD-49-DH 13:34 arrival, are still rejected), and the departure
+// still never crosses into the next calendar day.
 export function groupWindowMs(
   day: string, // YYYY-MM-DD
   rawCiclo: unknown,
   opts: { padMs?: number } = {},
-): { loMs: number; hiMs: number } {
+): { loMs: number; hiMs: number; depHiMs: number } {
   const padMs = opts.padMs ?? CICLO_PAD_MS;
   const dayLo = lisbonEpoch(day, 0);
   const dayHi = lisbonEpoch(day, DAY_MIN);
 
   const sp = matchCiclo(rawCiclo);
-  if (!sp) return { loMs: dayLo, hiMs: dayHi };
+  if (!sp) return { loMs: dayLo, hiMs: dayHi, depHiMs: dayHi };
 
   const sameDay = sp.startOffsetDays === 0 && sp.endOffsetDays === 0;
 
@@ -417,7 +473,9 @@ export function groupWindowMs(
   const hiMs = sameDay
     ? dayHi
     : lisbonEpoch(day, sp.endOffsetDays * DAY_MIN + sp.endMin) + padMs;
-  return { loMs, hiMs };
+  const depHiMs =
+    sp.startOffsetDays < 0 && sp.endOffsetDays === 0 ? Math.max(hiMs, dayHi) : hiMs;
+  return { loMs, hiMs, depHiMs };
 }
 
 // Epoch-ms [lo, hi) bounds for the stops/pings query for the whole file: the
@@ -445,18 +503,21 @@ export function stopQueryWindowMs(
 // window is the strict service day) can't claim a stop that spills past
 // midnight — a 09/09 23:04 → 10/09 00:10 visit goes to manual review, not "OK"
 // with a 10/09 departure. A stop with no departure recorded is judged on its
-// arrival alone.
+// arrival alone. `depHiMs` (default hiMs) lets the DEPARTURE run later than
+// the arrival bound — groupWindowMs's depHiMs, only ever wider for a "…-1 | …"
+// window, and never past the end of the service day.
 export function stopInWindow(
   arrivedAt: string,
   departedAt: string | null,
   loMs: number,
   hiMs: number,
+  depHiMs: number = hiMs,
 ): boolean {
   const a = new Date(arrivedAt).getTime();
   if (!Number.isFinite(a) || a < loMs || a >= hiMs) return false;
   if (departedAt == null) return true;
   const d = new Date(departedAt).getTime();
-  return !Number.isFinite(d) || d < hiMs;
+  return !Number.isFinite(d) || d < depHiMs;
 }
 
 // normalizeDateTimeCell moved to sheet-match/common.ts (2026-09-22) — it's now
@@ -573,6 +634,8 @@ type StoreGroup = {
   /** [lo, hi) epoch-ms a real stop for this group may fall in (day-aware) */
   winLoMs: number;
   winHiMs: number;
+  /** latest departure for a stop that arrived in [winLoMs, winHiMs) */
+  winDepHiMs: number;
   order: number; // first row index, for sheet order
   rows: Work[];
   assignedStop: WStop | null;
@@ -714,6 +777,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         rawCiclo: w.rawCiclo,
         winLoMs: 0,
         winHiMs: 0,
+        winDepHiMs: 0,
         order: w.idx,
         rows: [],
         assignedStop: null,
@@ -734,9 +798,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // Day-aware stop window per group: strict service day for same-day / free-text
   // CICLOs; only an explicit "…-1" / "…+1" reaches a neighbouring calendar day.
   for (const g of groups) {
-    const { loMs, hiMs } = groupWindowMs(day, g.rawCiclo);
+    const { loMs, hiMs, depHiMs } = groupWindowMs(day, g.rawCiclo);
     g.winLoMs = loMs;
     g.winHiMs = hiMs;
+    g.winDepHiMs = depHiMs;
   }
 
   // ----- group store-groups by ROTA, and let a plate-less group inherit its
@@ -827,7 +892,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         (s) =>
           !s.assigned &&
           codeEq(s.code, g.code, coLocatedGroups) &&
-          stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
+          stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs),
       );
       if (candidates.length === 0) {
         // no code match in window -> conf stays "" for step 3 (swap) / step 4
@@ -919,6 +984,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
             typo.suggStop.departedAt,
             g.winLoMs,
             g.winHiMs,
+            g.winDepHiMs,
           )
         ) {
           typo.suggStop.assigned = true;
@@ -962,6 +1028,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         sw.suggStop.departedAt,
         g.winLoMs,
         g.winHiMs,
+        g.winDepHiMs,
       )
     ) {
       continue;
@@ -1017,7 +1084,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const outcome = tryTrackitFallback(
       g.plate,
       g.code,
-      (s) => stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs),
+      (s) => stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs),
       args.trackitStopsByPlate,
       coLocatedGroups,
     );

@@ -86,7 +86,7 @@ ok(
   cicloSpan("20:00 | 08:00"),
 );
 ok('"Noturno" -> null', cicloSpan("Noturno") === null);
-ok('"Crossdocking peixe" -> null', cicloSpan("Crossdocking peixe") === null);
+ok('"Viatura Guarda" (free text, not mapped) -> null', cicloSpan("Viatura Guarda") === null);
 ok('"" -> null', cicloSpan("") === null);
 
 // parseCiclo behaviour unchanged by the refactor.
@@ -111,7 +111,7 @@ const next0130 = lisbonEpoch("2026-09-10", 90);
 
 // The three real regression cases — free text and same-day windows must stay
 // strictly inside the service day (00:00–24:00), never touching 10/09.
-for (const c of ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", "Noturno", ""]) {
+for (const c of ["Viatura Guarda", "02:00 | 14:00", "11:30 | 23:30", "Noturno", ""]) {
   const w = groupWindowMs(DAY, c);
   ok(
     `groupWindowMs(${JSON.stringify(c)}) == strict service day [00:00, 24:00)`,
@@ -123,7 +123,7 @@ for (const c of ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", "Noturn
 const toIso = (d: string, hhmm: string) =>
   new Date(lisbonEpoch(d, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)))).toISOString();
 for (const [c, hhmm] of [
-  ["Crossdocking peixe", "00:10"],
+  ["Viatura Guarda", "00:10"],
   ["02:00 | 14:00", "00:12"],
   ["11:30 | 23:30", "00:44"],
 ] as const) {
@@ -138,7 +138,7 @@ for (const [c, hhmm] of [
 // real "…OK with Hora Saída em 10/09" bug) must be rejected for a same-day /
 // free-text route.
 {
-  const w = groupWindowMs(DAY, "Crossdocking peixe"); // strict service day
+  const w = groupWindowMs(DAY, "Viatura Guarda"); // free text -> strict service day
   ok(
     "stop 09/09 23:04 -> 10/09 00:10 : rejected (departure crosses midnight)",
     stopInWindow(toIso("2026-09-09", "23:04"), toIso("2026-09-10", "00:10"), w.loMs, w.hiMs) === false,
@@ -156,6 +156,79 @@ for (const [c, hhmm] of [
     "+1 route: stop 09/09 23:04 -> 10/09 01:00 : accepted (window reaches next day)",
     stopInWindow(toIso("2026-09-09", "23:04"), toIso("2026-09-10", "01:00"), wp1.loMs, wp1.hiMs) === true,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Free-text CICLOs mapped to a measured window (FREE_TEXT_CICLO_EQUIVALENTS,
+// 2026-09-23). Values are the observed envelope; the ±3h pad is groupWindowMs's
+// own (applied ONCE — asserted below against the exact expected bounds).
+// ---------------------------------------------------------------------------
+console.log("== free-text CICLOs with a measured window ==");
+{
+  const at = (d: string, hhmm: string) => lisbonEpoch(d, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
+  const peixe = groupWindowMs(DAY, "Crossdocking peixe");
+  ok(
+    '"Crossdocking peixe" == "22:30-1 | 07:30" + 3h pad once: [08/09 19:30, 09/09 10:30)',
+    peixe.loMs === at("2026-09-08", "19:30") && peixe.hiMs === at("2026-09-09", "10:30"),
+    { lo: lisbon(peixe.loMs), hi: lisbon(peixe.hiMs) },
+  );
+  const cong = groupWindowMs(DAY, "Viatura dos Congelados -mantem");
+  ok(
+    '"Viatura dos Congelados -mantem" == "20:30-1 | 08:00" + 3h pad once: [08/09 17:30, 09/09 11:00)',
+    cong.loMs === at("2026-09-08", "17:30") && cong.hiMs === at("2026-09-09", "11:00"),
+    { lo: lisbon(cong.loMs), hi: lisbon(cong.hiMs) },
+  );
+  const same = (a: string, b: string) => JSON.stringify(cicloSpan(a)) === JSON.stringify(cicloSpan(b));
+  ok("cicloSpan: peixe label == its equivalent window", same("Crossdocking peixe", "22:30-1 | 07:30"));
+  ok("cicloSpan: congelados label == its equivalent window", same("Viatura dos Congelados -mantem", "20:30-1 | 08:00"));
+  ok(
+    "label match ignores case / accents / spacing around the dash",
+    same("  CROSSDOCKING  Peixe ", "22:30-1 | 07:30") &&
+      same("Viatura dos Congelados - mantém", "20:30-1 | 08:00") &&
+      same("viatura dos congelados-mantem", "20:30-1 | 08:00"),
+  );
+  ok('parseCiclo "Crossdocking peixe" -> 00:00..07:30 (service-day slice)', JSON.stringify(parseCiclo("Crossdocking peixe")) === JSON.stringify({ ini: "00:00", fim: "07:30" }));
+  ok('"Noturno" stays free text (strict day) — measured: ~95% already inside 00:00–24:00', cicloSpan("Noturno") === null);
+
+  // depHiMs: a stop that ARRIVES in a "…-1 | …" window may DEPART up to the
+  // end of the service day (a truck parked after its shift — real case: peixe
+  // AC-99-DS / 03-QA-31 back at Peniche 7007 ~06:30, parked until ~21:20).
+  const inW = (w: { loMs: number; hiMs: number; depHiMs: number }, a: [string, string], d: [string, string] | null) =>
+    stopInWindow(toIso(...a), d ? toIso(...d) : null, w.loMs, w.hiMs, w.depHiMs);
+  ok("peixe depHiMs == end of the service day (09/09 24:00)", peixe.depHiMs === dayHi, lisbon(peixe.depHiMs));
+  ok("peixe: 7007 park 09/09 06:40 -> 21:20 ACCEPTED (arrives in-window, leaves same day)", inW(peixe, ["2026-09-09", "06:40"], ["2026-09-09", "21:20"]));
+  ok("peixe: 09/09 22:39 arrival (next day's loading) still REJECTED", !inW(peixe, ["2026-09-09", "22:39"], ["2026-09-10", "00:04"]));
+  ok("peixe: park 09/09 06:40 -> 10/09 00:10 REJECTED (departure crosses into the next day)", !inW(peixe, ["2026-09-09", "06:40"], ["2026-09-10", "00:10"]));
+  const w2008 = groupWindowMs(DAY, "20:00-1 | 08:00");
+  ok('"20:00-1 | 08:00": 13:34 ARRIVAL still rejected (2026-09-11 AD-49-DH fix untouched)', !inW(w2008, ["2026-09-09", "13:34"], ["2026-09-09", "14:00"]));
+  ok('"20:00-1 | 08:00": arrives 10:30, parks until 15:00 -> accepted', inW(w2008, ["2026-09-09", "10:30"], ["2026-09-09", "15:00"]));
+  for (const c of ["02:00 | 14:00", "Noturno", "13:30 | 01:30+1"]) {
+    const w = groupWindowMs(DAY, c);
+    ok(`${JSON.stringify(c)}: depHiMs == hiMs (only "…-1 | …" windows get the park allowance)`, w.depHiMs === w.hiMs);
+  }
+  ok(
+    "stopInWindow without depHiMs: unchanged (departure bound = hiMs)",
+    stopInWindow(toIso("2026-09-09", "06:40"), toIso("2026-09-09", "21:20"), peixe.loMs, peixe.hiMs) === false,
+  );
+
+  // Neighbouring-day collision check, per label: the window must NOT reach the
+  // previous service day's last delivery (observed ≤ 07:34 / 07:24) nor the
+  // next service day's first activity (loading ≥ 22:39 / transfer ≥ 20:44).
+  for (const [label, w, prevEnd, nextStart] of [
+    ["Crossdocking peixe", peixe, "07:34", "22:39"],
+    ["Viatura dos Congelados -mantem", cong, "07:24", "20:44"],
+  ] as const) {
+    ok(
+      `${label}: previous day's last delivery (08/09 ${prevEnd}) is OUTSIDE the 09/09 window`,
+      at("2026-09-08", prevEnd) < w.loMs,
+      { prevEnd, lo: lisbon(w.loMs) },
+    );
+    ok(
+      `${label}: next day's first activity (09/09 ${nextStart}) is OUTSIDE the 09/09 window`,
+      at("2026-09-09", nextStart) >= w.hiMs,
+      { nextStart, hi: lisbon(w.hiMs) },
+    );
+  }
 }
 
 // Only an explicit -1 / +1 widens past the service day. An overnight shift's
@@ -209,7 +282,7 @@ console.log("== stopQueryWindowMs ==");
 const wEmpty = stopQueryWindowMs(DAY, []);
 ok("no CICLOs: window == strict service day (no ±skirt any more)", wEmpty.loMs === dayLo && wEmpty.hiMs === dayHi, { lo: lisbon(wEmpty.loMs), hi: lisbon(wEmpty.hiMs) });
 
-const wFree = stopQueryWindowMs(DAY, ["08:00 | 20:00", "Noturno", "Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30", ""]);
+const wFree = stopQueryWindowMs(DAY, ["08:00 | 20:00", "Noturno", "Viatura Guarda", "02:00 | 14:00", "11:30 | 23:30", ""]);
 ok(
   "REGRESSION: only same-day / free-text CICLOs -> window is EXACTLY the service day, never 10/09",
   wFree.loMs === dayLo && wFree.hiMs === dayHi,
@@ -287,7 +360,7 @@ if (!raw) {
   );
   // Per-CICLO: the free-text / same-day rows stay strictly inside the service
   // day even though the file as a whole has -1 / +1 rows widening the fetch.
-  const strictCiclos = ["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30"];
+  const strictCiclos = ["Viatura Guarda", "02:00 | 14:00", "11:30 | 23:30"];
   const present = strictCiclos.filter((c) => ciclos.some((x) => String(x).trim() === c));
   console.log(`     free-text / same-day CICLOs present in the file: ${present.join(" · ") || "(none)"}`);
   ok(
@@ -301,7 +374,7 @@ if (!raw) {
   );
   ok(
     "real: the reported cases — a stop arriving 09/09 23:0x and departing 10/09 00:1x is rejected",
-    (["Crossdocking peixe", "02:00 | 14:00", "11:30 | 23:30"] as const).every((c, i) => {
+    (["Viatura Guarda", "02:00 | 14:00", "11:30 | 23:30"] as const).every((c, i) => {
       const w = groupWindowMs("2026-09-09", c);
       const arr = new Date(lisbonEpoch("2026-09-09", 23 * 60 + 4)).toISOString();
       const dep = new Date(lisbonEpoch("2026-09-10", [10, 12, 44][i])).toISOString();
@@ -383,8 +456,11 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
     pingWindowByPlate: new Map([["AA11BB", { min: Date.parse(iso("09", "00:00")), max: Date.parse(iso("10", "02:00")) }]]),
   });
   const byLoja = Object.fromEntries(res.rows.map((r) => [String(r["N_LOJA"]), r]));
+  // Still rejected since the peixe label got its measured window
+  // ("22:30-1 | 07:30" -> [08/09 19:30, 09/09 10:30)), now for the RIGHT
+  // reason: a 09/09 23:04 arrival is the NEXT service day's loading.
   ok(
-    "Crossdocking peixe row: 23:04->00:10 stop NOT matched (departs 10/09) -> Rever",
+    "Crossdocking peixe row: 09/09 23:04->10/09 00:10 stop NOT matched (next day's loading) -> Rever",
     byLoja["7003"]["Hora Saida"] === "" && byLoja["7003"]["Confiança"] === REVIEW,
     { ch: byLoja["7003"]["Hora Chegada"], sa: byLoja["7003"]["Hora Saida"], conf: byLoja["7003"]["Confiança"] },
   );
@@ -397,6 +473,58 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
     '"13:30 | 01:30+1" row: DOES match its 23:50 -> 10/09 01:00 stop (explicit +1)',
     byLoja["7009"]["Confiança"] === "OK" && String(byLoja["7009"]["Hora Saida"]).includes("10-09-2026 01:00"),
     byLoja["7009"]["Hora Saida"],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end, the real 22/09 shape (AC-99-DS / 66-VG-49 / 03-QA-31 …): a
+// "Crossdocking peixe" route loads at Salvesen (7003) the EVENING BEFORE and
+// delivers overnight. Its 7003 row used to go "Rever" under the strict
+// 00:00–24:00 day even though the truck was at 7003, located. The pool also
+// holds that same truck's NEXT loading (22/09 23:00) — must not be taken.
+// ---------------------------------------------------------------------------
+console.log("== runMatch: Crossdocking peixe loads the evening before ==");
+{
+  const iso = (d: string, hhmm: string) => `2026-09-${d}T${hhmm}:00+01:00`;
+  const azHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const mk = (loja: string): SheetRecord => ({
+    ROTA: "R-PEIXE", N_LOJA: loja, NOME: loja, MATRICULA: "AC-99-DS",
+    "Hora Chegada": "", "Hora Saida": "", CICLO: "Crossdocking peixe", TIPO: "C",
+  });
+  const stops: DayStop[] = [
+    { id: "load", vehicleId: 7, plate: "AC99DS", code: "7003", arrivedAt: iso("21", "23:04"), departedAt: iso("22", "00:45") },
+    { id: "s25", vehicleId: 7, plate: "AC99DS", code: "25", arrivedAt: iso("22", "01:21"), departedAt: iso("22", "01:50") },
+    { id: "s18", vehicleId: 7, plate: "AC99DS", code: "18", arrivedAt: iso("22", "03:10"), departedAt: iso("22", "03:40") },
+    // back at Peniche after the deliveries, parked all day (real pattern)
+    { id: "park", vehicleId: 7, plate: "AC99DS", code: "7007", arrivedAt: iso("22", "06:40"), departedAt: iso("22", "21:20") },
+    // the NEXT night's loading, same truck, same Salvesen — belongs to 23/09
+    { id: "next", vehicleId: 7, plate: "AC99DS", code: "7003", arrivedAt: iso("22", "23:00"), departedAt: iso("23", "00:40") },
+  ];
+  const res = runMatch({
+    day: "2026-09-22", records: [mk("7003"), mk("25"), mk("18"), mk("7007")], header: azHeader, cols: resolveColumns(azHeader), stops,
+    platesWithGps: new Set(["AC99DS"]),
+    pingWindowByPlate: new Map([["AC99DS", { min: Date.parse(iso("21", "20:00")), max: Date.parse(iso("23", "02:00")) }]]),
+  });
+  const byLoja = Object.fromEntries(res.rows.map((r) => [String(r["N_LOJA"]), r]));
+  ok(
+    "peixe 7003 row: matched to the 21/09 23:04 loading (evening before) — was Rever under the strict day",
+    byLoja["7003"]["Confiança"] === "OK" && String(byLoja["7003"]["Hora Chegada"]).startsWith("21-09-2026 23:04"),
+    { conf: byLoja["7003"]["Confiança"], ch: byLoja["7003"]["Hora Chegada"], real: byLoja["7003"]["Real"] },
+  );
+  ok(
+    "peixe 7003 row: NOT the 22/09 23:00 stop (that's 23/09's loading)",
+    !String(byLoja["7003"]["Hora Chegada"]).startsWith("22-09-2026 23:00"),
+    byLoja["7003"]["Hora Chegada"],
+  );
+  ok(
+    "peixe 7007 row: the 06:40 -> 21:20 park at Peniche is OK (departure after end+pad, same day)",
+    byLoja["7007"]["Confiança"] === "OK" && String(byLoja["7007"]["Hora Chegada"]).startsWith("22-09-2026 06:40"),
+    { conf: byLoja["7007"]["Confiança"], ch: byLoja["7007"]["Hora Chegada"] },
+  );
+  ok(
+    "peixe store rows (01:21, 03:10) still OK",
+    byLoja["25"]["Confiança"] === "OK" && byLoja["18"]["Confiança"] === "OK",
+    [byLoja["25"]["Confiança"], byLoja["18"]["Confiança"]],
   );
 }
 
