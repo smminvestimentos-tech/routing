@@ -35,8 +35,8 @@ export const dynamic = "force-dynamic";
 // 150s (was 60s) — this project's Vercel plan/Fluid Compute already runs
 // src/app/api/sync/positions (180s) and sync/stops, sync/travels (300s each)
 // well above 60s, so 150s is comfortably inside a proven ceiling. Needed for
-// the (capped, budgeted) TRACKiT /vehicleTravels fallback below — each call
-// is ~15s server-side and up to MAX_TRACKIT_FALLBACK_PLATES may be needed.
+// the deadline-bounded TRACKiT /vehicleTravels fallback below — each call
+// takes ~23-26s, and it keeps going until the deadline (see trackit-fallback.ts).
 export const maxDuration = 150;
 
 // A day's fleet at ~one ping / 5 min is a few thousand rows; cap generously.
@@ -424,7 +424,11 @@ export async function POST(request: NextRequest) {
     codeTypes,
     codeCoords,
   };
+  const tPass1 = Date.now();
   let matched = runMatch(matchArgs);
+  const tPass1End = Date.now();
+  let tFallback = 0;
+  let tPass2 = 0;
   let trackitDiagnostics: (TrackitFallbackDiagnostics & { resolved: number }) | null = null;
 
   if (matched.pendingTrackitPlates.length > 0) {
@@ -447,7 +451,9 @@ export async function POST(request: NextRequest) {
       maxDurationMs: maxDuration * 1000,
     });
 
+    tFallback = Date.now();
     matched = runMatch({ ...matchArgs, trackitStopsByPlate });
+    tPass2 = Date.now();
     trackitDiagnostics = { ...diagnostics, resolved: matched.summary.trackitFallback };
   }
 
@@ -463,6 +469,7 @@ export async function POST(request: NextRequest) {
   // PROTOTYPE: output written with exceljs — conditional formatting (amber on
   // missing times, red on suggestions / "sem cobertura GPS") + the "OK"
   // dropdown. Input parsing above stays on SheetJS.
+  const tExcelStart = Date.now();
   const fileBase64 = await buildSheetWorkbook({
     rows,
     header: outHeader,
@@ -471,6 +478,7 @@ export async function POST(request: NextRequest) {
     saidaColName: cols.saidaCol,
     sheetName: outSheetName,
   });
+  const tExcelEnd = Date.now();
 
   return NextResponse.json({
     filename: `azambuja-${day}-conferido.xlsx`,
@@ -481,5 +489,15 @@ export async function POST(request: NextRequest) {
       dayStops: stops.length,
     },
     ...(trackitDiagnostics ? { trackitFallback: trackitDiagnostics } : {}),
+    // Tempo de cada fase do pedido — para afinar ROUTE_SAFETY_MARGIN_MS
+    // (trackit-fallback.ts) com números reais: a margem tem de cobrir pass2 + excel.
+    timingsMs: {
+      preFallback: tPass1 - fnStart,
+      pass1: tPass1End - tPass1,
+      fallback: tFallback ? tFallback - tPass1End : 0,
+      pass2: tPass2 ? tPass2 - tFallback : 0,
+      excel: tExcelEnd - tExcelStart,
+      total: tExcelEnd - fnStart,
+    },
   });
 }

@@ -28,7 +28,7 @@ import type { LocationForMatch } from "@/lib/sheet-match/trackit-candidates";
 export const dynamic = "force-dynamic";
 // 150s (was 60s) — see src/app/api/azambuja-sheet/route.ts's comment: this
 // project's Vercel plan/Fluid Compute already runs other routes well above
-// 60s (up to 300s), and the (capped, budgeted) TRACKiT /vehicleTravels
+// 60s (up to 300s), and the deadline-bounded TRACKiT /vehicleTravels
 // fallback below needs the headroom.
 export const maxDuration = 150;
 
@@ -369,7 +369,11 @@ export async function POST(request: NextRequest) {
     codeTypes,
     codeCoords,
   };
+  const tPass1 = Date.now();
   let matched = runMatch(matchArgs);
+  const tPass1End = Date.now();
+  let tFallback = 0;
+  let tPass2 = 0;
   let trackitDiagnostics: (TrackitFallbackDiagnostics & { resolved: number }) | null = null;
 
   if (matched.pendingTrackitPlates.length > 0) {
@@ -392,7 +396,9 @@ export async function POST(request: NextRequest) {
       maxDurationMs: maxDuration * 1000,
     });
 
+    tFallback = Date.now();
     matched = runMatch({ ...matchArgs, trackitStopsByPlate });
+    tPass2 = Date.now();
     trackitDiagnostics = { ...diagnostics, resolved: matched.summary.trackitFallback };
   }
 
@@ -400,6 +406,7 @@ export async function POST(request: NextRequest) {
 
   // PROTOTYPE: output written with exceljs (conditional formatting + the "OK"
   // dropdown on suggestion rows). Input parsing above stays on SheetJS.
+  const tExcelStart = Date.now();
   const fileBase64 = await buildSheetWorkbook({
     rows,
     header: outHeader,
@@ -409,6 +416,7 @@ export async function POST(request: NextRequest) {
     truckColName: cols.truckCol ?? undefined,
     sheetName: "TFS",
   });
+  const tExcelEnd = Date.now();
 
   return NextResponse.json({
     filename: `tfs-${day}-conferido.xlsx`,
@@ -421,5 +429,15 @@ export async function POST(request: NextRequest) {
       fleetError: fleetRes.error?.message ?? null,
     },
     ...(trackitDiagnostics ? { trackitFallback: trackitDiagnostics } : {}),
+    // Tempo de cada fase do pedido — para afinar ROUTE_SAFETY_MARGIN_MS
+    // (trackit-fallback.ts) com números reais: a margem tem de cobrir pass2 + excel.
+    timingsMs: {
+      preFallback: tPass1 - fnStart,
+      pass1: tPass1End - tPass1,
+      fallback: tFallback ? tFallback - tPass1End : 0,
+      pass2: tPass2 ? tPass2 - tFallback : 0,
+      excel: tExcelEnd - tExcelStart,
+      total: tExcelEnd - fnStart,
+    },
   });
 }

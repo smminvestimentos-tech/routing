@@ -41,10 +41,7 @@ import {
   type TrackitCandidateMap,
 } from "@/lib/sheet-match/trackit-candidates";
 import {
-  computeTrackitFallbackCap,
-  DEFAULT_MAX_DURATION_MS,
-  ROUTE_SAFETY_MARGIN_MS,
-  TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
+  resolveTrackitFallback,
 } from "@/lib/sheet-match/trackit-fallback";
 
 let pass = 0;
@@ -531,59 +528,160 @@ console.log("\n== real-data regression: BG-96-ID / 2026-09-21 (vehicle_id=106241
 }
 
 // ---------------------------------------------------------------------------
-console.log("== computeTrackitFallbackCap ==");
-{
-  const t0 = 1_000_000;
+// resolveTrackitFallback orchestration — fake fetchTravels + tiny time scale
+// (maxDuration 1000ms, margin 200ms -> deadline at 800ms). No network.
+async function orchestrationTests() {
+  console.log("== resolveTrackitFallback (prazo, timeout, sem cap) ==");
+  process.env.TRACKIT_USER = "u1";
+  process.env.TRACKIT_PASS = "p1";
+  process.env.TRACKIT_USER_2 = "u2";
+  process.env.TRACKIT_PASS_2 = "p2";
 
-  // 1. Standard route (150s maxDuration, 35s safety margin, 55s timeout, 5s elapsed)
-  // Available: 150 - 35 - 5 = 110s. Floor(110 / 55) = 2.
-  const cap1 = computeTrackitFallbackCap({
-    fnStart: t0,
-    maxDurationMs: 150_000,
-    safetyMarginMs: 35_000,
-    callTimeoutMs: 55_000,
-    now: t0 + 5_000,
-  });
-  ok("standard route (150s, 5s elapsed) -> cap = 2", cap1 === 2, cap1);
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const plates = Array.from({ length: 12 }, (_, i) => `P${i}`);
+  const vehicleIdByPlate = new Map(plates.map((p, i) => [p, 1000 + i]));
+  const common = {
+    realStopsByVehicle: new Map<number, DayStop[]>(),
+    locations: [] as LocationForMatch[],
+    dateBegin: "2026-09-24 00:00:00",
+    maxDurationMs: 1000,
+    safetyMarginMs: 200,
+    callTimeoutMs: 550,
+    minCallBudgetMs: 50,
+  };
+  let dayN = 0;
+  const freshDay = () => `2026-09-24 23:59:${String(dayN++).padStart(2, "0")}`; // cache isolation
 
-  // 2. Standard route with 0s elapsed: Available: 150 - 35 = 115s. Floor(115 / 55) = 2.
-  const cap2 = computeTrackitFallbackCap({
-    fnStart: t0,
-    maxDurationMs: 150_000,
-    safetyMarginMs: 35_000,
-    callTimeoutMs: 55_000,
-    now: t0,
-  });
-  ok("standard route (150s, 0s elapsed) -> cap = 2", cap2 === 2, cap2);
+  // 1. Uma conta, chamadas de 150ms: ~5 cabem em 800ms, o resto fica "deadline"
+  //    (nunca "cap"), e a fase toda acaba antes do prazo.
+  {
+    const fnStart = Date.now();
+    const { trackitStopsByPlate, diagnostics } = await resolveTrackitFallback({
+      ...common,
+      dateEnd: freshDay(),
+      pendingPlates: plates,
+      vehicleIdByPlate,
+      accountsByVehicle: new Map(plates.map((p, i) => [1000 + i, new Set(["default"])])),
+      fnStart,
+      fetchTravels: async () => {
+        await sleep(150);
+        return [];
+      },
+    });
+    const elapsed = Date.now() - fnStart;
+    const reasons = plates.map((p) => trackitStopsByPlate.get(p));
+    const resolved = reasons.filter((r) => Array.isArray(r)).length;
+    const deadline = reasons.filter((r) => !Array.isArray(r) && r?.skipped === "deadline").length;
+    ok("1 conta: resolve mais que o cap antigo (>=4)", resolved >= 4, { resolved });
+    // a última pode começar à beira do prazo e expirar ("call-failed") — no máximo uma
+    const failed = reasons.filter((r) => !Array.isArray(r) && r?.skipped === "call-failed").length;
+    ok("1 conta: restantes ficam 'deadline' (no máx. 1 'call-failed')", resolved + deadline + failed === plates.length && failed <= 1, reasons);
+    ok("1 conta: nenhuma fica 'cap'", !reasons.some((r) => !Array.isArray(r) && r?.skipped === "cap"));
+    ok("1 conta: acaba antes do prazo (800ms + folga)", elapsed < 850, { elapsed });
+    ok("diagnostics.deadlinePlates bate certo", diagnostics.deadlinePlates.length === deadline, diagnostics);
+    ok("diagnostics.callDurationsMs regista cada chamada", diagnostics.callDurationsMs.length === resolved + failed, diagnostics);
+  }
 
-  // 3. Extended route (300s maxDuration, like sync/travels):
-  // Available: 300 - 35 - 5 = 260s. Floor(260 / 55) = 4.
-  const cap3 = computeTrackitFallbackCap({
-    fnStart: t0,
-    maxDurationMs: 300_000,
-    safetyMarginMs: 35_000,
-    callTimeoutMs: 55_000,
-    now: t0 + 5_000,
-  });
-  ok("extended route (300s, 5s elapsed) -> cap = 4", cap3 === 4, cap3);
+  // 2. Duas contas em paralelo: cerca do dobro das matrículas resolvidas.
+  {
+    const fnStart = Date.now();
+    const { trackitStopsByPlate } = await resolveTrackitFallback({
+      ...common,
+      dateEnd: freshDay(),
+      pendingPlates: plates,
+      vehicleIdByPlate,
+      accountsByVehicle: new Map(
+        plates.map((p, i) => [1000 + i, new Set([i % 2 === 0 ? "default" : "azambuja"])]),
+      ),
+      fnStart,
+      fetchTravels: async () => {
+        await sleep(150);
+        return [];
+      },
+    });
+    const resolved = plates.filter((p) => Array.isArray(trackitStopsByPlate.get(p))).length;
+    ok("2 contas: resolve >=8 (paralelo entre contas)", resolved >= 8, { resolved });
+  }
 
-  // 4. Exhausted time: elapsed 125s into 150s route (already in safety margin territory)
-  // Available: 150 - 35 - 125 = -10 -> Math.max(0, -10) = 0. Floor(0 / 55) = 0.
-  const cap4 = computeTrackitFallbackCap({
-    fnStart: t0,
-    maxDurationMs: 150_000,
-    safetyMarginMs: 35_000,
-    callTimeoutMs: 55_000,
-    now: t0 + 125_000,
-  });
-  ok("time exhausted into margin -> cap = 0", cap4 === 0, cap4);
+  // 3. Chamada pendurada perto do prazo: o timeout é cortado ao que falta,
+  //    por isso a fase acaba no prazo e não aos fnStart + 550ms de timeout.
+  {
+    const fnStart = Date.now() - 600; // já passaram 600ms: restam 200ms até ao prazo
+    const t0 = Date.now();
+    const { trackitStopsByPlate, diagnostics } = await resolveTrackitFallback({
+      ...common,
+      dateEnd: freshDay(),
+      pendingPlates: ["P0"],
+      vehicleIdByPlate,
+      accountsByVehicle: new Map([[1000, new Set(["default"])]]),
+      fnStart,
+      fetchTravels: () => new Promise(() => {}), // nunca responde
+    });
+    const took = Date.now() - t0;
+    ok("chamada pendurada: timeout cortado ao prazo (~200ms, não 550ms)", took < 300, { took });
+    const r = trackitStopsByPlate.get("P0");
+    ok("chamada pendurada: fica 'call-failed'", !Array.isArray(r) && r?.skipped === "call-failed", r);
+    const timedOutMs = Number(/timed out after (\d+)ms/.exec(diagnostics.failedPlateReasons.P0 ?? "")?.[1]);
+    ok("chamada pendurada: motivo nos diagnostics (timeout <= 200ms)", timedOutMs > 0 && timedOutMs <= 200, diagnostics);
+  }
 
-  // 5. Default parameters when omitted
-  const cap5 = computeTrackitFallbackCap({
-    fnStart: Date.now(),
-  });
-  ok("default params (150s maxDuration, 35s margin, 55s timeout, 0s elapsed) -> cap = 2", cap5 === 2, cap5);
+  // 4. Menos que minCallBudgetMs até ao prazo: nem começa a chamada.
+  {
+    let calls = 0;
+    const { trackitStopsByPlate } = await resolveTrackitFallback({
+      ...common,
+      dateEnd: freshDay(),
+      pendingPlates: ["P0"],
+      vehicleIdByPlate,
+      accountsByVehicle: new Map([[1000, new Set(["default"])]]),
+      fnStart: Date.now() - 780, // restam 20ms < 50ms
+      fetchTravels: async () => {
+        calls++;
+        return [];
+      },
+    });
+    const r = trackitStopsByPlate.get("P0");
+    ok("sem tempo mínimo: nenhuma chamada feita", calls === 0, { calls });
+    ok("sem tempo mínimo: fica 'deadline'", !Array.isArray(r) && r?.skipped === "deadline", r);
+  }
+
+  // 5. Matrículas em cache vão primeiro: um re-upload com o prazo quase
+  //    esgotado ainda as serve, e as novas ficam "deadline".
+  {
+    const dateEnd = freshDay();
+    const accountsByVehicle = new Map(plates.map((p, i) => [1000 + i, new Set(["default"])]));
+    const fetchTravels = async () => [] as never[];
+    // aquece a cache só para as últimas duas
+    await resolveTrackitFallback({
+      ...common,
+      dateEnd,
+      pendingPlates: ["P10", "P11"],
+      vehicleIdByPlate,
+      accountsByVehicle,
+      fnStart: Date.now(),
+      fetchTravels,
+    });
+    let calls = 0;
+    const { trackitStopsByPlate } = await resolveTrackitFallback({
+      ...common,
+      dateEnd,
+      pendingPlates: plates,
+      vehicleIdByPlate,
+      accountsByVehicle,
+      fnStart: Date.now() - 790, // sem tempo para chamadas novas
+      fetchTravels: async () => {
+        calls++;
+        return [];
+      },
+    });
+    ok("cache primeiro: P10/P11 resolvidas da cache", Array.isArray(trackitStopsByPlate.get("P10")) && Array.isArray(trackitStopsByPlate.get("P11")));
+    ok("cache primeiro: nenhuma chamada nova", calls === 0, { calls });
+    const r = trackitStopsByPlate.get("P0");
+    ok("cache primeiro: P0 fica 'deadline'", !Array.isArray(r) && r?.skipped === "deadline", r);
+  }
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+orchestrationTests().then(() => {
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

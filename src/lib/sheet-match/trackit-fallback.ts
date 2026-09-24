@@ -3,7 +3,7 @@
 // directly, the same import style scripts/backfill-azambuja-pings.ts already
 // uses, bypassing client.ts's server-only guard) and merges the result with
 // each vehicle's real stops. Shared by both sheet routes (azambuja-sheet,
-// tfs-sheet) so the cap/deadline/timeout/concurrency/cache logic lives in
+// tfs-sheet) so the deadline/timeout/concurrency/cache logic lives in
 // exactly one place — candidate derivation/matching itself stays pure, in
 // trackit-candidates.ts.
 
@@ -23,46 +23,26 @@ import {
 } from "./trackit-candidates";
 import type { DayStop, TrackitSkipReason, WStop } from "./common";
 
-// Matrículas distintas, não pares (vehicleId, account) — uma matrícula com
-// veículo em 2 contas (ex. BG-96-ID) é tratada por inteiro ou fica de fora
-// por inteiro, nunca parcialmente (quebraria a nota "não consultado", que é
-// por matrícula/linha).
-// Limite dinâmico: o cap de matrículas elegíveis para fallback é calculado
-// em função do tempo disponível (maxDuration da rota - margem de segurança - tempo decorrido)
-// a dividir pelo timeout por chamada. Nunca é um número arbitrário fixo.
+// Sem cap à partida: todas as matrículas pendentes entram na fila e é o prazo
+// global que decide até onde se chega. Um cap calculado com o pior caso por
+// chamada (55s) e como se tudo fosse sequencial dava só 1-2 matrículas por
+// pedido, quando as chamadas reais demoram 23-26s e as contas correm em
+// paralelo. As que o prazo não alcança ficam com { skipped: "deadline" }.
 export const DEFAULT_MAX_DURATION_MS = 150_000;
+// Reservado, depois do prazo do fallback, para o pass 2 do matching e o
+// ExcelJS. O timeout de cada chamada é cortado ao tempo que falta até ao
+// prazo, por isso nenhuma chamada TRACKiT invade esta margem — é isto que
+// garante que a rota nunca rebenta o maxDuration.
 export const ROUTE_SAFETY_MARGIN_MS = 35_000;
 
-// Timeout por chamada getVehicleTravels(): as chamadas reais demoram 23-26s
-// com picos observados até 55s. 55s previne abortos prematuros em picos lentos.
+// Timeout máximo por chamada getVehicleTravels(): as chamadas reais demoram
+// 23-26s com picos observados até 55s.
 export const TRACKIT_FALLBACK_CALL_TIMEOUT_MS = 55_000;
 
-// Mantido para compatibilidade de referência / imports legados:
-export const MAX_TRACKIT_FALLBACK_PLATES = 6;
-export const TRACKIT_FALLBACK_BUDGET_MS = 100_000;
-
-/**
- * Calcula dinamicamente quantas matrículas cabem sequencialmente no tempo restante
- * do pedido sem risco de timeout HTTP da rota (Vercel maxDuration).
- */
-export function computeTrackitFallbackCap(params: {
-  fnStart: number;
-  maxDurationMs?: number;
-  safetyMarginMs?: number;
-  callTimeoutMs?: number;
-  now?: number;
-}): number {
-  const {
-    fnStart,
-    maxDurationMs = DEFAULT_MAX_DURATION_MS,
-    safetyMarginMs = ROUTE_SAFETY_MARGIN_MS,
-    callTimeoutMs = TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
-    now = Date.now(),
-  } = params;
-  const elapsedMs = Math.max(0, now - fnStart);
-  const availableBudgetMs = Math.max(0, maxDurationMs - safetyMarginMs - elapsedMs);
-  return Math.floor(availableBudgetMs / callTimeoutMs);
-}
+// Não vale a pena começar uma chamada com menos tempo do que isto até ao
+// prazo — abaixo das chamadas mais rápidas observadas (~23s), expiraria
+// quase sempre e só gastaria um pedido à conta.
+export const MIN_CALL_BUDGET_MS = 20_000;
 
 export type TrackitFallbackInput = {
   /** matrículas elegíveis, na ordem em que apareceram na folha (pass 1) */
@@ -82,27 +62,31 @@ export type TrackitFallbackInput = {
   maxDurationMs?: number;
   /** margem de segurança reservada para matching pass 2 e ExcelJS (default 35_000ms) */
   safetyMarginMs?: number;
-  /** timeout por chamada individual (default TRACKIT_FALLBACK_CALL_TIMEOUT_MS) */
+  /** timeout máximo por chamada individual (default TRACKIT_FALLBACK_CALL_TIMEOUT_MS) */
   callTimeoutMs?: number;
+  /** tempo mínimo até ao prazo para começar uma chamada (default MIN_CALL_BUDGET_MS) */
+  minCallBudgetMs?: number;
+  /** só para testes — substitui a chamada real a /vehicleTravels */
+  fetchTravels?: typeof getVehicleTravels;
 };
 
 export type TrackitFallbackDiagnostics = {
-  /** matrículas elegíveis antes do cap */
+  /** matrículas elegíveis */
   targeted: number;
-  /** matrículas para as quais pelo menos uma chamada foi mesmo feita */
+  /** matrículas com pelo menos uma chamada feita (ou servida da cache) */
   attempted: number;
-  /** cap dinâmico calculado para este pedido */
-  cap: number;
-  /** matrículas cortadas só pelo cap (não por prazo/erro) */
-  cappedPlates: string[];
+  /** matrículas que o prazo global não alcançou (nenhuma chamada começou) */
+  deadlinePlates: string[];
   /** matrículas com pelo menos uma chamada falhada/expirada */
   failedPlates: string[];
   /**
-   * matrícula -> motivo exato da falha (mensagem da exceção, "budget
-   * exceeded", ou o timeout de TRACKIT_FALLBACK_CALL_TIMEOUT_MS) — só para
-   * as matrículas em failedPlates. Diagnóstico, nunca escrito na folha.
+   * matrícula -> motivo exato da falha (mensagem da exceção ou o timeout da
+   * chamada) — só para as matrículas em failedPlates. Diagnóstico, nunca
+   * escrito na folha.
    */
   failedPlateReasons: Record<string, string>;
+  /** duração de cada chamada real (não cache) a /vehicleTravels, em ms */
+  callDurationsMs: number[];
 };
 
 export type TrackitFallbackResult = {
@@ -148,28 +132,18 @@ export async function resolveTrackitFallback(
     maxDurationMs = DEFAULT_MAX_DURATION_MS,
     safetyMarginMs = ROUTE_SAFETY_MARGIN_MS,
     callTimeoutMs = TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
+    minCallBudgetMs = MIN_CALL_BUDGET_MS,
+    fetchTravels = getVehicleTravels,
   } = input;
 
   const trackitStopsByPlate = new Map<string, WStop[] | TrackitSkipReason>();
   const configured = new Map(getConfiguredAccounts().map((a) => [a.id, a]));
 
-  const cap = computeTrackitFallbackCap({
-    fnStart,
-    maxDurationMs,
-    safetyMarginMs,
-    callTimeoutMs,
-  });
-
-  const targeted = pendingPlates.length;
-  const eligible = pendingPlates.slice(0, cap);
-  const cappedPlates = pendingPlates.slice(cap);
-  for (const plate of cappedPlates) trackitStopsByPlate.set(plate, { skipped: "cap" });
-
   // Resolve vehicleId + contas utilizáveis primeiro, para uma matrícula sem
   // nenhuma das duas nunca ocupar um slot de prazo/timeout à toa.
   type PlanEntry = { plate: string; vehicleId: number; accounts: TrackitAccount[] };
   const plan: PlanEntry[] = [];
-  for (const plate of eligible) {
+  for (const plate of pendingPlates) {
     const vehicleId = vehicleIdByPlate.get(plate);
     if (vehicleId == null) {
       trackitStopsByPlate.set(plate, { skipped: "no-vehicle-id" });
@@ -190,8 +164,10 @@ export async function resolveTrackitFallback(
 
   const failedPlates = new Set<string>();
   const failedPlateReasons = new Map<string, string>();
+  const attemptedPlates = new Set<string>();
   const travelsByPlate = new Map<string, RawTravel[]>();
   const successByPlate = new Set<string>();
+  const callDurationsMs: number[] = [];
 
   // Sequencial DENTRO de cada conta (o pacer em http.ts já serializa pedidos
   // à mesma conta — paralelizar aí não ganha nada), paralelo ENTRE contas
@@ -205,27 +181,37 @@ export async function resolveTrackitFallback(
     }
   }
 
+  const cacheKeyOf = (accountId: string, entry: PlanEntry) =>
+    travelsCacheKey(accountId, entry.vehicleId, dateBegin, dateEnd);
+
   const deadlineMs = fnStart + (maxDurationMs - safetyMarginMs);
 
   await Promise.all(
     [...byAccount.entries()].map(async ([accountId, entries]) => {
       const account = configured.get(accountId)!;
-      for (const entry of entries) {
-        if (Date.now() >= deadlineMs) {
-          failedPlates.add(entry.plate);
-          failedPlateReasons.set(
-            entry.plate,
-            `prazo global excedido (restavam menos de ${Math.round(safetyMarginMs / 1000)}s da margem)`,
-          );
-          continue;
-        }
-        const key = travelsCacheKey(accountId, entry.vehicleId, dateBegin, dateEnd);
+      // Matrículas já em cache primeiro (custam 0s) — assim um re-upload
+      // avança para matrículas novas em vez de repetir sempre as do topo.
+      // Estável: dentro de cada grupo mantém a ordem da folha.
+      const cachedFirst = [...entries].sort(
+        (a, b) =>
+          Number(getCachedTravels(cacheKeyOf(accountId, b)) != null) -
+          Number(getCachedTravels(cacheKeyOf(accountId, a)) != null),
+      );
+      for (const entry of cachedFirst) {
+        const key = cacheKeyOf(accountId, entry);
         let travels = getCachedTravels(key);
         if (!travels) {
+          const remainingMs = deadlineMs - Date.now();
+          // Não começa a chamada; sem attemptedPlates, a matrícula fica
+          // "deadline" (a menos que outra conta a resolva).
+          if (remainingMs < minCallBudgetMs) continue;
+          attemptedPlates.add(entry.plate);
+          const callStart = Date.now();
           try {
+            // Nunca passa do prazo: a margem para pass 2 + ExcelJS fica intacta.
             travels = (await withTimeout(
-              getVehicleTravels(account, entry.vehicleId, dateBegin, dateEnd),
-              callTimeoutMs,
+              fetchTravels(account, entry.vehicleId, dateBegin, dateEnd),
+              Math.min(callTimeoutMs, remainingMs),
             )) as unknown as RawTravel[];
             setCachedTravels(key, travels);
           } catch (err) {
@@ -235,8 +221,11 @@ export async function resolveTrackitFallback(
               `conta=${accountId} vehicleId=${entry.vehicleId}: ${err instanceof Error ? err.message : String(err)}`,
             );
             continue;
+          } finally {
+            callDurationsMs.push(Date.now() - callStart);
           }
         }
+        attemptedPlates.add(entry.plate);
         successByPlate.add(entry.plate);
         const arr = travelsByPlate.get(entry.plate) ?? [];
         arr.push(...travels);
@@ -245,10 +234,15 @@ export async function resolveTrackitFallback(
     }),
   );
 
+  const deadlinePlates: string[] = [];
   for (const entry of plan) {
-    if (trackitStopsByPlate.has(entry.plate)) continue; // já tem skip-reason acima
     if (!successByPlate.has(entry.plate)) {
-      trackitStopsByPlate.set(entry.plate, { skipped: "call-failed" });
+      if (attemptedPlates.has(entry.plate)) {
+        trackitStopsByPlate.set(entry.plate, { skipped: "call-failed" });
+      } else {
+        trackitStopsByPlate.set(entry.plate, { skipped: "deadline" });
+        deadlinePlates.push(entry.plate);
+      }
       continue;
     }
     const travels = travelsByPlate.get(entry.plate) ?? [];
@@ -265,14 +259,14 @@ export async function resolveTrackitFallback(
   return {
     trackitStopsByPlate,
     diagnostics: {
-      targeted,
-      attempted: plan.length,
-      cap,
-      cappedPlates,
+      targeted: pendingPlates.length,
+      attempted: attemptedPlates.size,
+      deadlinePlates,
       failedPlates: trulyFailedPlates,
       failedPlateReasons: Object.fromEntries(
         trulyFailedPlates.map((p) => [p, failedPlateReasons.get(p) ?? "motivo desconhecido"]),
       ),
+      callDurationsMs,
     },
   };
 }
