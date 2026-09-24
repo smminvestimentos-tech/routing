@@ -146,11 +146,6 @@ export class TrackitError extends Error {
   }
 }
 
-// 30s, not 20s: a TRACKiT tenant with a large fleet (observed: ~180 vehicles)
-// can take 20-30s just to build the /vehiclesForUser payload, and a 20s cap was
-// tripping the timeout and burning all 3 retries (~60s) before eventually
-// succeeding. vehicleTravels is ~15s server-side, comfortably inside 30s too.
-const REQUEST_TIMEOUT_MS = 30_000;
 // 60s: vehicleTravels calls take 23-26s on average, with observed peaks up to
 // 55s, and large-fleet payloads (/vehiclesForUser) can take 20-30s. A 60s timeout
 // prevents premature aborts on slow responses before the fallback caller's timeout.

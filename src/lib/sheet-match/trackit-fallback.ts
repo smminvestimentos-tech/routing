@@ -39,14 +39,7 @@ export const TRACKIT_FALLBACK_CALL_TIMEOUT_MS = 55_000;
 
 // Mantido para compatibilidade de referência / imports legados:
 export const MAX_TRACKIT_FALLBACK_PLATES = 6;
-// Deixa ~50s dos 150s de maxDuration para o resto do pedido (construir o
-// workbook, etc.) — ver route.ts.
 export const TRACKIT_FALLBACK_BUDGET_MS = 100_000;
-// Envolve CADA chamada getVehicleTravels() (que já tem retry com backoff, até
-// 3 tentativas de 30s cada, dentro de src/lib/trackit/http.ts — pior caso bem
-// mais que 60s para UMA chamada) para que um único veículo lento nunca coma o
-// orçamento inteiro pensado para até MAX_TRACKIT_FALLBACK_PLATES veículos.
-export const TRACKIT_FALLBACK_CALL_TIMEOUT_MS = 25_000;
 
 /**
  * Calcula dinamicamente quantas matrículas cabem sequencialmente no tempo restante
@@ -168,8 +161,6 @@ export async function resolveTrackitFallback(
   });
 
   const targeted = pendingPlates.length;
-  const eligible = pendingPlates.slice(0, MAX_TRACKIT_FALLBACK_PLATES);
-  const cappedPlates = pendingPlates.slice(MAX_TRACKIT_FALLBACK_PLATES);
   const eligible = pendingPlates.slice(0, cap);
   const cappedPlates = pendingPlates.slice(cap);
   for (const plate of cappedPlates) trackitStopsByPlate.set(plate, { skipped: "cap" });
@@ -220,10 +211,8 @@ export async function resolveTrackitFallback(
     [...byAccount.entries()].map(async ([accountId, entries]) => {
       const account = configured.get(accountId)!;
       for (const entry of entries) {
-        if (Date.now() - fnStart > TRACKIT_FALLBACK_BUDGET_MS) {
         if (Date.now() >= deadlineMs) {
           failedPlates.add(entry.plate);
-          failedPlateReasons.set(entry.plate, `prazo global excedido (>${TRACKIT_FALLBACK_BUDGET_MS}ms desde o início do pedido)`);
           failedPlateReasons.set(
             entry.plate,
             `prazo global excedido (restavam menos de ${Math.round(safetyMarginMs / 1000)}s da margem)`,
@@ -236,7 +225,6 @@ export async function resolveTrackitFallback(
           try {
             travels = (await withTimeout(
               getVehicleTravels(account, entry.vehicleId, dateBegin, dateEnd),
-              TRACKIT_FALLBACK_CALL_TIMEOUT_MS,
               callTimeoutMs,
             )) as unknown as RawTravel[];
             setCachedTravels(key, travels);

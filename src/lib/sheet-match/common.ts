@@ -1521,13 +1521,11 @@ export function implausibleSpeedNote(params: {
   speedKmh: number;
   limitKmh?: number;
 }): string {
-  const { code, otherCode, distanceKm, minutes, speedKmh } = params;
   const { code, otherCode, distanceKm, minutes, speedKmh, limitKmh } = params;
   const limit = limitKmh ?? getMaxPlausibleSpeedKmh(distanceKm);
   return (
     `⚠️ Velocidade implausível: ${distanceKm.toFixed(1)}km entre ${code} e ` +
     `${otherCode} em ${Math.round(minutes)}min (${speedKmh.toFixed(1)}km/h) — ` +
-    `camião não pode exceder ${MAX_PLAUSIBLE_SPEED_KMH}km/h. Confirma os horários.`
     `camião não pode exceder ${limit}km/h. Confirma os horários.`
   );
 }
