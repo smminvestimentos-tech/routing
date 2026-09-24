@@ -76,6 +76,7 @@ import {
   SWAP_WINDOW_PAD_MIN,
   type SwapRival,
   VV_COL,
+  yardAcceptedCodes,
   type WStop,
 } from "@/lib/sheet-match/common";
 import {
@@ -871,6 +872,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else byPlate.set(g.plate, [g]);
   }
 
+  // Which (ROTA, code) claimed each stop in this Step 1/2 — the only claims
+  // the yard's passagem B below may share. Stops claimed later (swap, typo,
+  // TRACKiT) never appear here, so they are never shareable.
+  const yardClaims = new Map<WStop, { rota: string; code: string; shared: boolean }>();
+
   for (const [plate, plateGroups] of byPlate) {
     plateGroups.sort((a, b) => a.order - b.order);
     const plateStops = stops
@@ -907,6 +913,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         rowsInSheetOrder.forEach((w, i) => {
           const stop = candidates[i];
           stop.assigned = true;
+          yardClaims.set(stop, { rota: g.rota, code: g.code, shared: false });
           w.conf = "OK";
           w.assignedStop = stop;
           w.real = "";
@@ -919,8 +926,65 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         // stop, as before.
         const hit = candidates[0];
         hit.assigned = true;
+        yardClaims.set(hit, { rota: g.rota, code: g.code, shared: false });
         setGroup(g, "OK", hit, "");
       }
+    }
+
+    // ----- Passagem B: pátio 7001/7005 (ver YARD_ACCEPTS, common.ts) -----
+    // Only for groups the exact-code pass above left unmatched (so a 7001
+    // row always prefers a real east-dock 7001 stop), and only for codes
+    // with an accepted alternative — a 7005 row never gets here. Each row, in
+    // sheet order, takes the earliest in-window stop at an accepted code
+    // that is either still free, or was claimed above by a row of an
+    // accepted code on the SAME ROTA (this loop is already per plate) and
+    // hasn't been shared yet. A stop is shared at most once: one physical
+    // west-dock visit covers one 7005 + 7001 pair, never a second pair, and
+    // never a row from another route.
+    for (const g of plateGroups) {
+      if (g.conf !== "" || !g.code) continue;
+      const accepted = yardAcceptedCodes(g.code);
+      if (accepted.length === 0) continue;
+      const isAccepted = (code: string | null) =>
+        accepted.some((c) => codeEq(code, c, coLocatedGroups));
+
+      const picks: { w: Work; stop: WStop; shared: boolean }[] = [];
+      for (const w of [...g.rows].sort((a, b) => a.idx - b.idx)) {
+        const stop = plateStops.find((s) => {
+          if (!isAccepted(s.code)) return false;
+          if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs)) return false;
+          if (!s.assigned) return true;
+          const claim = yardClaims.get(s);
+          return claim != null && !claim.shared && claim.rota === g.rota && isAccepted(claim.code);
+        });
+        if (!stop) break;
+        const claim = yardClaims.get(stop);
+        const shared = stop.assigned;
+        stop.assigned = true;
+        if (claim) claim.shared = true;
+        else yardClaims.set(stop, { rota: g.rota, code: g.code, shared: true });
+        picks.push({ w, stop, shared });
+      }
+      if (picks.length === 0) continue; // untouched -> Step 3/4 as usual
+
+      for (const w of g.rows) {
+        const p = picks.find((x) => x.w === w);
+        if (p) {
+          w.conf = "OK";
+          w.assignedStop = p.stop;
+          w.real = p.shared
+            ? `Paragem partilhada com a linha ${p.stop.code} da mesma rota (doca oeste do pátio).`
+            : `Paragem na doca ${p.stop.code} (oeste) — aceite para ${g.code}, mesmo pátio.`;
+        } else {
+          // More rows than west-dock stops: this row would need a visit of
+          // its own, and none is left.
+          w.conf = REVIEW;
+          w.assignedStop = null;
+          w.real = describeReal(plate);
+        }
+      }
+      g.conf = "OK";
+      g.assignedStop = picks[0].stop;
     }
   }
 

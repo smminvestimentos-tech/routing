@@ -41,6 +41,7 @@ import {
   mergeFragmentedStops,
   minutesBetweenKeptCells,
   normalizeDateTimeCell,
+  normalizePlate,
   resolveMergedCode,
 } from "@/lib/sheet-match/common";
 
@@ -1745,6 +1746,144 @@ ok(
     ok("TFS speed [dispara]: row A (SYN-A) flags implausible speed in Real", hasSpeedNote(r.rows[0]["Real"]), r.rows[0]["Real"]);
     ok("TFS speed [dispara]: row B (SYN-B) flags implausible speed in Real", hasSpeedNote(r.rows[1]["Real"]), r.rows[1]["Real"]);
     ok("TFS speed [dispara]: Confiança untouched (still mantido)", r.rows[0]["Confiança"] === KEPT && r.rows[1]["Confiança"] === KEPT);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pátio 7001/7005 (Azambuja) — passagem B: uma linha 7001 aceita a doca oeste
+// (7005) quando não há paragem 7001; uma linha 7005 nunca aceita 7001; uma
+// paragem oeste partilha no máximo UMA vez, e só dentro da mesma ROTA.
+// Stops carry the codes they get AFTER migration 0042 (pins + backfill).
+// ---------------------------------------------------------------------------
+{
+  console.log("\n== pátio 7001/7005 ==");
+  const yHeader = ["ROTA", "N_LOJA", "NOME", "MATRICULA", "Hora Chegada", "Hora Saida", "CICLO", "TIPO"];
+  const yCols = resolveAzColumns(yHeader);
+  const yRow = (rota: string, code: string, plate: string, ciclo: string): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code, MATRICULA: plate,
+    "Hora Chegada": "", "Hora Saida": "", CICLO: ciclo, TIPO: "C",
+  });
+  let sid = 0;
+  const yStop = (plate: string, code: string | null, arr: string, dep: string): DayStop => ({
+    id: `y${sid++}`, vehicleId: 7000, plate: normalizePlate(plate), code, arrivedAt: arr, departedAt: dep,
+  });
+  const runY = (yDay: string, records: SheetRecord[], stops: DayStop[]) =>
+    runAzMatch({
+      day: yDay, records, header: yHeader, cols: yCols, stops,
+      platesWithGps: new Set(stops.map((s) => s.plate!)), pingWindowByPlate: new Map(),
+    });
+  // "DD-MM-YYYY HH:MM:SS" -> "HH:MM-HH:MM"
+  const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${String(r["Hora Saida"]).slice(11, 16)}`;
+  const isOk = (r: SheetRecord) => r["Confiança"] === "OK";
+  const shared = (r: SheetRecord) => /partilhada/.test(String(r["Real"]));
+  const conflict = (r: SheetRecord) => /Conflito/.test(String(r["Real"]));
+  const L = (d: string, hhmm: string) => `${d}T${hhmm}:00+01:00`; // Lisbon (WEST) in September
+
+  // Test 1 — rotas diferentes nunca partilham (proteção do bug 201/Vialonga).
+  {
+    const d = "2026-09-09";
+    const r = runY(d, [yRow("R1", "7005", "YA-01-AA", "08:00 | 20:00"), yRow("R2", "7001", "YA-01-AA", "08:00 | 20:00")],
+      [yStop("YA-01-AA", "7005", L(d, "09:00"), L(d, "09:30"))]);
+    ok("pátio T1: 7005 da rota R1 fica com a paragem oeste", isOk(r.rows[0]) && t(r.rows[0]) === "09:00-09:30", r.rows[0]);
+    ok("pátio T1: 7001 da rota R2 NÃO partilha (rota diferente)", !isOk(r.rows[1]) && r.rows[1]["Hora Chegada"] === "", r.rows[1]);
+  }
+
+  // Test 2 — uma rota, duas visitas ao pátio.
+  {
+    const d = "2026-09-09";
+    const rows = [
+      yRow("R1", "7005", "YB-02-BB", "Noturno"), yRow("R1", "7001", "YB-02-BB", "Noturno"),
+      yRow("R1", "701", "YB-02-BB", "Noturno"),
+      yRow("R1", "7005", "YB-02-BB", "Noturno"), yRow("R1", "7001", "YB-02-BB", "Noturno"),
+    ];
+    const store = () => yStop("YB-02-BB", "701", L(d, "10:00"), L(d, "10:40"));
+    // 2a: só UMA paragem oeste -> só o primeiro par partilha
+    const one = runY(d, rows, [yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store()]);
+    ok("pátio T2a: 1.ª 7001 partilha a única paragem oeste", isOk(one.rows[1]) && shared(one.rows[1]) && t(one.rows[1]) === "06:00-06:45", one.rows[1]);
+    ok("pátio T2a: 2.ª 7001 fica Rever (sem paragem própria)", one.rows[4]["Confiança"] === REVIEW && one.rows[4]["Hora Chegada"] === "", one.rows[4]);
+    // 2b: duas paragens oeste -> cada par tem a sua
+    const two = runY(d, rows, [
+      yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store(),
+      yStop("YB-02-BB", "7005", L(d, "14:00"), L(d, "14:30")),
+    ]);
+    ok("pátio T2b: 1.ª 7005 e 1.ª 7001 na 1.ª visita", t(two.rows[0]) === "06:00-06:45" && t(two.rows[1]) === "06:00-06:45", [two.rows[0], two.rows[1]]);
+    ok("pátio T2b: 2.ª 7005 e 2.ª 7001 na 2.ª visita", t(two.rows[3]) === "14:00-14:30" && t(two.rows[4]) === "14:00-14:30", [two.rows[3], two.rows[4]]);
+  }
+
+  // Test 3 — uma linha 7005 nunca aceita a doca leste, em qualquer ordem da folha.
+  {
+    const d = "2026-09-09";
+    const east = () => [yStop("YC-03-CC", "7001", L(d, "09:00"), L(d, "09:30"))];
+    for (const order of [["7005", "7001"], ["7001", "7005"]]) {
+      const r = runY(d, order.map((c) => yRow("R1", c, "YC-03-CC", "08:00 | 20:00")), east());
+      const row7005 = r.rows[order.indexOf("7005")];
+      const row7001 = r.rows[order.indexOf("7001")];
+      ok(`pátio T3 [${order}]: 7005 fica Rever com só paragem leste`, row7005["Confiança"] === REVIEW && row7005["Hora Chegada"] === "", row7005);
+      ok(`pátio T3 [${order}]: 7001 usa a paragem leste`, isOk(row7001) && t(row7001) === "09:00-09:30", row7001);
+    }
+    const alone = runY(d, [yRow("R1", "7005", "YC-03-CC", "08:00 | 20:00")], east());
+    ok("pátio T3: 7005 sozinha com só paragem leste -> Rever", alone.rows[0]["Confiança"] === REVIEW, alone.rows[0]);
+  }
+
+  // Test 4 — caso real AA-32-CP, 09/09, ROTA 185794681 (resolve pela passagem A).
+  {
+    const d = "2026-09-09";
+    const P = "AA-32-CP";
+    const rows = ["7005", "7001", "7003", "31", "7001"].map((c) => yRow("185794681", c, P, "00:30 | 12:30"));
+    const stops = [
+      yStop(P, null, "2026-09-08T23:03:26.785Z", "2026-09-08T23:27:56.832Z"), // fora dos dois círculos (dW=103m)
+      yStop(P, "7005", "2026-09-08T23:31:28.921Z", "2026-09-08T23:53:14.878Z"), // dW=17m
+      yStop(P, "7001", "2026-09-08T23:59:14.890Z", "2026-09-09T00:15:00.132Z"), // dE=40m
+      yStop(P, "7001", "2026-09-09T00:18:00.136Z", "2026-09-09T00:18:00.136Z"), // dE=36m (fragmento)
+      yStop(P, "7003", "2026-09-09T00:27:30.152Z", "2026-09-09T01:24:49.246Z"),
+      yStop(P, "31", "2026-09-09T05:19:56.800Z", "2026-09-09T06:41:36.882Z"),
+    ];
+    const r = runY(d, rows, stops);
+    ok("pátio T4 AA-32-CP: 7005 = 00:31-00:53", isOk(r.rows[0]) && t(r.rows[0]) === "00:31-00:53", r.rows[0]);
+    ok("pátio T4 AA-32-CP: 7001 = 00:59-01:18 (fragmentos reunidos)", isOk(r.rows[1]) && t(r.rows[1]) === "00:59-01:18", r.rows[1]);
+    ok("pátio T4 AA-32-CP: sem partilha (resolve pela passagem A)", !r.rows.some(shared), r.rows.map((x) => x["Real"]));
+    ok("pátio T4 AA-32-CP: fragmento 00:03-00:27 não é usado", !r.rows.some((x) => String(x["Hora Chegada"]).includes(" 00:03")), r.rows.map(t));
+    ok("pátio T4 AA-32-CP: 7003 e 31 inalterados", t(r.rows[2]) === "01:27-02:24" && t(r.rows[3]) === "06:19-07:41", [t(r.rows[2]), t(r.rows[3])]);
+  }
+
+  // Test 5 — caso real da passagem B: BB-68-EV, 22/09, ROTA 185891560.
+  // Única paragem no pátio 03:19-04:19 (13m da doca oeste, 163m da leste).
+  {
+    const d = "2026-09-22";
+    const P = "BB-68-EV";
+    const rows = ["7005", "7001", "7003", "710", "7001"].map((c) => yRow("185891560", c, P, "Noturno"));
+    const stops = [
+      yStop(P, "7005", L(d, "03:19"), L(d, "04:19")),
+      yStop(P, null, L(d, "04:24"), L(d, "04:49")), // 122m/130m — fora dos dois círculos
+      yStop(P, "7003", L(d, "05:00"), L(d, "05:44")),
+      yStop(P, null, L(d, "06:00"), L(d, "06:09")),
+      yStop(P, "710", L(d, "09:09"), L(d, "10:00")),
+      yStop(P, null, L(d, "11:19"), L(d, "11:29")),
+    ];
+    const r = runY(d, rows, stops);
+    ok("pátio T5 BB-68-EV: 7005 = 03:19-04:19 (passagem A)", isOk(r.rows[0]) && t(r.rows[0]) === "03:19-04:19" && !shared(r.rows[0]), r.rows[0]);
+    ok("pátio T5 BB-68-EV: 1.ª 7001 partilha 03:19-04:19 (passagem B)", isOk(r.rows[1]) && t(r.rows[1]) === "03:19-04:19" && shared(r.rows[1]), r.rows[1]);
+    ok("pátio T5 BB-68-EV: 7001 de regresso fica Rever", r.rows[4]["Confiança"] === REVIEW && r.rows[4]["Hora Chegada"] === "", r.rows[4]);
+    ok("pátio T5 BB-68-EV: 7003 e 710 inalterados", t(r.rows[2]) === "05:00-05:44" && t(r.rows[3]) === "09:09-10:00", [t(r.rows[2]), t(r.rows[3])]);
+    ok("pátio T5 BB-68-EV: par partilhado não é marcado como conflito", !conflict(r.rows[0]) && !conflict(r.rows[1]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
+  }
+
+  // Test 6 — controlo: com paragem leste disponível, a 7001 usa-a (sem partilha).
+  {
+    const d = "2026-09-09";
+    const r = runY(d, [yRow("R1", "7005", "YD-04-DD", "08:00 | 20:00"), yRow("R1", "7001", "YD-04-DD", "08:00 | 20:00")], [
+      yStop("YD-04-DD", "7005", L(d, "09:00"), L(d, "09:30")),
+      yStop("YD-04-DD", "7001", L(d, "09:40"), L(d, "10:10")),
+    ]);
+    ok("pátio T6: 7005 = doca oeste", t(r.rows[0]) === "09:00-09:30", r.rows[0]);
+    ok("pátio T6: 7001 = doca leste, sem partilha", t(r.rows[1]) === "09:40-10:10" && !shared(r.rows[1]), r.rows[1]);
+  }
+
+  // Test 7 — 7001 sem linha 7005 na rota aceita uma paragem oeste livre.
+  {
+    const d = "2026-09-09";
+    const r = runY(d, [yRow("R1", "7001", "YE-05-EE", "08:00 | 20:00")], [yStop("YE-05-EE", "7005", L(d, "09:00"), L(d, "09:30"))]);
+    ok("pátio T7: 7001 aceita paragem oeste livre", isOk(r.rows[0]) && t(r.rows[0]) === "09:00-09:30" && !shared(r.rows[0]), r.rows[0]);
   }
 }
 

@@ -402,6 +402,31 @@ export function codeEq(
   return codeBaseEq(x, y);
 }
 
+// Pátio de Vila Nova da Rainha (Azambuja): 7001 (Armazém-Azambuja, doca
+// leste) e 7005 (Aucham Congelados, doca oeste) são dois locais distintos a
+// ~158 m (migração 0042), mas um camião que carrega nos dois pode fazê-lo
+// numa única paragem na doca oeste. A equivalência é ASSIMÉTRICA — uma linha
+// 7001 aceita uma paragem 7005, uma linha 7005 NUNCA aceita uma paragem 7001
+// — por isso não pode viver em locations.colocated_with_id (simétrico).
+// Usado só pela passagem B do matcher da Azambuja (azambuja-sheet/match.ts).
+export const YARD_ACCEPTS: ReadonlyArray<{ code: string; accepts: readonly string[] }> = [
+  { code: "7001", accepts: ["7005"] },
+];
+
+/** Códigos de paragem que uma linha `code` aceita ALÉM do seu próprio (passagem B). */
+export function yardAcceptedCodes(code: string | null | undefined): readonly string[] {
+  if (!code) return [];
+  return YARD_ACCEPTS.find((y) => codeBaseEq(y.code, code))?.accepts ?? [];
+}
+
+/** a/b formam um par do pátio (7001 + 7005), em qualquer ordem. */
+export function isYardPair(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (
+    yardAcceptedCodes(a).some((c) => codeBaseEq(c, b)) ||
+    yardAcceptedCodes(b).some((c) => codeBaseEq(c, a))
+  );
+}
+
 export function codeKey(code: string, groups: CoLocatedGroups): string {
   const norm = normalizeStoreCode(code);
   const canonical = canonicalSiteCode(norm, groups);
@@ -1426,6 +1451,10 @@ export function detectScheduleConflicts(params: {
         const b = group[j];
         // 1. Must be different store codes and NOT co-located/merged.
         if (codeEq(a.code, b.code, coLocatedGroups)) continue;
+        // A 7001 + 7005 pair holding the EXACT same window is one physical
+        // yard visit shared on purpose (passagem B, see YARD_ACCEPTS) — not a
+        // conflict. Any other overlap between the two is still flagged.
+        if (isYardPair(a.code, b.code) && a.startMs === b.startMs && a.effEndMs === b.effEndMs) continue;
 
         // 2. Physical overlap: startA < effEndB && startB < effEndA
         if (a.startMs < b.effEndMs && b.startMs < a.effEndMs) {
@@ -1615,7 +1644,7 @@ export function detectImplausibleSpeed(params: {
         (v) =>
           v.startMs === it.startMs &&
           v.endMs === it.endMs &&
-          codeEq(v.code, it.code, coLocatedGroups),
+          (codeEq(v.code, it.code, coLocatedGroups) || isYardPair(v.code, it.code)),
       );
       if (existing) existing.rows.push(it);
       else visits.push({ code: it.code, startMs: it.startMs, endMs: it.endMs, rows: [it] });
