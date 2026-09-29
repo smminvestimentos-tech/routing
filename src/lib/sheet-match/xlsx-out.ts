@@ -157,6 +157,8 @@ const FILL_HEADER = "FFFFC000";
 // visible cell (header + data), never to the hidden ZZ/YY/XX technical
 // columns, same exception already used for color/border/alignment below.
 const FONT_NAME = "Aptos Narrow";
+// Number format for the Chegada/Saída cells — see the style loop below.
+export const TIME_CELL_NUMFMT = "dd\\-mm\\-yyyy hh:mm:ss";
 
 const SUGGESTION_CONFS: ReadonlySet<string> = new Set([
   SWAP,
@@ -258,6 +260,18 @@ export async function buildSheetWorkbook(
   const visibleCols = outHeader
     .map((h, i) => (TECH_COL_SET.has(h) ? -1 : i + 1))
     .filter((c) => c > 0);
+  // Chegada/Saída data cells get an explicit, literal number format. Our own
+  // values are text, so it never shows on them — it's for the moment a user
+  // types a time by hand and Excel converts it to a real date serial: in a
+  // "General" cell Excel then picks its built-in regional date format (pt-PT:
+  // "dd/mm/yyyy hh:mm" — slashes, and the GPS seconds gone). Escaped "\-" so
+  // Excel never treats the dash as a swappable locale date separator.
+  const timeCols = new Set(
+    [chegadaColName, saidaColName]
+      .filter((n) => !!n)
+      .map((n) => outHeader.indexOf(n) + 1)
+      .filter((c) => c > 0),
+  );
   for (let r = 1; r <= lastRow; r++) {
     const row = ws.getRow(r);
     for (const c of visibleCols) {
@@ -271,6 +285,7 @@ export async function buildSheetWorkbook(
       cell.alignment = { horizontal: "center" };
       cell.font =
         r === 1 ? { name: FONT_NAME, bold: true } : { name: FONT_NAME };
+      if (r > 1 && timeCols.has(c)) cell.numFmt = TIME_CELL_NUMFMT;
     }
   }
 
@@ -303,6 +318,10 @@ export async function buildSheetWorkbook(
       ws.getColumn(i + 1).width = 14;
     }
   }
+  // Chegada/Saída wide enough for a hand-typed "dd-mm-yyyy hh:mm:ss" date:
+  // unlike our text values, a number doesn't spill into the next cell, so at
+  // the default width Excel showed the corrected cell as "########".
+  for (const c of timeCols) ws.getColumn(c).width = 20;
   // Roomier Confiança / Real columns.
   for (const n of [CONFIANCA_COL, REAL_COL]) {
     const i = outHeader.indexOf(n);
@@ -331,6 +350,12 @@ export async function buildSheetWorkbook(
   // TIMEVALUE on a number errors, so without this WW went "" and 🟣 switched
   // off at exactly the moment a manual correction most needs re-checking
   // (same "always react to edits" stance as the other rules in this file).
+  //
+  // KNOWN LIMITATION (accepted 2026-09-29): DATEVALUE on the TEXT cells reads
+  // "dd-mm-yyyy" in the viewer's regional date order. Correct in pt-PT (DMY);
+  // under an MDY locale "10-09-2026" becomes 9 Oct and a midnight-crossing
+  // row's WW blows up (verified in Excel: 30.5 -> 41790.5). If the file is ever
+  // opened outside pt-PT, replace DATEVALUE with DATE(MID(…),MID(…),LEFT(…)).
   if (chegadaL && saidaL) {
     const serial = (colL: string, row: number) => {
       const cell = `$${colL}${row}`;

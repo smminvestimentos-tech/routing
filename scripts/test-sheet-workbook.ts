@@ -20,6 +20,7 @@ import { join } from "node:path";
 import {
   buildSheetWorkbook,
   FILL_ORANGE,
+  TIME_CELL_NUMFMT,
   ZZ_COL,
   YY_COL,
   XX_COL,
@@ -154,6 +155,24 @@ async function main() {
   ok("YY/XX snapshot the OK row's times", cellAt(2, YY_COL) === "08:00" && cellAt(2, XX_COL) === "08:20");
   ok("YY/XX blank on the no-data REVIEW + GPS rows", [4, 8, 9].every((r) => cellAt(r, YY_COL) === "" && cellAt(r, XX_COL) === ""));
   ok("OK / KEPT rows keep their times & Confiança verbatim", cellAt(2, "Hora de Chegada") === "08:00" && cellAt(3, CONFIANCA_COL) === KEPT);
+  // Read the format code back with SheetJS: exceljs's reader strips the "\"
+  // escapes, SheetJS returns the raw formatCode exactly as Excel will see it.
+  {
+    const sj = XLSX.read(buf, { cellNF: true });
+    const s = sj.Sheets[sj.SheetNames[0]];
+    ok(
+      "Chegada/Saída data cells carry the literal dd\\-mm\\-yyyy hh:mm:ss format (raw, escapes kept)",
+      TIME_CELL_NUMFMT === "dd\\-mm\\-yyyy hh:mm:ss" &&
+        [2, 4, LAST].every((r) => ["E", "F"].every((c) => s[`${c}${r}`]?.z === TIME_CELL_NUMFMT)),
+      [s.E2?.z, s.F2?.z],
+    );
+    ok(
+      "…but not the header, nor other columns (e.g. Matrícula)",
+      s.E1?.z === "General" && s.C2?.z === "General",
+      [s.E1?.z, s.C2?.z],
+    );
+  }
+  ok("Chegada values stay text (numFmt doesn't coerce them)", typeof ws.getCell(2, colIdx("Hora de Chegada")).value === "string");
   ok(
     "VV holds the PLANNED plate even on a swap row where Matrícula was overwritten (a)",
     cellAt(17, VV_COL) === "44DD44" && cellAt(17, "Matrícula da Viatura") === "44DD45",
