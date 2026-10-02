@@ -25,7 +25,7 @@ const ODOMETER_REGRESSION_FLOOR = 0.95;
 // rows are pure cost. Any ping older than this is well past every vehicle's
 // resume point (which tracks the last stop — days old at most), so it can be
 // pruned on each ingest to keep the table bounded.
-const PING_RETENTION_DAYS = 30;
+const PING_RETENTION_DAYS = 14;
 
 type AccountResult = {
   trackitAccount: string;
