@@ -125,5 +125,49 @@ const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${Stri
   ok("sem plano: a mesma paragem é aceite (comportamento antigo)", r2.rows[0]["Confiança"] === "OK", r2.rows[0]);
 }
 
+// 5. CICLO de mesmo dia, mas o plano prevê a carga na véspera (07-11:
+//    186307152 "01:00 | 13:00", 7005 prevista 06-11 22:47) -> manda o plano.
+{
+  const recs: SheetRecord[] = [
+    { ...row("R5", "7005"), CICLO: "01:00 | 13:00" },
+    { ...row("R5", "63", "D"), CICLO: "01:00 | 13:00" },
+  ];
+  const stops: DayStop[] = [
+    { id: "c1", vehicleId: 1, plate: "AD49DH", code: "7005", arrivedAt: "2026-11-06T22:40:00Z", departedAt: "2026-11-06T23:15:00Z" },
+    st("63", "04:40", "06:05"),
+  ];
+  const plan = [
+    { ...pl("R5", 1, "7005", "00:00", 7), arrMs: Date.parse("2026-11-06T22:47:00Z") },
+    pl("R5", 2, "63", "05:30", 33, "D"),
+  ];
+  const r = run(recs, stops, plan);
+  ok("plano manda na janela: 7005 de 06-11 22:40 aceite", r.rows[0]["Confiança"] === "OK" && String(r.rows[0]["Hora Chegada"]).startsWith("06-11-2026 22:40"), r.rows[0]);
+  const r2 = run(recs, stops);
+  ok("sem plano: a mesma paragem fica fora da janela do CICLO", r2.rows[0]["Confiança"] !== "OK", r2.rows[0]);
+}
+
+// 6. Carga com toque na portaria + paragem SEM código logo antes, junto ao 7001.
+{
+  const coords = new Map([
+    ["7001", { lat: 39.043191, lng: -8.920665 }],
+    ["7005", { lat: 39.042557, lng: -8.920994 }],
+  ]);
+  const runC = (records: SheetRecord[], stops: DayStop[], plan: PlanLine[]) =>
+    runMatch({ day: "2026-11-07", records, header, cols, stops, platesWithGps: new Set(["AD49DH"]), pingWindowByPlate: new Map(), plan, codeCoords: coords });
+  const recs = [row("R6", "7001"), row("R6", "18", "D")];
+  const plan = [pl("R6", 1, "7001", "00:40", 33), pl("R6", 2, "18", "02:00", 33, "D")];
+  const near7001 = { lat: 39.0436, lng: -8.9203 }; // ~55 m do 7001, mais longe do 7005
+  const near7005 = { lat: 39.0424, lng: -8.9212 }; // junto ao 7005
+  const mk = (xy: { lat: number; lng: number }): DayStop[] => [
+    { id: "u1", vehicleId: 1, plate: "AD49DH", code: null, arrivedAt: Z("00:37"), departedAt: Z("00:51"), ...xy },
+    st("7001", "00:55", "00:55"),
+    st("18", "02:00", "02:30"),
+  ];
+  const r = runC(recs, mk(near7001), plan);
+  ok("toque + paragem sem código junto ao 7001 -> OK 00:37-00:55", r.rows[0]["Confiança"] === "OK" && t(r.rows[0]) === "00:37-00:55", [t(r.rows[0]), r.rows[0]["Real"]]);
+  const r2 = runC(recs, mk(near7005), plan);
+  ok("paragem sem código mais perto do 7005 NÃO conta para o 7001 -> Rever", r2.rows[0]["Confiança"] === REVIEW, r2.rows[0]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -48,6 +48,7 @@ import {
   fmtDateTimeLisbon,
   fmtDuration,
   fmtHM,
+  haversineKm,
   type ImplausibleKeptReason,
   implausibleKeptNote,
   KEPT,
@@ -655,6 +656,13 @@ type StoreGroup = {
   conf: Work["conf"];
 };
 
+const PLAN_WINDOW_MS = 4 * 3_600_000;
+// A stop with no location code counts as part of a gate touch's visit only if
+// it is this close to the row's own pin AND nearer to it than to any other
+// location (7001/7005/7003 are independent — never borrow a neighbour's dock).
+const UNCODED_NEAR_KM = 0.35;
+const UNCODED_CHAIN_GAP_MIN = 10;
+
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, rawRecords, header, cols, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
@@ -865,6 +873,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     g.winLoMs = loMs;
     g.winHiMs = hiMs;
     g.winDepHiMs = depHiMs;
+    // With a planned time, the plan decides the window (± 4h), not the CICLO:
+    // 07-11 "01:00 | 13:00" routes were planned to load at 22:47 the evening
+    // before — outside the CICLO's same-day window, so every row went "Rever".
+    if (g.planArrMs != null) {
+      g.winLoMs = g.planArrMs - PLAN_WINDOW_MS;
+      g.winHiMs = g.planArrMs + PLAN_WINDOW_MS;
+      g.winDepHiMs = g.winHiMs + PLAN_WINDOW_MS;
+    }
   }
 
   // ----- group store-groups by ROTA, and let a plate-less group inherit its
@@ -1112,8 +1128,57 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         if (pickK[i] < 0) continue; // -> Step 3/4
         const k0 = pickK[i];
         const stop = plateStops[k0];
-        // A planned load with only a gate touch: don't write a 0-min "carga".
+        // A planned load with only a gate touch: the dwell is often a stop with
+        // NO location code right next to it (docked just outside the pin). Join
+        // it when it's close to this row's own location and nearer to it than
+        // to any other one; otherwise don't write a 0-min "carga".
         if (g.carga > 0 && dwellMin(stop) < MIN_LOAD_DWELL_MIN) {
+          const own = codeCoords.get(g.code);
+          const nearestCode = (s: WStop): { code: string; km: number } | null => {
+            if (s.lat == null || s.lng == null) return null;
+            let best: { code: string; km: number } | null = null;
+            for (const [c, xy] of codeCoords) {
+              const km = haversineKm(s.lat, s.lng, xy.lat, xy.lng);
+              if (!best || km < best.km) best = { code: c, km };
+            }
+            return best;
+          };
+          const joinable = (s: WStop | undefined, other: WStop): s is WStop => {
+            if (!s || s.assigned || s.code || !own) return false;
+            const gap =
+              Date.parse(s.arrivedAt) >= Date.parse(other.arrivedAt)
+                ? (Date.parse(s.arrivedAt) - Date.parse(other.departedAt ?? other.arrivedAt)) / 60000
+                : (Date.parse(other.arrivedAt) - Date.parse(s.departedAt ?? s.arrivedAt)) / 60000;
+            if (gap > UNCODED_CHAIN_GAP_MIN) return false;
+            const n = nearestCode(s);
+            return n != null && n.km <= UNCODED_NEAR_KM && codeEq(n.code, g.code, coLocatedGroups);
+          };
+          const parts = [stop];
+          const before = plateStops[k0 - 1];
+          const after = plateStops[k0 + 1];
+          if (joinable(before, stop)) parts.unshift(before);
+          if (joinable(after, stop)) parts.push(after);
+          const arr = Math.min(...parts.map((s) => Date.parse(s.arrivedAt)));
+          const dep = Math.max(...parts.map((s) => Date.parse(s.departedAt ?? s.arrivedAt)));
+          if (parts.length > 1 && (dep - arr) / 60000 >= MIN_LOAD_DWELL_MIN) {
+            for (const s of parts) s.assigned = true;
+            const visit: WStop = {
+              ...stop,
+              arrivedAt: new Date(arr).toISOString(),
+              departedAt: new Date(dep).toISOString(),
+              assigned: true,
+            };
+            for (const w of g.rows) {
+              w.conf = "OK";
+              w.assignedStop = visit;
+              w.real =
+                `Carga: toque no ${stop.code ?? g.code} às ${fmtHM(stop.arrivedAt)} + paragem sem ` +
+                `local junto ao ${g.code} (permanência total ${Math.round((dep - arr) / 60000)} min).`;
+            }
+            g.conf = "OK";
+            g.assignedStop = visit;
+            continue;
+          }
           setGroup(
             g,
             REVIEW,

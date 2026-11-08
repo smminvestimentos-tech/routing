@@ -56,6 +56,10 @@ export type DayStop = {
   code: string | null;
   arrivedAt: string; // ISO
   departedAt: string | null; // ISO
+  /** stops.centroid_lat/lng — optional; only used to place a stop with no
+   *  location code (e.g. a truck docked just outside the 7001 pin) */
+  lat?: number | null;
+  lng?: number | null;
 };
 
 /** A DayStop plus the matcher's "already handed to a row" flag. */

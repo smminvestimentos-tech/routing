@@ -49,6 +49,8 @@ type StopEmbedRow = {
   vehicle_id: number;
   arrived_at: string;
   departed_at: string | null;
+  centroid_lat: number | null;
+  centroid_lng: number | null;
   location: { code: string | null } | { code: string | null }[] | null;
 };
 
@@ -211,10 +213,24 @@ export async function POST(request: NextRequest) {
   // query window is the strict day skirted by 4h each side AND stretched to
   // reach the real shift day of any "…-1 | …" / "… | …+1" CICLO in the file
   // (a fixed skirt clips an early start like "18:00-1 …").
-  const { loMs, hiMs } = stopQueryWindowMs(
+  const ciclosWin = stopQueryWindowMs(
     day,
     cols.cicloCol ? records.map((r) => r[cols.cicloCol!]) : [],
   );
+  let { loMs, hiMs } = ciclosWin;
+  // With a Plano de Cargas, also reach every planned time ± 4h (the matcher's
+  // plan window) — same single query, just a slightly wider range.
+  if (plan) {
+    const PLAN_PAD_MS = 4 * 3_600_000;
+    for (const pl of plan) {
+      if (pl.arrMs == null) continue;
+      loMs = Math.min(loMs, pl.arrMs - PLAN_PAD_MS);
+      hiMs = Math.max(hiMs, pl.arrMs + PLAN_PAD_MS);
+    }
+    // never more than one extra day either side, whatever the plan says
+    loMs = Math.max(loMs, ciclosWin.loMs - 24 * 3_600_000);
+    hiMs = Math.min(hiMs, ciclosWin.hiMs + 24 * 3_600_000);
+  }
   const dayStart = new Date(loMs).toISOString();
   const dayEnd = new Date(hiMs).toISOString();
 
@@ -226,7 +242,7 @@ export async function POST(request: NextRequest) {
     fetchAllRows<StopEmbedRow>((from, to) =>
       supabase
         .from("stops")
-        .select("id, vehicle_id, arrived_at, departed_at, location:locations(code)", {
+        .select("id, vehicle_id, arrived_at, departed_at, centroid_lat, centroid_lng, location:locations(code)", {
           count: "exact",
         })
         .gte("arrived_at", dayStart)
@@ -369,6 +385,8 @@ export async function POST(request: NextRequest) {
       code: embeddedCode(s.location),
       arrivedAt: s.arrived_at,
       departedAt: s.departed_at,
+      lat: s.centroid_lat,
+      lng: s.centroid_lng,
     })),
   );
 
