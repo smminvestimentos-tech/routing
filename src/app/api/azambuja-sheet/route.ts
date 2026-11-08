@@ -16,6 +16,7 @@ import {
   type SheetRecord,
 } from "@/lib/azambuja-sheet/match";
 import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
+import { parsePlanoCargas, type PlanLine } from "@/lib/azambuja-sheet/plano";
 import {
   formatTrackitDate,
   resolveTrackitFallback,
@@ -121,6 +122,27 @@ export async function POST(request: NextRequest) {
     defval: "",
     blankrows: false,
   });
+
+  // Plano de Cargas (opcional): lido em memória, não é guardado nem consulta a
+  // base. Dá a hora prevista e a carga de cada linha ao matcher (plano.ts).
+  let plan: PlanLine[] | undefined;
+  const planoFile = form.get("plano");
+  if (planoFile instanceof File && planoFile.size > 0) {
+    let pwb: XLSX.WorkBook;
+    try {
+      pwb = XLSX.read(Buffer.from(await planoFile.arrayBuffer()), { type: "buffer" });
+    } catch {
+      return NextResponse.json(
+        { error: "Não consegui abrir o plano de cargas como .xlsx." },
+        { status: 400 },
+      );
+    }
+    const parsed = parsePlanoCargas(pwb);
+    if ("error" in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 422 });
+    }
+    plan = parsed.lines;
+  }
 
   const cols = resolveColumns(header);
   if (cols.errors.length > 0) {
@@ -423,6 +445,7 @@ export async function POST(request: NextRequest) {
     coLocatedGroups,
     codeTypes,
     codeCoords,
+    plan,
   };
   const tPass1 = Date.now();
   let matched = runMatch(matchArgs);

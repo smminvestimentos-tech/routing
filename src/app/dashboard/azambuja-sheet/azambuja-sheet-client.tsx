@@ -6,6 +6,7 @@ import { Notice, chipClass } from "../_shared";
 import { EXPECTED_COLUMNS } from "@/lib/azambuja-sheet/match";
 
 type Summary = {
+  planRows?: number;
   total: number;
   ok: number;
   review: number;
@@ -46,6 +47,8 @@ function download(base64: string, filename: string) {
 export function AzambujaSheetClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const planoRef = useRef<HTMLInputElement>(null);
+  const [plano, setPlano] = useState<File | null>(null);
   const [day, setDay] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +62,7 @@ export function AzambujaSheetClient() {
     try {
       const body = new FormData();
       body.append("file", file);
+      if (plano) body.append("plano", plano);
       if (day) body.append("day", day);
       const res = await fetch("/api/azambuja-sheet", { method: "POST", body });
       const json = await res.json().catch(() => ({}));
@@ -77,6 +81,8 @@ export function AzambujaSheetClient() {
 
   function reset() {
     setFile(null);
+    setPlano(null);
+    if (planoRef.current) planoRef.current.value = "";
     setDay("");
     setError(null);
     setResult(null);
@@ -116,6 +122,27 @@ export function AzambujaSheetClient() {
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
+              setError(null);
+              setResult(null);
+            }}
+            className="text-sm file:mr-3 file:rounded-md file:border file:border-black/15 file:bg-white/75 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-white dark:file:border-white/20 dark:file:bg-neutral-900/75 dark:hover:file:bg-neutral-900"
+          />
+        </label>
+
+        <label className="mt-4 flex flex-col gap-2 text-sm">
+          <span className="font-medium">
+            Plano de Cargas .xlsx{" "}
+            <span className="font-normal text-black/50 dark:text-white/50">
+              (opcional — mesmo dia; usa a hora prevista e a carga de cada
+              linha para escolher a paragem certa)
+            </span>
+          </span>
+          <input
+            ref={planoRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => {
+              setPlano(e.target.files?.[0] ?? null);
               setError(null);
               setResult(null);
             }}
@@ -171,6 +198,7 @@ export function AzambujaSheetClient() {
             <p className="font-medium">
               Dia {result.day} · {result.summary.total} linhas ·{" "}
               {result.summary.routesOk}/{result.summary.routes} rotas OK
+              {result.summary.planRows ? ` · ${result.summary.planRows} ligadas ao plano` : ""}
             </p>
             <ul className="mt-2 space-y-1 text-black/70 dark:text-white/70">
               <li>

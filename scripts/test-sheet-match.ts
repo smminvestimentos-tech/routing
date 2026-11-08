@@ -1799,15 +1799,16 @@ ok(
     const store = () => yStop("YB-02-BB", "701", L(d, "10:00"), L(d, "10:40"));
     // 2a: só UMA paragem oeste -> só o primeiro par partilha
     const one = runY(d, rows, [yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store()]);
-    ok("pátio T2a: 1.ª 7001 partilha a única paragem oeste", isOk(one.rows[1]) && shared(one.rows[1]) && t(one.rows[1]) === "06:00-06:45", one.rows[1]);
+    // 2026-11-08: 7001 e 7005 independentes — a 7001 já não usa a paragem 7005
+    ok("pátio T2a: 1.ª 7001 NÃO usa a paragem 7005 (independentes) -> Rever", !isOk(one.rows[1]) && one.rows[1]["Hora Chegada"] === "", one.rows[1]);
     ok("pátio T2a: 2.ª 7001 fica Rever (sem paragem própria)", one.rows[4]["Confiança"] === REVIEW && one.rows[4]["Hora Chegada"] === "", one.rows[4]);
     // 2b: duas paragens oeste -> cada par tem a sua
     const two = runY(d, rows, [
       yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store(),
       yStop("YB-02-BB", "7005", L(d, "14:00"), L(d, "14:30")),
     ]);
-    ok("pátio T2b: 1.ª 7005 e 1.ª 7001 na 1.ª visita", t(two.rows[0]) === "06:00-06:45" && t(two.rows[1]) === "06:00-06:45", [two.rows[0], two.rows[1]]);
-    ok("pátio T2b: 2.ª 7005 e 2.ª 7001 na 2.ª visita", t(two.rows[3]) === "14:00-14:30" && t(two.rows[4]) === "14:00-14:30", [two.rows[3], two.rows[4]]);
+    ok("pátio T2b: 1.ª 7005 = 1.ª visita 7005; 1.ª 7001 sem paragem 7001 -> Rever", t(two.rows[0]) === "06:00-06:45" && !isOk(two.rows[1]), [two.rows[0], two.rows[1]]);
+    ok("pátio T2b: 2.ª 7005 = 2.ª visita 7005; 2.ª 7001 -> Rever", t(two.rows[3]) === "14:00-14:30" && !isOk(two.rows[4]), [two.rows[3], two.rows[4]]);
   }
 
   // Test 3 — uma linha 7005 nunca aceita a doca leste, em qualquer ordem da folha.
@@ -1862,7 +1863,7 @@ ok(
     ];
     const r = runY(d, rows, stops);
     ok("pátio T5 BB-68-EV: 7005 = 03:19-04:19 (passagem A)", isOk(r.rows[0]) && t(r.rows[0]) === "03:19-04:19" && !shared(r.rows[0]), r.rows[0]);
-    ok("pátio T5 BB-68-EV: 1.ª 7001 partilha 03:19-04:19 (passagem B)", isOk(r.rows[1]) && t(r.rows[1]) === "03:19-04:19" && shared(r.rows[1]), r.rows[1]);
+    ok("pátio T5 BB-68-EV: 1.ª 7001 NÃO herda a paragem 7005 (independentes)", !isOk(r.rows[1]) && r.rows[1]["Hora Chegada"] === "", r.rows[1]);
     ok("pátio T5 BB-68-EV: 7001 de regresso fica Rever", r.rows[4]["Confiança"] === REVIEW && r.rows[4]["Hora Chegada"] === "", r.rows[4]);
     ok("pátio T5 BB-68-EV: 7003 e 710 inalterados", t(r.rows[2]) === "05:00-05:44" && t(r.rows[3]) === "09:09-10:00", [t(r.rows[2]), t(r.rows[3])]);
     ok("pátio T5 BB-68-EV: par partilhado não é marcado como conflito", !conflict(r.rows[0]) && !conflict(r.rows[1]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
@@ -1883,7 +1884,64 @@ ok(
   {
     const d = "2026-09-09";
     const r = runY(d, [yRow("R1", "7001", "YE-05-EE", "08:00 | 20:00")], [yStop("YE-05-EE", "7005", L(d, "09:00"), L(d, "09:30"))]);
-    ok("pátio T7: 7001 aceita paragem oeste livre", isOk(r.rows[0]) && t(r.rows[0]) === "09:00-09:30" && !shared(r.rows[0]), r.rows[0]);
+    ok("pátio T7: 7001 NÃO aceita paragem 7005 livre (independentes)", !isOk(r.rows[0]) && r.rows[0]["Hora Chegada"] === "", r.rows[0]);
+  }
+
+  // Test 8 — ficheiro 07-11-2026, AD-49-DH (rotas 186315796 → 186315798).
+  // Antes: carga e regresso 7001 da mesma rota caíam no mesmo grupo e levavam
+  // as 2 paragens 7001 MAIS CEDO da janela (06-11 17:30 e 07:07), ignorando a
+  // ordem; o regresso ficava antes da entrega na loja 18. Agora: alinhamento
+  // por ordem, carga = última paragem do pátio antes da 1.ª entrega,
+  // regresso = 1.ª depois da última entrega.
+  {
+    const Z = (d: string, hhmm: string) => `${d}T${hhmm}:00+00:00`; // Lisboa = UTC em novembro
+    const d6 = "2026-11-06", d7 = "2026-11-07", P = "AD-49-DH";
+    const row = (rota: string, code: string, ciclo: string): SheetRecord => ({ ...yRow(rota, code, P, ciclo) });
+    const r = runY(d7, [
+      row("186315796", "7001", "20:00-1 | 08:00"),
+      row("186315796", "18", "20:00-1 | 08:00"),
+      row("186315796", "7001", "20:00-1 | 08:00"),
+      row("186315798", "7001", "08:00 | 20:00"),
+      row("186315798", "27", "08:00 | 20:00"),
+      row("186315798", "7001", "08:00 | 20:00"),
+    ], [
+      yStop(P, "7001", Z(d6, "17:30"), Z(d6, "19:29")),
+      yStop(P, "7001", Z(d7, "07:07"), Z(d7, "08:26")),
+      yStop(P, "18", Z(d7, "09:28"), Z(d7, "10:42")),
+      yStop(P, "7001", Z(d7, "10:50"), Z(d7, "11:05")),
+      yStop(P, "7001", Z(d7, "11:46"), Z(d7, "12:11")),
+      yStop(P, "27", Z(d7, "13:28"), Z(d7, "14:03")),
+      yStop(P, "7001", Z(d7, "15:30"), Z(d7, "16:00")),
+    ]);
+    const got = r.rows.map(t);
+    ok("ordem T8: 186315796 carga = 07:07 (não a paragem de 06-11 17:30)", got[0] === "07:07-08:26", got);
+    ok("ordem T8: 186315796 loja 18 = 09:28", got[1] === "09:28-10:42", got);
+    ok("ordem T8: 186315796 regresso = 10:50 (depois da entrega)", got[2] === "10:50-11:05", got);
+    ok("ordem T8: 186315798 carga = 11:46", got[3] === "11:46-12:11", got);
+    ok("ordem T8: 186315798 loja 27 = 13:28", got[4] === "13:28-14:03", got);
+    ok("ordem T8: 186315798 regresso = 15:30", got[5] === "15:30-16:00", got);
+    ok("ordem T8: todas OK", r.rows.every(isOk), r.rows.map((x) => x["Confiança"]));
+  }
+
+  // Test 9 — regresso da rota N e carga da rota N+1 são a MESMA visita ao pátio
+  // (só existe uma paragem 7001 entre as duas entregas): partilham-na.
+  {
+    const Z = (d: string, hhmm: string) => `${d}T${hhmm}:00+00:00`;
+    const d7 = "2026-11-07", P = "AD-49-DH";
+    const r = runY(d7, [
+      yRow("RA", "7001", P, "08:00 | 20:00"), yRow("RA", "18", P, "08:00 | 20:00"), yRow("RA", "7001", P, "08:00 | 20:00"),
+      yRow("RB", "7001", P, "08:00 | 20:00"), yRow("RB", "27", P, "08:00 | 20:00"), yRow("RB", "7001", P, "08:00 | 20:00"),
+    ], [
+      yStop(P, "7001", Z(d7, "07:07"), Z(d7, "08:26")),
+      yStop(P, "18", Z(d7, "09:28"), Z(d7, "10:42")),
+      yStop(P, "7001", Z(d7, "11:34"), Z(d7, "12:11")),
+      yStop(P, "27", Z(d7, "13:28"), Z(d7, "14:03")),
+      yStop(P, "7001", Z(d7, "15:30"), Z(d7, "16:00")),
+    ]);
+    const got = r.rows.map(t);
+    ok("ordem T9: regresso RA e carga RB = mesma paragem 11:34", got[2] === "11:34-12:11" && got[3] === "11:34-12:11", got);
+    ok("ordem T9: regresso RB = 15:30 (não desliza uma paragem)", got[5] === "15:30-16:00", got);
+    ok("ordem T9: todas OK", r.rows.every(isOk), r.rows.map((x) => x["Confiança"]));
   }
 }
 

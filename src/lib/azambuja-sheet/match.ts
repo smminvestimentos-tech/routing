@@ -8,18 +8,18 @@
 //
 // The logic, in order:
 //
-//   1. Group rows by (ROTA, N_LOJA). The same store listed twice in a route
-//      (a "C" delivery + a "D" devolution, or two "C" lines) is ONE physical
-//      stop — every row in the group gets the same Chegada/Saída.
+//   1. Group CONSECUTIVE rows with the same (ROTA, N_LOJA) — a "C" delivery
+//      + a "D" devolution listed back to back is ONE physical stop, every row
+//      in the group gets the same Chegada/Saída. The same store again later
+//      in the route (carga 7001 … regresso 7001) is a separate group/visit.
 //
-//   2. Per PLATE (a plate is one physical vehicle; if it runs two routes those
-//      are just earlier/later legs of one run): take that plate's stops for the
-//      day from OUR data (stops ↔ vehicle_pings.plate — all TRACKiT accounts,
-//      deduped; vehicle_id is company-wide and it's one shared fleet). For each
-//      store-group, in sheet order, claim the earliest still-unassigned stop of
-//      that plate whose location code matches (codeEq) → "OK". The plate's
-//      depot/workshop stops (not on the sheet) and out-of-order driving are
-//      simply ignored. Same principle as the TFS matcher.
+//   2. Per PLATE (one physical vehicle), route by route in sheet order: align
+//      the route's store-groups (SEQ order) with that plate's stops for the
+//      day IN TIME ORDER (stops ↔ vehicle_pings.plate — all TRACKiT accounts,
+//      deduped). Exact code first, yard alternative (7005 for a 7001 row)
+//      second; depot/workshop stops not on the sheet are simply skipped. The
+//      regresso of one route may share its yard stop with the next route's
+//      carga. See the "Sequence-aware assignment" block below → "OK".
 //
 //   3. A store-group the plate couldn't cover: if we have NO GPS of ours for
 //      the planned vehicle across its CICLO window, we can't tell it wasn't
@@ -84,6 +84,7 @@ import {
   tryTrackitFallback,
   type TrackitCandidateMap,
 } from "@/lib/sheet-match/trackit-candidates";
+import type { PlanLine } from "@/lib/azambuja-sheet/plano";
 
 export {
   CONFIANCA_COL,
@@ -163,6 +164,8 @@ export function classifyViaturaPlaneada(j: string): ViaturaPlaneadaClass {
 export type MatchSummary = {
   /** data rows considered (blank rows excluded) */
   total: number;
+  /** rows linked to a Plano de Cargas line (0 when no plan was uploaded) */
+  planRows: number;
   ok: number;
   review: number;
   /** rows that arrived with both times filled and were kept verbatim */
@@ -183,6 +186,8 @@ export type MatchSummary = {
 };
 
 export type RunMatchArgs = {
+  /** Plano de Cargas do mesmo dia (opcional, em memória) — ver plano.ts */
+  plan?: readonly PlanLine[];
   day: string; // YYYY-MM-DD
   records: SheetRecord[];
   /** same rows, read with raw:true — Excel serials as numbers (for kept-row
@@ -607,6 +612,10 @@ type Work = {
   rawCiclo: string;
   /** the (ROTA, N_LOJA) store-group this row belongs to */
   groupKey: string;
+  /** from the Plano de Cargas, when uploaded */
+  planArrMs: number | null;
+  planDepMs: number | null;
+  carga: number;
   conf:
     | ""
     | "OK"
@@ -638,6 +647,9 @@ type StoreGroup = {
   /** latest departure for a stop that arrived in [winLoMs, winHiMs) */
   winDepHiMs: number;
   order: number; // first row index, for sheet order
+  /** Plano de Cargas: hora prevista de chegada (1.ª linha) e paletes (máx.) */
+  planArrMs: number | null;
+  carga: number;
   rows: Work[];
   assignedStop: WStop | null;
   conf: Work["conf"];
@@ -751,6 +763,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       planFim: ciclo.fim,
       rawCiclo,
       groupKey: `${rota} ${codeKey(code, coLocatedGroups)}`,
+      planArrMs: null,
+      planDepMs: null,
+      carga: 0,
       conf: kept ? KEPT : "",
       real: "",
       placeholderNote,
@@ -758,6 +773,49 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       assignedStop: null,
     };
   });
+
+  // Plano de Cargas -> each sheet row: same ROTA, same code, in SEQ order
+  // (n-th row of code X in the route <-> n-th plan line of code X).
+  let planMatched = 0;
+  if (args.plan && args.plan.length > 0) {
+    const byRota = new Map<string, PlanLine[]>();
+    for (const pl of args.plan) {
+      const arr = byRota.get(pl.rota) ?? [];
+      arr.push(pl);
+      byRota.set(pl.rota, arr);
+    }
+    for (const arr of byRota.values()) arr.sort((a, b) => a.seq - b.seq);
+    const used = new Set<PlanLine>();
+    for (const w of works) {
+      if (w.empty || !w.rota || !w.code) continue;
+      const pl = (byRota.get(w.rota) ?? []).find(
+        (x) => !used.has(x) && normalizeStoreCode(x.code).toUpperCase() === w.code.toUpperCase(),
+      );
+      if (!pl) continue;
+      used.add(pl);
+      w.planArrMs = pl.arrMs;
+      w.planDepMs = pl.depMs;
+      w.carga = pl.tipo === "C" ? pl.carga : 0;
+      planMatched++;
+    }
+  }
+
+  // A store-group is a run of CONSECUTIVE rows with the same (ROTA, code): a
+  // C + D pair listed back to back is one physical visit. The same code
+  // appearing again later in the route (carga 7001 … regresso 7001) is a
+  // DIFFERENT visit and gets its own group (before 2026-11 both 7001 rows of
+  // a route shared one group and were filled from the same/earliest stops).
+  {
+    let prevKey = "";
+    let run = 0;
+    for (const w of works) {
+      if (w.empty) continue;
+      const k = `${w.rota} ${codeKey(w.code, coLocatedGroups)}`;
+      if (k !== prevKey) run++;
+      prevKey = k;
+      w.groupKey = `${k} #${run}`;
+    }
+  }
 
   // ----- build (ROTA, N_LOJA) store-groups, in sheet order -----
   // "kept" rows (both times already filled on input) are left out of grouping
@@ -780,6 +838,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         winHiMs: 0,
         winDepHiMs: 0,
         order: w.idx,
+        planArrMs: w.planArrMs,
+        carga: 0,
         rows: [],
         assignedStop: null,
         conf: "",
@@ -787,6 +847,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       groupMap.set(w.groupKey, g);
     }
     g.rows.push(w);
+    if (w.carga > g.carga) g.carga = w.carga;
+    if (g.planArrMs == null && w.planArrMs != null) g.planArrMs = w.planArrMs;
     // a later row in the group may carry the plate/ciclo the first one lacked
     if (!g.plate && w.plate) g.plate = w.plate;
     if (!g.planIni && w.planIni) g.planIni = w.planIni;
@@ -856,11 +918,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // ----- Step 1/2: match each store-group to a stop BY STORE CODE, per PLATE -----
   //
   // A plate is one physical vehicle. Its real GPS stops for the day include
-  // depot/workshop stops that aren't on the sheet, and the sheet's row order
-  // isn't the driving order — so a positional zip doesn't work. Instead, for
-  // each store-group (in sheet order) take the earliest still-unassigned stop
-  // of that plate whose location code matches (codeEq). Extra stops are simply
-  // left over; order doesn't matter. Same principle as the TFS matcher.
+  // depot/workshop stops that aren't on the sheet — those are simply left
+  // over. The store-groups are aligned to the stops IN ORDER (see below).
   const byPlate = new Map<string, StoreGroup[]>();
   for (const g of groups) {
     if (!g.plate) {
@@ -872,119 +931,236 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     else byPlate.set(g.plate, [g]);
   }
 
-  // Which (ROTA, code) claimed each stop in this Step 1/2 — the only claims
-  // the yard's passagem B below may share. Stops claimed later (swap, typo,
-  // TRACKiT) never appear here, so they are never shareable.
-  const yardClaims = new Map<WStop, { rota: string; code: string; shared: boolean }>();
+  // Sequence-aware assignment (2026-11, ficheiro 07-11-2026). The old pass
+  // took, per store-group, the EARLIEST unassigned stop at that code — order
+  // ignored. On a plate running 2+ routes that let a route's final "regresso
+  // 7001" grab a yard stop from BEFORE the route even started (e.g. 186315796:
+  // regresso planeado 11:08, preenchido 06-11 17:30), and since the regresso
+  // of route N and the carga of route N+1 are usually ONE physical yard visit,
+  // every later 7001 row on that plate slid by one stop (91 linhas fora de
+  // ordem nesse dia).
+  //
+  // Now, per plate, routes are taken in sheet order and each route's
+  // store-groups are aligned to the plate's stops IN TIME ORDER (the sheet
+  // lists a route's stores in SEQ order — 125/127 rotas no 07-11, the other
+  // two only tie on SEQ). A small DP per route: maximise matched groups; exact
+  // code beats the yard's accepted alternative (YARD_ACCEPTS); among equal
+  // solutions the earliest compatible stop wins. A stop may be shared ONCE:
+  //   • by two consecutive groups of the same route (7005+7001 west dock, a
+  //     co-located pair), or
+  //   • by a route's FIRST group and the previous route's LAST group on the
+  //     same plate, exact same code only (regresso → carga seguinte). Different
+  //     routes never share through the yard alternative (bug 201/Vialonga).
+  const SCORE_EXACT = 1000;
+  const SCORE_YARD_ALT = 990;
+  const SCORE_SHARED = 980;
+  // Plano de Cargas (quando vem no upload):
+  //  • uma paragem a mais de PLAN_MAX_DEV_MIN da hora prevista não serve;
+  //  • entre paragens possíveis, ganha a mais próxima da hora prevista;
+  //  • uma CARGA (paletes > 0) prefere uma paragem com permanência; se só
+  //    houver um toque (< MIN_LOAD_DWELL_MIN) a linha vai para "Rever".
+  const PLAN_MAX_DEV_MIN = 240;
+  const MIN_LOAD_DWELL_MIN = 5;
+  const SCORE_TOUCH_PENALTY = 100;
+  const dwellMin = (s: WStop) =>
+    s.departedAt ? (Date.parse(s.departedAt) - Date.parse(s.arrivedAt)) / 60000 : Infinity;
+  const planDevMin = (g: StoreGroup, s: WStop) =>
+    g.planArrMs == null ? null : Math.abs(Date.parse(s.arrivedAt) - g.planArrMs) / 60000;
 
   for (const [plate, plateGroups] of byPlate) {
     plateGroups.sort((a, b) => a.order - b.order);
     const plateStops = stops
       .filter((s) => s.plate === plate)
       .sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
+    const m = plateStops.length;
+    const sharedOnce = new Set<WStop>();
 
+    const routeOrder: string[] = [];
+    const routeGroups = new Map<string, StoreGroup[]>();
     for (const g of plateGroups) {
       if (!g.code) {
         setGroup(g, REVIEW, null, describeReal(plate));
         continue;
       }
-      // Every unassigned real stop at this code, in window, in time order —
-      // not just the first. A group can hold >1 row (the same store listed
-      // twice: a C + D pair sharing one physical visit, OR a code the route
-      // genuinely revisits, e.g. a platform passed through twice). Each
-      // candidate is independently windowed here — none of this skips or
-      // reuses a sibling row's result unvalidated.
-      const candidates = plateStops.filter(
-        (s) =>
-          !s.assigned &&
-          codeEq(s.code, g.code, coLocatedGroups) &&
-          stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs),
-      );
-      if (candidates.length === 0) {
-        // no code match in window -> conf stays "" for step 3 (swap) / step 4
-        continue;
+      let arr = routeGroups.get(g.rota);
+      if (!arr) {
+        routeGroups.set(g.rota, (arr = []));
+        routeOrder.push(g.rota);
       }
-      if (candidates.length >= g.rows.length) {
-        // Enough distinct real stops for every row in the group to get its
-        // OWN visit (sheet order) instead of all rows inheriting the first
-        // row's Chegada/Saída — a route that genuinely revisits this code
-        // must not have the 2nd+ occurrence silently copy the 1st's stop.
-        const rowsInSheetOrder = [...g.rows].sort((a, b) => a.idx - b.idx);
-        rowsInSheetOrder.forEach((w, i) => {
-          const stop = candidates[i];
-          stop.assigned = true;
-          yardClaims.set(stop, { rota: g.rota, code: g.code, shared: false });
-          w.conf = "OK";
-          w.assignedStop = stop;
-          w.real = "";
-        });
-        g.conf = "OK";
-        g.assignedStop = candidates[0];
-      } else {
-        // Fewer real stops than rows in the group (the common C+D-pair case:
-        // one physical visit, two sheet lines) — every row shares that one
-        // stop, as before.
-        const hit = candidates[0];
-        hit.assigned = true;
-        yardClaims.set(hit, { rota: g.rota, code: g.code, shared: false });
-        setGroup(g, "OK", hit, "");
-      }
+      arr.push(g);
     }
+    if (m === 0) continue;
 
-    // ----- Passagem B: pátio 7001/7005 (ver YARD_ACCEPTS, common.ts) -----
-    // Only for groups the exact-code pass above left unmatched (so a 7001
-    // row always prefers a real east-dock 7001 stop), and only for codes
-    // with an accepted alternative — a 7005 row never gets here. Each row, in
-    // sheet order, takes the earliest in-window stop at an accepted code
-    // that is either still free, or was claimed above by a row of an
-    // accepted code on the SAME ROTA (this loop is already per plate) and
-    // hasn't been shared yet. A stop is shared at most once: one physical
-    // west-dock visit covers one 7005 + 7001 pair, never a second pair, and
-    // never a row from another route.
-    for (const g of plateGroups) {
-      if (g.conf !== "" || !g.code) continue;
-      const accepted = yardAcceptedCodes(g.code);
-      if (accepted.length === 0) continue;
-      const isAccepted = (code: string | null) =>
-        accepted.some((c) => codeEq(code, c, coLocatedGroups));
+    // last group of the previous route on this plate, and the stop it took
+    let prevTail: { g: StoreGroup; stop: WStop } | null = null;
 
-      const picks: { w: Work; stop: WStop; shared: boolean }[] = [];
-      for (const w of [...g.rows].sort((a, b) => a.idx - b.idx)) {
-        const stop = plateStops.find((s) => {
-          if (!isAccepted(s.code)) return false;
-          if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs)) return false;
-          if (!s.assigned) return true;
-          const claim = yardClaims.get(s);
-          return claim != null && !claim.shared && claim.rota === g.rota && isAccepted(claim.code);
+    for (const rota of routeOrder) {
+      const G = routeGroups.get(rota)!;
+      const n = G.length;
+
+      // 0 = incompatible, else the base score of matching group i to stop k
+      const compat: number[][] = G.map((g) => {
+        const alt = yardAcceptedCodes(g.code);
+        return plateStops.map((s) => {
+          if (s.assigned) return 0;
+          if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs)) return 0;
+          const dev = planDevMin(g, s);
+          if (dev != null && dev > PLAN_MAX_DEV_MIN) return 0;
+          let base = 0;
+          if (codeEq(s.code, g.code, coLocatedGroups)) base = SCORE_EXACT;
+          else if (alt.some((c) => codeEq(s.code, c, coLocatedGroups))) base = SCORE_YARD_ALT;
+          if (base > 0 && g.carga > 0 && dwellMin(s) < MIN_LOAD_DWELL_MIN) base -= SCORE_TOUCH_PENALTY;
+          return base;
         });
-        if (!stop) break;
-        const claim = yardClaims.get(stop);
-        const shared = stop.assigned;
-        stop.assigned = true;
-        if (claim) claim.shared = true;
-        else yardClaims.set(stop, { rota: g.rota, code: g.code, shared: true });
-        picks.push({ w, stop, shared });
+      });
+      // regresso → carga: the previous route's tail stop, if this route's
+      // first group is the exact same code and it hasn't been shared yet
+      let headShareK = -1;
+      if (
+        prevTail &&
+        !sharedOnce.has(prevTail.stop) &&
+        codeEq(prevTail.stop.code, G[0].code, coLocatedGroups) &&
+        codeEq(prevTail.g.code, G[0].code, coLocatedGroups) &&
+        stopInWindow(prevTail.stop.arrivedAt, prevTail.stop.departedAt, G[0].winLoMs, G[0].winHiMs, G[0].winDepHiMs)
+      ) {
+        headShareK = plateStops.indexOf(prevTail.stop);
       }
-      if (picks.length === 0) continue; // untouched -> Step 3/4 as usual
 
-      for (const w of g.rows) {
-        const p = picks.find((x) => x.w === w);
-        if (p) {
-          w.conf = "OK";
-          w.assignedStop = p.stop;
-          w.real = p.shared
-            ? `Paragem partilhada com a linha ${p.stop.code} da mesma rota (doca oeste do pátio).`
-            : `Paragem na doca ${p.stop.code} (oeste) — aceite para ${g.code}, mesmo pátio.`;
-        } else {
-          // More rows than west-dock stops: this row would need a visit of
-          // its own, and none is left.
-          w.conf = REVIEW;
-          w.assignedStop = null;
-          w.real = describeReal(plate);
+      // dp state: (last used stop L ∈ -1..m-1, f = L may still be shared
+      // by the next group of this route) -> index (L + 1) * 2 + f
+      const W = (m + 1) * 2;
+      type Back = { prev: number; kind: "skip" | "match" | "share" | "head"; k: number };
+      let dp = new Array<number>(W).fill(-Infinity);
+      dp[0] = 0;
+      const backs: Back[][] = [];
+      for (let i = 0; i < n; i++) {
+        const nd = new Array<number>(W).fill(-Infinity);
+        const nb: Back[] = new Array(W);
+        const relax = (st: number, v: number, b: Back) => {
+          if (v > nd[st]) {
+            nd[st] = v;
+            nb[st] = b;
+          }
+        };
+        for (let st = 0; st < W; st++) {
+          const v = dp[st];
+          if (v === -Infinity) continue;
+          const L = (st >> 1) - 1;
+          const f = st & 1;
+          relax(st, v, { prev: st, kind: "skip", k: -1 });
+          if (f === 1 && L >= 0 && compat[i][L] > 0) {
+            // L was taken by group i-1 on this path; share it once
+            relax((L + 1) * 2, v + SCORE_SHARED, { prev: st, kind: "share", k: L });
+          }
+          if (i === 0 && L === -1 && headShareK >= 0) {
+            relax((headShareK + 1) * 2, v + SCORE_SHARED, { prev: st, kind: "head", k: headShareK });
+          }
+          // tie-break (always < the 10-point gap between score tiers): with a
+          // plan, closeness to the planned arrival; without, earliest stop
+          let skipped = 0;
+          for (let k = L + 1; k < m; k++) {
+            const c = compat[i][k];
+            if (c > 0) {
+              const dev = planDevMin(G[i], plateStops[k]);
+              const pen = dev != null ? Math.min(9, dev / 30) : skipped;
+              relax((k + 1) * 2 + 1, v + c - pen, { prev: st, kind: "match", k });
+              skipped++;
+            }
+          }
+        }
+        dp = nd;
+        backs.push(nb);
+      }
+      let bestSt = 0;
+      for (let st = 0; st < W; st++) if (dp[st] > dp[bestSt]) bestSt = st;
+      const pickK: number[] = new Array(n).fill(-1);
+      const kinds: Back["kind"][] = new Array(n).fill("skip");
+      for (let i = n - 1, st = bestSt; i >= 0; i--) {
+        const bk = backs[i][st];
+        pickK[i] = bk.k;
+        kinds[i] = bk.kind;
+        st = bk.prev;
+      }
+
+      // A route's head (the carga) takes the LATEST compatible stop before the
+      // next pick, not the earliest: a truck that sat at the yard since the
+      // afternoon starts loading at the end of that wait (07-11: AD-49-DH,
+      // 06-11 17:30 parado vs 07:07 carga real da 186315796). Single-row heads
+      // only — a repeated code keeps its rows on distinct, earliest stops.
+      if (
+        kinds[0] === "match" &&
+        G[0].planArrMs == null && // with a plan, closeness to the planned time already decided
+        G[0].rows.length === 1 &&
+        !(n > 1 && kinds[1] === "share")
+      ) {
+        // bounded by the route's next pick; a route with nothing else matched
+        // keeps the earliest (no evidence of when the loading ended)
+        const nextK = pickK.slice(1).find((k) => k >= 0) ?? -1;
+        for (let k = nextK - 1; k > pickK[0]; k--) {
+          if (compat[0][k] >= compat[0][pickK[0]]) {
+            pickK[0] = k;
+            break;
+          }
         }
       }
-      g.conf = "OK";
-      g.assignedStop = picks[0].stop;
+
+      // write back. Extra rows in a group (same store listed twice in a row)
+      // take the next free compatible stops before the following pick, else
+      // share the group's stop (C + D pair = one physical visit).
+      for (let i = 0; i < n; i++) {
+        const g = G[i];
+        if (pickK[i] < 0) continue; // -> Step 3/4
+        const k0 = pickK[i];
+        const stop = plateStops[k0];
+        // A planned load with only a gate touch: don't write a 0-min "carga".
+        if (g.carga > 0 && dwellMin(stop) < MIN_LOAD_DWELL_MIN) {
+          setGroup(
+            g,
+            REVIEW,
+            null,
+            `Carga prevista (${g.carga} paletes) mas o GPS só tem um toque de ` +
+              `${Math.max(0, Math.round(dwellMin(stop)))} min no ${stop.code ?? g.code} às ` +
+              `${fmtHM(stop.arrivedAt)} — sem permanência para a carga; confirmar.`,
+          );
+          continue;
+        }
+        let note = "";
+        if (kinds[i] === "share") {
+          sharedOnce.add(stop);
+          note = `Paragem partilhada com a linha ${G[i - 1].code} da mesma rota.`;
+        } else if (kinds[i] === "head" && prevTail) {
+          sharedOnce.add(stop);
+          note = `Mesma paragem que o regresso da rota ${prevTail.g.rota} (regresso → carga seguinte).`;
+        } else if (!codeEq(stop.code, g.code, coLocatedGroups)) {
+          note = `Paragem na doca ${stop.code} (oeste) — aceite para ${g.code}, mesmo pátio.`;
+        }
+        stop.assigned = true;
+        const nextK = pickK.slice(i + 1).find((k) => k >= 0 && k !== k0) ?? m;
+        let cursor = k0;
+        [...g.rows]
+          .sort((a, b) => a.idx - b.idx)
+          .forEach((w, r) => {
+            let st = stop;
+            if (r > 0) {
+              for (let k = cursor + 1; k < nextK; k++) {
+                if (compat[i][k] > 0 && !plateStops[k].assigned) {
+                  st = plateStops[k];
+                  st.assigned = true;
+                  cursor = k;
+                  break;
+                }
+              }
+            }
+            w.conf = "OK";
+            w.assignedStop = st;
+            w.real = st === stop ? note : "";
+          });
+        g.conf = "OK";
+        g.assignedStop = stop;
+      }
+
+      const lastI = n - 1;
+      prevTail = pickK[lastI] >= 0 ? { g: G[lastI], stop: plateStops[pickK[lastI]] } : null;
     }
   }
 
@@ -1307,6 +1483,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     rows: works.map((w) => w.out),
     header: outHeader,
     summary: {
+      planRows: planMatched,
       total: ok + review + kept + swap + swapOutOfWindow + plateTypo + trackitFallback,
       ok,
       review,

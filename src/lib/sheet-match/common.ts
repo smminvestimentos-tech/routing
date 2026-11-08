@@ -409,9 +409,11 @@ export function codeEq(
 // 7001 aceita uma paragem 7005, uma linha 7005 NUNCA aceita uma paragem 7001
 // — por isso não pode viver em locations.colocated_with_id (simétrico).
 // Usado só pela passagem B do matcher da Azambuja (azambuja-sheet/match.ts).
-export const YARD_ACCEPTS: ReadonlyArray<{ code: string; accepts: readonly string[] }> = [
-  { code: "7001", accepts: ["7005"] },
-];
+// 2026-11-08: REMOVIDO a pedido do utilizador — 7001 e 7005 são no mesmo
+// armazém mas operações independentes; uma linha 7001 só aceita paragens
+// 7001 (e 7005 só 7005). Mantém-se a estrutura para o caso de voltar a ser
+// precisa; vazia = nenhuma equivalência no pátio.
+export const YARD_ACCEPTS: ReadonlyArray<{ code: string; accepts: readonly string[] }> = [];
 
 /** Códigos de paragem que uma linha `code` aceita ALÉM do seu próprio (passagem B). */
 export function yardAcceptedCodes(code: string | null | undefined): readonly string[] {
