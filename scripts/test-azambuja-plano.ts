@@ -154,7 +154,8 @@ const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${Stri
   ]);
   const runC = (records: SheetRecord[], stops: DayStop[], plan: PlanLine[]) =>
     runMatch({ day: "2026-11-07", records, header, cols, stops, platesWithGps: new Set(["AD49DH"]), pingWindowByPlate: new Map(), plan, codeCoords: coords });
-  const recs = [row("R6", "7001"), row("R6", "18", "D")];
+  // a 7005 noutra viatura: a folha usa o 7005, por isso conta como vizinho
+  const recs = [row("R6", "7001"), row("R6", "18", "D"), { ...row("R6X", "7005"), MATRICULA: "XX-00-XX" }];
   const plan = [pl("R6", 1, "7001", "00:40", 33), pl("R6", 2, "18", "02:00", 33, "D")];
   const near7001 = { lat: 39.0436, lng: -8.9203 }; // ~55 m do 7001, mais longe do 7005
   const near7005 = { lat: 39.0424, lng: -8.9212 }; // junto ao 7005
@@ -167,6 +168,7 @@ const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${Stri
   ok("toque + paragem sem código junto ao 7001 -> OK 00:37-00:55", r.rows[0]["Confiança"] === "OK" && t(r.rows[0]) === "00:37-00:55", [t(r.rows[0]), r.rows[0]["Real"]]);
   const r2 = runC(recs, mk(near7005), plan);
   ok("paragem sem código mais perto do 7005 NÃO conta para o 7001 -> Rever", r2.rows[0]["Confiança"] === REVIEW, r2.rows[0]);
+  ok("Rever traz o diagnóstico da paragem sem local (distância e local mais perto)", /paragem sem local 00:37–00:51: \d+ m do 7001, mais perto de 7005/.test(String(r2.rows[0]["Real"])), r2.rows[0]["Real"]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
