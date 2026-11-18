@@ -729,6 +729,8 @@ const sharedDockAlt = (code: string): readonly string[] =>
 // 7003 e o parque) nas REGRESSO_MAX_H horas a seguir à última entrega.
 const REGRESSO_YARD_KM = 0.6;
 const REGRESSO_MAX_H = 8;
+// Linha do pátio com estadia maior que isto (viatura parada) → Rever.
+const YARD_LONG_REVIEW_H = 6;
 const REGRESSO_DEFAULT_MIN = 15;
 const REGRESSO_PARKED_EXTRA_MIN = 45;
 const UNCODED_CHAIN_GAP_MIN = 15;
@@ -1703,9 +1705,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // mesma visita e a divisão abaixo trata o tempo de cais.
     for (const g of groups) {
       if (g.conf !== "OK" || !g.assignedStop || !g.plate || !/^7005/.test(g.code) || !inCarga(g)) continue;
+      // …ou o 7001 ficou num toque (<5 min) ANTES do 7005 — o armazém carrega
+      // sempre 7005 primeiro (16-11 47-LF-63: 7001 09:05–09:05, 7005 09:15–10:10)
+      const t5 = Date.parse(g.assignedStop.arrivedAt);
+      const touchBefore = (s: WStop | null) =>
+        !!s &&
+        Date.parse(s.departedAt ?? s.arrivedAt) - Date.parse(s.arrivedAt) < MIN_LOAD_DWELL_MIN * 60_000 &&
+        Date.parse(s.arrivedAt) < t5;
       const mate = groups.find(
         (h) =>
-          h !== g && h.rota === g.rota && h.plate === g.plate && /^7001/.test(h.code) && !h.assignedStop &&
+          h !== g && h.rota === g.rota && h.plate === g.plate && /^7001/.test(h.code) &&
+          (!h.assignedStop || (h.conf === "OK" && touchBefore(h.assignedStop))) &&
           !h.rows.some((w) => w.kept) && inCarga(h) && Math.abs(h.order - g.order) === 1,
       );
       if (!mate) continue;
@@ -1877,9 +1887,25 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         if (t != null && t > lastDel) lastDel = t;
       }
       if (lastDel === -Infinity) continue;
+      // se outra rota da mesma viatura acaba depois desta e antes da paragem,
+      // o regresso é dela (16-11 BB-54-EX: rota acabou 01:25, apanhava o
+      // regresso das 10:00 da rota seguinte) — ver também Step 2d
+      const otherEnds: number[] = [];
+      {
+        const m = new Map<string, number>();
+        for (const h of groups) {
+          if (h.plate !== g.plate || h.rota === g.rota || isYardCode(h.code) || h.conf !== "OK" || !h.assignedStop) continue;
+          const t = Date.parse(h.assignedStop.departedAt ?? h.assignedStop.arrivedAt);
+          if (t > (m.get(h.rota) ?? -Infinity)) m.set(h.rota, t);
+        }
+        otherEnds.push(...m.values());
+      }
       const cand = stopsForPlate(g.plate).find((s) => {
         const a = Date.parse(s.arrivedAt);
-        return a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs && inYard(s);
+        return (
+          a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs && inYard(s) &&
+          !otherEnds.some((t) => t > lastDel && t < a)
+        );
       });
       if (!cand) continue;
       const a = Date.parse(cand.arrivedAt);
@@ -2039,6 +2065,55 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // visit — never a "swap" candidate for another route (16-11: 186376676/38
   // got AD-70-DF 04:49, the visit its own route 186376648 already lists).
   for (const s of keptClaim.keys()) s.assigned = true;
+
+  // ----- Step 2d: verificações finais nas linhas do pátio -----
+  //  • regresso depois da 1.ª entrega da rota seguinte da mesma viatura é
+  //    impossível (16-11 BB-54-EX: rota acabou 01:25, regresso às 10:00 da
+  //    rota seguinte) → sem hora;
+  //  • estadia no pátio > YARD_LONG_REVIEW_H (viatura parada; 16-11 AD-76-DF
+  //    00:00–23:00) → Rever, mantendo as horas como sugestão.
+  {
+    const isFixed = (g: StoreGroup) => g.rows.some((w) => w.kept);
+    for (const g of groups) {
+      if (!isYardCode(g.code) || g.conf !== "OK" || !g.assignedStop || !g.plate || isFixed(g)) continue;
+      const fn = firstDeliveryIdx.get(g.rota);
+      if (g.isTail && fn != null && g.order > fn) {
+        let lastDel = -Infinity;
+        for (const h of groups) {
+          if (h.rota !== g.rota || isYardCode(h.code) || h.conf !== "OK" || !h.assignedStop) continue;
+          const t = Date.parse(h.assignedStop.departedAt ?? h.assignedStop.arrivedAt);
+          if (t > lastDel) lastDel = t;
+        }
+        // outra rota da mesma viatura que ACABA depois desta e antes da
+        // paragem → o regresso é dela (rotas intercaladas, p.ex. vaivém
+        // 405↔12 da AT-45-AC: fica com a rota que acaba mais tarde)
+        const lastDelOther = new Map<string, number>();
+        for (const h of groups) {
+          if (h.plate !== g.plate || h.rota === g.rota || isYardCode(h.code) || h.conf !== "OK" || !h.assignedStop) continue;
+          const t = Date.parse(h.assignedStop.departedAt ?? h.assignedStop.arrivedAt);
+          if (t > (lastDelOther.get(h.rota) ?? -Infinity)) lastDelOther.set(h.rota, t);
+        }
+        const arr = Date.parse(g.assignedStop.arrivedAt);
+        const owned = [...lastDelOther.values()].some((t) => t > lastDel && t < arr);
+        if (lastDel > -Infinity && owned) {
+          setGroup(g, "", null, "");
+          continue;
+        }
+      }
+      const a = Date.parse(g.assignedStop.arrivedAt);
+      const d = Date.parse(g.assignedStop.departedAt ?? g.assignedStop.arrivedAt);
+      if (d - a > YARD_LONG_REVIEW_H * 3_600_000) {
+        const note =
+          `Viatura ${Math.round((d - a) / 3_600_000)} h parada no pátio (${fmtHM(g.assignedStop.arrivedAt)}–` +
+          `${fmtHM(g.assignedStop.departedAt)}) — confirmar a hora real da carga/regresso.`;
+        g.conf = REVIEW;
+        for (const w of g.rows) {
+          w.conf = REVIEW;
+          w.real = w.real ? `${w.real} ${note}` : note;
+        }
+      }
+    }
+  }
 
   // ----- Step 3: vehicle-swap suggestion for uncovered store-groups -----
   const rivalRows: SwapRival[] = groups.map((g) => ({
