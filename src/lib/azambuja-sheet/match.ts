@@ -1696,12 +1696,32 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   {
     type Part = { code: string | null; a: number; d: number };
     const visits = new Map<string, StoreGroup[]>();
+    const inCarga = (g: StoreGroup) => (firstDeliveryIdx.get(g.rota) ?? Infinity) > g.order;
+    // 7005 + 7001 seguidos no bloco de carga e só a 7005 ficou com paragem: o
+    // DP não deixa duas linhas na mesma paragem, mas as docas 54-59 servem as
+    // duas (armazém: 7005 primeiro, 7001 logo a seguir) → o 7001 entra na
+    // mesma visita e a divisão abaixo trata o tempo de cais.
+    for (const g of groups) {
+      if (g.conf !== "OK" || !g.assignedStop || !g.plate || !/^7005/.test(g.code) || !inCarga(g)) continue;
+      const mate = groups.find(
+        (h) =>
+          h !== g && h.rota === g.rota && h.plate === g.plate && /^7001/.test(h.code) && !h.assignedStop &&
+          !h.rows.some((w) => w.kept) && inCarga(h) && Math.abs(h.order - g.order) === 1,
+      );
+      if (!mate) continue;
+      mate.conf = "OK";
+      mate.assignedStop = g.assignedStop;
+      for (const w of mate.rows) {
+        w.conf = "OK";
+        w.assignedStop = g.assignedStop;
+      }
+    }
     for (const g of groups) {
       if (g.conf !== "OK" || !g.assignedStop || !g.plate || !/^700[15]/.test(g.code)) continue;
       const k = `${g.plate}|${g.assignedStop.id}|${g.assignedStop.arrivedAt}`;
-      (visits.get(k) ?? visits.set(k, []).get(k)!).push(g);
+      const vs = visits.get(k) ?? visits.set(k, []).get(k)!;
+      if (!vs.includes(g)) vs.push(g);
     }
-    const inCarga = (g: StoreGroup) => (firstDeliveryIdx.get(g.rota) ?? Infinity) > g.order;
     const isDwell = (p: Part) => p.d - p.a >= MIN_LOAD_DWELL_MIN * 60_000;
     const iso = (t: number) => new Date(t).toISOString();
     for (const gs of visits.values()) {
