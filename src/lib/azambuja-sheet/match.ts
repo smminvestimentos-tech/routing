@@ -2102,6 +2102,33 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       }
       const a = Date.parse(g.assignedStop.arrivedAt);
       const d = Date.parse(g.assignedStop.departedAt ?? g.assignedStop.arrivedAt);
+      // fora de ordem face às entregas da PRÓPRIA rota (carga depois da 1.ª
+      // entrega / regresso antes da última) → Rever, hora fica como sugestão
+      // (17-11: 75-XR-31, AC-41-DT, AZ-98-BH — rotas da mesma viatura trocadas)
+      if (fn != null) {
+        let firstDel = Infinity;
+        let lastDel = -Infinity;
+        for (const h of groups) {
+          if (h.rota !== g.rota || isYardCode(h.code) || h.conf !== "OK" || !h.assignedStop) continue;
+          firstDel = Math.min(firstDel, Date.parse(h.assignedStop.arrivedAt));
+          lastDel = Math.max(lastDel, Date.parse(h.assignedStop.departedAt ?? h.assignedStop.arrivedAt));
+        }
+        const slack = 5 * 60_000;
+        const bad =
+          g.order < fn ? firstDel < Infinity && a > firstDel + slack : g.isTail && lastDel > -Infinity && a < lastDel - slack;
+        if (bad) {
+          const note =
+            `${g.order < fn ? "Carga" : "Regresso"} fora de ordem: ${fmtHM(g.assignedStop.arrivedAt)} vs entregas da rota ` +
+            `${fmtHM(new Date(firstDel).toISOString())}–${fmtHM(new Date(lastDel).toISOString())} — ` +
+            `confirmar (a viatura pode ter feito as rotas noutra ordem).`;
+          g.conf = REVIEW;
+          for (const w of g.rows) {
+            w.conf = REVIEW;
+            w.real = w.real ? `${w.real} ${note}` : note;
+          }
+          continue;
+        }
+      }
       if (d - a > YARD_LONG_REVIEW_H * 3_600_000) {
         const note =
           `Viatura ${Math.round((d - a) / 3_600_000)} h parada no pátio (${fmtHM(g.assignedStop.arrivedAt)}–` +
