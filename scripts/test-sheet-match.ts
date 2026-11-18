@@ -1799,16 +1799,17 @@ ok(
     const store = () => yStop("YB-02-BB", "701", L(d, "10:00"), L(d, "10:40"));
     // 2a: só UMA paragem oeste -> só o primeiro par partilha
     const one = runY(d, rows, [yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store()]);
-    // 2026-11-08: 7001 e 7005 independentes — a 7001 já não usa a paragem 7005
-    ok("pátio T2a: 1.ª 7001 NÃO usa a paragem 7005 (independentes) -> Rever", !isOk(one.rows[1]) && one.rows[1]["Hora Chegada"] === "", one.rows[1]);
+    // 2026-11-18: docas 54-59 servem 7005 e 7001 (relatório do armazém) — uma
+    // só paragem no 7005 é dividida: 7005 primeiro (42%), depois 7001
+    ok("pátio T2a: 1.º par divide a paragem 7005 (7005 06:00-06:19, 7001 06:19-06:45)", t(one.rows[0]) === "06:00-06:19" && t(one.rows[1]) === "06:19-06:45" && isOk(one.rows[1]), [t(one.rows[0]), t(one.rows[1]), one.rows[1]["Real"]]);
     ok("pátio T2a: 2.ª 7001 fica Rever (sem paragem própria)", one.rows[4]["Confiança"] === REVIEW && one.rows[4]["Hora Chegada"] === "", one.rows[4]);
     // 2b: duas paragens oeste -> cada par tem a sua
     const two = runY(d, rows, [
       yStop("YB-02-BB", "7005", L(d, "06:00"), L(d, "06:45")), store(),
       yStop("YB-02-BB", "7005", L(d, "14:00"), L(d, "14:30")),
     ]);
-    ok("pátio T2b: 1.ª 7005 = 1.ª visita 7005; 1.ª 7001 sem paragem 7001 -> Rever", t(two.rows[0]) === "06:00-06:45" && !isOk(two.rows[1]), [two.rows[0], two.rows[1]]);
-    ok("pátio T2b: 2.ª 7005 = 2.ª visita 7005; 2.ª 7001 -> Rever", t(two.rows[3]) === "14:00-14:30" && !isOk(two.rows[4]), [two.rows[3], two.rows[4]]);
+    ok("pátio T2b: 1.º par = 1.ª visita 7005 dividida", t(two.rows[0]) === "06:00-06:19" && t(two.rows[1]) === "06:19-06:45", [t(two.rows[0]), t(two.rows[1])]);
+    ok("pátio T2b: 2.º par = 2.ª visita 7005 dividida", t(two.rows[3]) === "14:00-14:13" && t(two.rows[4]) === "14:13-14:30", [t(two.rows[3]), t(two.rows[4])]);
   }
 
   // Test 3 — uma linha 7005 nunca aceita a doca leste, em qualquer ordem da folha.
@@ -1862,8 +1863,9 @@ ok(
       yStop(P, null, L(d, "11:19"), L(d, "11:29")),
     ];
     const r = runY(d, rows, stops);
-    ok("pátio T5 BB-68-EV: 7005 = 03:19-04:19 (passagem A)", isOk(r.rows[0]) && t(r.rows[0]) === "03:19-04:19" && !shared(r.rows[0]), r.rows[0]);
-    ok("pátio T5 BB-68-EV: 1.ª 7001 NÃO herda a paragem 7005 (independentes)", !isOk(r.rows[1]) && r.rows[1]["Hora Chegada"] === "", r.rows[1]);
+    // 2026-11-18: 7005 + 7001 dividem a única paragem do pátio (7005 primeiro, 42%)
+    ok("pátio T5 BB-68-EV: 7005 = 03:19-03:44 (1.ª parte da paragem)", isOk(r.rows[0]) && t(r.rows[0]) === "03:19-03:44", [t(r.rows[0]), r.rows[0]["Real"]]);
+    ok("pátio T5 BB-68-EV: 1.ª 7001 = 03:44-04:19 (resto da paragem)", isOk(r.rows[1]) && t(r.rows[1]) === "03:44-04:19", [t(r.rows[1]), r.rows[1]["Real"]]);
     ok("pátio T5 BB-68-EV: 7001 de regresso fica Rever", r.rows[4]["Confiança"] === REVIEW && r.rows[4]["Hora Chegada"] === "", r.rows[4]);
     ok("pátio T5 BB-68-EV: 7003 e 710 inalterados", t(r.rows[2]) === "05:00-05:44" && t(r.rows[3]) === "09:09-10:00", [t(r.rows[2]), t(r.rows[3])]);
     ok("pátio T5 BB-68-EV: par partilhado não é marcado como conflito", !conflict(r.rows[0]) && !conflict(r.rows[1]), [r.rows[0]["Real"], r.rows[1]["Real"]]);
@@ -1884,7 +1886,8 @@ ok(
   {
     const d = "2026-09-09";
     const r = runY(d, [yRow("R1", "7001", "YE-05-EE", "08:00 | 20:00")], [yStop("YE-05-EE", "7005", L(d, "09:00"), L(d, "09:30"))]);
-    ok("pátio T7: 7001 NÃO aceita paragem 7005 livre (independentes)", !isOk(r.rows[0]) && r.rows[0]["Hora Chegada"] === "", r.rows[0]);
+    // 2026-11-18: o 7001 também carrega nas docas 54-59 (pino 7005)
+    ok("pátio T7: 7001 aceita paragem 7005 livre (docas partilhadas)", isOk(r.rows[0]) && t(r.rows[0]) === "09:00-09:30", r.rows[0]);
   }
 
   // Test 8 — ficheiro 07-11-2026, AD-49-DH (rotas 186315796 → 186315798).

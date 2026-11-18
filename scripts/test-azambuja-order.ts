@@ -48,7 +48,7 @@ console.log("== regresso não pode ser antes das entregas mantidas ==");
   const recs = [row("R1", "7005", P), row("R1", "437", P, "11:37", "12:32", "D"), row("R1", "7001", P)];
   const stops = [st(P, "7005", "04:24", "05:04"), st(P, "7001", "05:10", "05:10"), st(P, "437", "11:40", "12:28"), st(P, "7001", "13:40", "13:55")];
   const r = run(recs, stops, ["47LF63"]);
-  ok("carga 7005 = 04:24-05:04", hm(r.rows[0]) === "04:24-05:04", hm(r.rows[0]));
+  ok("carga 7005 = 04:24-05:10 (Saída = saída do pátio, toque no portão 05:10)", hm(r.rows[0]) === "04:24-05:10", hm(r.rows[0]));
   ok("regresso 7001 = 13:40 (depois da entrega)", hm(r.rows[2]) === "13:40-13:55", hm(r.rows[2]));
   const r2 = run(recs, stops.slice(0, 3), ["47LF63"]);
   ok("sem 7001 depois da entrega -> Rever (não 05:10)", r2.rows[2]["Confiança"] === REVIEW, hm(r2.rows[2]));
@@ -103,8 +103,8 @@ console.log("\n== bloco de carga sem ordem fixa entre 7005/7001/7003 ==");
   const recs2 = [row("R2", "7005", Q), row("R2", "7001", Q), row("R2", "437", Q, "07:15", "08:40", "D")];
   const stops2 = [st(Q, "7001", "04:50", "04:50"), st(Q, "7005", "04:55", "05:10"), st(Q, "437", "07:15", "08:40")];
   const r2 = run(recs2, stops2, ["BG96ID"]);
-  ok("7005 = 04:55-05:10 (antes ficava vazio)", hm(r2.rows[0]) === "04:55-05:10", hm(r2.rows[0]));
-  ok("7001 = toque 04:50", hm(r2.rows[1]) === "04:50-04:50", hm(r2.rows[1]));
+  ok("7005 = 04:50-05:01 (entrada no pátio; cais dividido 42/58, 7005 primeiro)", hm(r2.rows[0]) === "04:50-05:01", hm(r2.rows[0]));
+  ok("7001 = 05:01-05:10 (resto do cais)", hm(r2.rows[1]) === "05:01-05:10", hm(r2.rows[1]));
 }
 
 console.log("\n== espera pelo cais conta na Chegada da carga ==");

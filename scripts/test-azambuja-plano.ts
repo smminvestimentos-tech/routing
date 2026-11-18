@@ -167,8 +167,7 @@ const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${Stri
   const r = runC(recs, mk(near7001), plan);
   ok("toque + paragem sem código junto ao 7001 -> OK 00:37-00:55", r.rows[0]["Confiança"] === "OK" && t(r.rows[0]) === "00:37-00:55", [t(r.rows[0]), r.rows[0]["Real"]]);
   const r2 = runC(recs, mk(near7005), plan);
-  ok("paragem sem código mais perto do 7005 NÃO conta para o 7001 -> Rever", r2.rows[0]["Confiança"] === REVIEW, r2.rows[0]);
-  ok("Rever traz o diagnóstico da paragem sem local (distância e local mais perto)", /paragem sem local 00:37–00:51: \d+ m do 7001, mais perto de 7005/.test(String(r2.rows[0]["Real"])), r2.rows[0]["Real"]);
+  ok("paragem sem código junto ao 7005 conta para o 7001 (docas 54-59 partilhadas) -> OK 00:37-00:55", r2.rows[0]["Confiança"] === "OK" && t(r2.rows[0]) === "00:37-00:55", [t(r2.rows[0]), r2.rows[0]["Real"]]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

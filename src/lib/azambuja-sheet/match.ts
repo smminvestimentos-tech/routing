@@ -707,7 +707,95 @@ const YARD_NON_WAIT_ZONES: ReadonlyArray<{ lat: number; lng: number; km: number 
 // it is this close to the row's own pin AND nearer to it than to any other
 // location (7001/7005/7003 are independent — never borrow a neighbour's dock).
 const UNCODED_NEAR_KM = 0.35;
+// Duração típica das cargas no pátio (relatório do armazém 05-11 e 29-09:
+// 7001 mediana 37–48 min, 7005 17–24 min) e folga para "estadia longa".
+const LOAD_MIN_7001 = 45;
+const LOAD_MIN_7005 = 20;
+const LONG_STAY_EXTRA_MIN = 60;
+// 7001 + 7005 numa só visita: parte do 7005 (relatório 05-11: 7001 ≈ 58%).
+const SHARE_7005 = 0.42;
+// paragens seguidas na zona 7001/7005 com intervalos até isto = uma visita
+const YARD_VISIT_GAP_MIN = 20; // = YARD_CHAIN_GAP_MIN (espera)
+// Docas 54-59 (pino 7005) servem também o 7001 (relatório do armazém 05-11/
+// 29-09): a linha 7001 aceita uma paragem no 7005 (pontua abaixo do código
+// exato). O contrário não: o 7005 só carrega nas docas 54-59.
+// 7005 carrega nas docas 54-59, que o GPS também regista como 7001-SON/SOS
+// (relatório 05-11: 25× 7005, 10× SON, 3× SOS) — nunca no pino 7001 (leste).
+const servesDocks7005 = (s: DayStop & { parts?: { code: string | null }[] }): boolean =>
+  /^7001-SO[NS]$/i.test(s.code ?? "") || !!s.parts?.some((p) => /^(7005|7001-SO[NS])$/i.test(p.code ?? ""));
+const sharedDockAlt = (code: string): readonly string[] =>
+  /^7001/.test(code) ? ["7005"] : yardAcceptedCodes(code);
+// Regresso: primeira chegada ao pátio (até REGRESSO_YARD_KM do pino 7001, inclui
+// 7003 e o parque) nas REGRESSO_MAX_H horas a seguir à última entrega.
+const REGRESSO_YARD_KM = 0.6;
+const REGRESSO_MAX_H = 8;
+const REGRESSO_DEFAULT_MIN = 15;
+const REGRESSO_PARKED_EXTRA_MIN = 45;
 const UNCODED_CHAIN_GAP_MIN = 15;
+
+// One physical visit to the 7001/7005 area = the run
+// of consecutive stops there (gate touch + dock + uncoded stops beside the
+// docks) with gaps <= gapMin. 7003 is a separate site and is never merged.
+function mergeYardVisits<T extends DayStop & { assigned: boolean }>(
+  stops: T[],
+  codeCoords: ReadonlyMap<string, { lat: number; lng: number }>,
+  gapMin: number,
+): T[] {
+  const p7001 = codeCoords.get("7001");
+  const p7005 = codeCoords.get("7005");
+  const p7003 = codeCoords.get("7003");
+  const inArea = (s: T) => {
+    if (s.code) return /^700[15]/.test(s.code);
+    if (s.lat == null || s.lng == null || !p7001 || !p7005) return false;
+    if (YARD_NON_WAIT_ZONES.some((z) => haversineKm(s.lat!, s.lng!, z.lat, z.lng) <= z.km)) return false;
+    const d = Math.min(haversineKm(s.lat, s.lng, p7001.lat, p7001.lng), haversineKm(s.lat, s.lng, p7005.lat, p7005.lng));
+    const d3 = p7003 ? haversineKm(s.lat, s.lng, p7003.lat, p7003.lng) : Infinity;
+    return d <= UNCODED_NEAR_KM && d < d3;
+  };
+  const dur = (s: T) => (s.departedAt ? Date.parse(s.departedAt) : Date.parse(s.arrivedAt)) - Date.parse(s.arrivedAt);
+  const byPlate = new Map<string, T[]>();
+  const out: T[] = [];
+  for (const s of stops) {
+    if (!s.plate) out.push(s);
+    else (byPlate.get(s.plate) ?? byPlate.set(s.plate, []).get(s.plate)!).push(s);
+  }
+  for (const list of byPlate.values()) {
+    list.sort((a, b) => a.arrivedAt.localeCompare(b.arrivedAt));
+    let run: T[] = [];
+    const flush = () => {
+      if (run.length === 0) return;
+      if (run.length === 1) out.push(run[0]);
+      else {
+        const longest = [...run].sort((a, b) => dur(b) - dur(a))[0];
+        const coded = [...run].filter((s) => s.code).sort((a, b) => dur(b) - dur(a))[0];
+        const end = Math.max(...run.map((s) => Date.parse(s.departedAt ?? s.arrivedAt)));
+        out.push({
+          ...longest,
+          code: longest.code ?? coded?.code ?? "7001",
+          arrivedAt: run[0].arrivedAt,
+          departedAt: new Date(end).toISOString(),
+          parts: run.map((x) => ({ code: x.code, a: Date.parse(x.arrivedAt), d: Date.parse(x.departedAt ?? x.arrivedAt) })),
+        });
+      }
+      run = [];
+    };
+    for (const s of list) {
+      if (!inArea(s)) {
+        flush();
+        out.push(s);
+        continue;
+      }
+      const last = run[run.length - 1];
+      if (last) {
+        const lastEnd = Math.max(...run.map((x) => Date.parse(x.departedAt ?? x.arrivedAt)));
+        if ((Date.parse(s.arrivedAt) - lastEnd) / 60000 > gapMin) flush();
+      }
+      run.push(s);
+    }
+    flush();
+  }
+  return out;
+}
 
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, rawRecords, header, cols, platesWithGps } = args;
@@ -723,10 +811,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   // Re-stitch detect_stops fragments (same vehicle, same location, small gap)
   // into one effective stop BEFORE any candidate selection below — see
   // mergeFragmentedStops in common.ts for why.
-  const stops: WStop[] = mergeFragmentedStops(args.stops).map((s) => ({
+  let stops: WStop[] = mergeFragmentedStops(args.stops).map((s) => ({
     ...s,
     assigned: false,
   }));
+  stops = mergeYardVisits(stops, codeCoords, YARD_VISIT_GAP_MIN);
 
   // Candidate pool for the plate-typo check: plates with real GPS stops today.
   const platesWithDayStops = new Set<string>();
@@ -998,6 +1087,77 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (routePlate) for (const g of routeGroups) if (!g.plate) g.plate = routePlate;
   }
 
+  // ----- Troca de viatura ao nível da rota -----
+  // The planned truck has NO stop at any of the route's delivery stores in
+  // their windows, while exactly one other truck visited most of them: that
+  // truck did the route (relatório 29-09: 17/103 rotas com outra matrícula).
+  // The yard rows then follow it too — a per-store swap can never resolve
+  // 7001/7005/7003, where dozens of trucks stop every night.
+  const routeSwaps = new Map<string, { from: string; to: string; n: number; of: number }>();
+  {
+    const platesStops = new Map<string, WStop[]>();
+    for (const s of stops) if (s.plate) (platesStops.get(s.plate) ?? platesStops.set(s.plate, []).get(s.plate)!).push(s);
+    type Del = { code: string; lo: number; hi: number; depHi: number };
+    const delsOf = (rota: string): Del[] => {
+      const out: Del[] = [];
+      for (const w of works) {
+        if (w.rota !== rota || w.empty || !w.code || isYardType(w.code)) continue;
+        if (w.kept && w.keptArrMs != null) {
+          const pad = 30 * 60_000;
+          out.push({ code: w.code, lo: w.keptArrMs - pad, hi: (w.keptDepMs ?? w.keptArrMs) + pad, depHi: (w.keptDepMs ?? w.keptArrMs) + pad });
+        } else {
+          const g = groupMap.get(w.groupKey);
+          if (g) out.push({ code: w.code, lo: g.winLoMs, hi: g.winHiMs, depHi: g.winDepHiMs });
+        }
+      }
+      return out;
+    };
+    const hits = (plate: string, dels: Del[]) => {
+      const ss = platesStops.get(plate) ?? [];
+      return new Set(
+        dels
+          .filter((d) => ss.some((s) => codeEq(s.code, d.code, coLocatedGroups) && stopInWindow(s.arrivedAt, s.departedAt, d.lo, d.hi, d.depHi)))
+          .map((d) => d.code),
+      ).size;
+    };
+    const span = (dels: Del[]) => [Math.min(...dels.map((d) => d.lo)), Math.max(...dels.map((d) => d.hi))];
+    const plannedOf = new Map<string, string>();
+    for (const [rota, rg] of routeMap) {
+      const p = rg.find((g) => g.plate)?.plate;
+      if (p) plannedOf.set(rota, p);
+    }
+    for (const [rota, rg] of routeMap) {
+      const P = plannedOf.get(rota);
+      const dels = delsOf(rota);
+      const nCodes = new Set(dels.map((d) => d.code)).size;
+      // only a truck of ours that did something else that day; an unknown
+      // plate is a typo case (findPlateTypo, Step 3)
+      if (!P || nCodes === 0 || !platesWithGps.has(P) || hits(P, dels) > 0) continue;
+      let best: string | null = null;
+      let bestN = 0;
+      let tie = false;
+      for (const Q of platesStops.keys()) {
+        if (Q === P) continue;
+        const n = hits(Q, dels);
+        if (n > bestN) [best, bestN, tie] = [Q, n, false];
+        else if (n === bestN && n > 0) tie = true;
+      }
+      if (!best || tie || bestN < Math.max(1, Math.ceil(nCodes / 2))) continue;
+      // the other truck isn't busy with a route of its own at the same time
+      const [lo, hi] = span(dels);
+      const busy = [...plannedOf].some(([r2, p2]) => {
+        if (r2 === rota || p2 !== best) return false;
+        const d2 = delsOf(r2);
+        if (d2.length === 0) return false;
+        const [lo2, hi2] = span(d2);
+        return lo2 <= hi && hi2 >= lo && hits(best!, d2) > 0;
+      });
+      if (busy) continue;
+      routeSwaps.set(rota, { from: P, to: best, n: bestN, of: nCodes });
+      for (const g of rg) g.plate = best;
+    }
+  }
+
   const stopsForPlate = (plate: string) =>
     stops
       .filter((s) => s.plate === plate)
@@ -1174,7 +1334,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
       // 0 = incompatible, else the base score of matching group i to stop k
       const compat: number[][] = G.map((g) => {
-        const alt = yardAcceptedCodes(g.code);
+        const alt = sharedDockAlt(g.code);
         return plateStops.map((s) => {
           if (s.assigned) return 0;
           if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs)) return 0;
@@ -1192,6 +1352,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           let base = 0;
           if (codeEq(s.code, g.code, coLocatedGroups)) base = SCORE_EXACT;
           else if (alt.some((c) => codeEq(s.code, c, coLocatedGroups))) base = SCORE_YARD_ALT;
+          else if (/^7005/.test(g.code) && servesDocks7005(s)) base = SCORE_YARD_ALT;
           if (base > 0 && g.carga > 0 && dwellMin(s) < MIN_LOAD_DWELL_MIN) base -= SCORE_TOUCH_PENALTY;
           return base;
         });
@@ -1202,8 +1363,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       if (
         prevTail &&
         !sharedOnce.has(prevTail.stop) &&
-        codeEq(prevTail.stop.code, G[0].code, coLocatedGroups) &&
-        codeEq(prevTail.g.code, G[0].code, coLocatedGroups) &&
+        ((codeEq(prevTail.stop.code, G[0].code, coLocatedGroups) &&
+          codeEq(prevTail.g.code, G[0].code, coLocatedGroups)) ||
+          (
+            // only a REGRESSO (after the route's deliveries) hands its visit
+            // to the next route's carga — never a carga to another carga
+            [...works].some((w) => w.rota === prevTail!.g.rota && w.code && !/^700[135]/.test(w.code) && !isYardType(w.code) && w.idx < prevTail!.g.order) &&
+            /^700[15]/.test(prevTail.g.code) &&
+            /^700[15]/.test(G[0].code) &&
+            /^700[15]/.test(prevTail.stop.code ?? ""))) &&
         stopInWindow(prevTail.stop.arrivedAt, prevTail.stop.departedAt, G[0].winLoMs, G[0].winHiMs, G[0].winDepHiMs) &&
         Date.parse(prevTail.stop.arrivedAt) >= G[0].anchorLoMs &&
         Date.parse(prevTail.stop.arrivedAt) <= G[0].anchorHiMs
@@ -1300,7 +1468,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         let b = 0;
         const blockEnd = firstNonYardIdx.get(rota) ?? Infinity;
         while (b < n && isYardType(G[b].code) && G[b].order < blockEnd) b++;
-        const plain = kinds.slice(0, b).every((k) => k === "match" || k === "skip");
+        const plain = kinds
+          .slice(0, b)
+          .every((k) => k === "match" || k === "skip" || k === "share" || k === "head");
         if (b >= 2 && plain) {
           const upper = pickK.slice(b).find((k) => k >= 0) ?? m;
           const cands = (i: number) => {
@@ -1320,12 +1490,47 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           };
           const used = new Set<number>();
           const order = [...Array(b).keys()].sort((x, y) => cands(x).length - cands(y).length);
+          const usedBy = new Map<number, number>();
+          const shared = new Set<number>();
+          const sharedHeadCodes = new Set<string>();
+          const pairable = (i: number, j: number) =>
+            /^700[15]/.test(G[i].code) &&
+            /^700[15]/.test(G[j].code) &&
+            G[i].code.slice(0, 4) !== G[j].code.slice(0, 4);
           for (const i of order) {
             let best = -1;
             for (const k of cands(i)) if (!used.has(k) && (best < 0 || better(i, k, best))) best = k;
+            // 7005 + 7001 load at the same (shared) docks: one GPS visit may
+            // serve both — split later
+            if (
+              best < 0 &&
+              headShareK >= 0 &&
+              /^700[15]/.test(G[i].code) &&
+              ![...usedBy].some(([k, j]) => k === headShareK && G[j].code.slice(0, 4) === G[i].code.slice(0, 4)) &&
+              !sharedHeadCodes.has(G[i].code.slice(0, 4))
+            ) {
+              const s = plateStops[headShareK];
+              if (
+                stopInWindow(s.arrivedAt, s.departedAt, G[i].winLoMs, G[i].winHiMs, G[i].winDepHiMs) &&
+                (planDevMin(G[i], s) ?? 0) <= PLAN_MAX_DEV_MIN
+              ) {
+                best = headShareK;
+                sharedHeadCodes.add(G[i].code.slice(0, 4));
+              }
+            }
+            if (best < 0) {
+              for (const k of cands(i)) {
+                const j = usedBy.get(k);
+                if (j != null && !shared.has(k) && pairable(i, j) && (best < 0 || better(i, k, best))) best = k;
+              }
+              if (best >= 0) shared.add(best);
+            }
             pickK[i] = best;
             kinds[i] = best >= 0 ? "match" : "skip";
-            if (best >= 0) used.add(best);
+            if (best >= 0) {
+              used.add(best);
+              if (!usedBy.has(best)) usedBy.set(best, i);
+            }
           }
         }
       }
@@ -1467,6 +1672,218 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     }
   }
 
+  // 7001/7005/7003 are always the yard, even without a location type
+  const isYardCode = (code: string) => isYardType(code) || /^700[135]/.test(code);
+  const firstDeliveryIdx = new Map<string, number>();
+  for (const w of works) {
+    if (w.empty || !w.rota || !w.code || isYardCode(w.code)) continue;
+    if (!firstDeliveryIdx.has(w.rota)) firstDeliveryIdx.set(w.rota, w.idx);
+  }
+
+  // ----- Step 2a: a visit to the 7001/7005 docks -> carga times -----
+  // A visit (mergeYardVisits) = gate touch + espera + doca(s) [+ toque de saída].
+  //  • Saída = saída do pátio (fim da visita);
+  //  • Chegada da 1.ª carga = entrada no pátio (a espera pelo cais conta),
+  //    com as mesmas regras de "Rever" do Step 2b (chegada muito antecipada);
+  //  • 7005 + 7001 na mesma visita (docas 54-59 servem as duas; o armazém
+  //    carrega sempre 7005 primeiro e 7001 logo a seguir — relatório 05-11:
+  //    66/66 rotas, intervalo mediano 0 min): se o GPS separa as duas docas,
+  //    usa-se esse corte; senão divide-se o tempo de cais (7001 ≈ 58%);
+  //  • estadia longa (parado horas antes de carregar): a carga TERMINA quando
+  //    sai (29-09/05-11: erro mediano 6–7 min ancorado no fim);
+  //  • regresso da rota anterior na mesma visita: fica no início.
+  const noWaitWalk = new Set<StoreGroup>();
+  {
+    type Part = { code: string | null; a: number; d: number };
+    const visits = new Map<string, StoreGroup[]>();
+    for (const g of groups) {
+      if (g.conf !== "OK" || !g.assignedStop || !g.plate || !/^700[15]/.test(g.code)) continue;
+      const k = `${g.plate}|${g.assignedStop.id}|${g.assignedStop.arrivedAt}`;
+      (visits.get(k) ?? visits.set(k, []).get(k)!).push(g);
+    }
+    const inCarga = (g: StoreGroup) => (firstDeliveryIdx.get(g.rota) ?? Infinity) > g.order;
+    const isDwell = (p: Part) => p.d - p.a >= MIN_LOAD_DWELL_MIN * 60_000;
+    const iso = (t: number) => new Date(t).toISOString();
+    for (const gs of visits.values()) {
+      const stop = gs[0].assignedStop!;
+      const t0 = Date.parse(stop.arrivedAt);
+      const t1 = Date.parse(stop.departedAt ?? stop.arrivedAt);
+      // loads = rows of the latest route in the visit (its carga block, or a
+      // 7005+7001 pair mid-route); rows of an earlier route = its regresso
+      const lastRota = gs.reduce((a, b) => (b.order > a.order ? b : a)).rota;
+      const prior = gs.filter((g) => g.rota !== lastRota);
+      const loads = gs
+        .filter((g) => g.rota === lastRota)
+        .sort((a, b) => (/^7005/.test(a.code) ? 0 : 1) - (/^7005/.test(b.code) ? 0 : 1) || a.order - b.order);
+      if (loads.length === 0 || prior.length > 1 || loads.length > 2) continue;
+      if (loads.length === 1 && prior.length === 0 && !inCarga(loads[0])) continue; // lone regresso
+      if (
+        loads.length === 2 &&
+        (loads[0].rota !== loads[1].rota || loads[0].code.slice(0, 4) === loads[1].code.slice(0, 4))
+      ) {
+        continue;
+      }
+      const parts: Part[] = (stop as WStop & { parts?: Part[] }).parts ?? [{ code: stop.code, a: t0, d: t1 }];
+      const dwellParts = parts.filter(isDwell);
+      // Saída = saída do pátio (fim da visita, incl. toque no portão) — como a
+      // Chegada é a entrada; no 7003 o fim da paragem GPS = saída na portaria
+      const tEnd = t1;
+
+      const need =
+        loads.reduce((acc, g) => acc + (/^7005/.test(g.code) ? LOAD_MIN_7005 : LOAD_MIN_7001), 0) * 60_000;
+      // regresso + one carga in a normal visit: keep sharing the whole stop
+      // (Step 2b writes "Viatura já no pátio")
+      if (prior.length === 1 && loads.length === 1 && tEnd - t0 <= need + LONG_STAY_EXTRA_MIN * 60_000) continue;
+
+      const segs: [StoreGroup, number, number][] = [];
+      let cursor = t0;
+      for (const g of prior) {
+        const w = g.rows.find((r) => r.planArrMs != null && r.planDepMs != null);
+        const dur = Math.max(w ? w.planDepMs! - w.planArrMs! : 0, REGRESSO_DEFAULT_MIN * 60_000);
+        const end = Math.min(tEnd, cursor + Math.min(dur, (tEnd - t0) / 3));
+        segs.push([g, cursor, end]);
+        cursor = end;
+      }
+      // cais = first dwell piece from here on
+      const dock = dwellParts.find((p) => p.d > cursor);
+      let loadStart = dock ? Math.max(cursor, dock.a) : cursor;
+      let long = false;
+      if (tEnd - loadStart > need + LONG_STAY_EXTRA_MIN * 60_000) {
+        loadStart = tEnd - need;
+        long = true;
+      }
+      let gpsSplit = false;
+      if (loads.length === 2) {
+        const i5 = parts.findIndex((p) => /^7005/.test(p.code ?? "") && isDwell(p) && p.d > loadStart);
+        const p1 = i5 >= 0 ? parts.slice(i5 + 1).find((p) => /^7001/.test(p.code ?? "") && isDwell(p)) : undefined;
+        if (!long && p1) {
+          gpsSplit = true;
+          segs.push([loads[0], loadStart, parts[i5].d], [loads[1], p1.a, tEnd]);
+        } else {
+          const cut = Math.round((loadStart + SHARE_7005 * (tEnd - loadStart)) / 60_000) * 60_000;
+          segs.push([loads[0], loadStart, cut], [loads[1], cut, tEnd]);
+        }
+      } else segs.push([loads[0], loadStart, tEnd]);
+
+      // Chegada da 1.ª carga: entrada no pátio (a espera conta), salvo se a
+      // viatura já lá estava (regresso da rota anterior na mesma visita)
+      const first = loads[0];
+      const firstSeg = segs.find((x) => x[0] === first)!;
+      let conf: Work["conf"] = "OK";
+      const notes: string[] = [];
+      // Step 2b still walks back over EARLIER separate stops when this visit
+      // itself holds no waiting time (first load starts at the visit start)
+      const decided = prior.length > 0 || long || t0 < firstSeg[1];
+      if (prior.length) {
+        notes.push(`Viatura já no pátio (regresso da rota ${prior[0].rota}); cais às ${fmtHM(iso(firstSeg[1]))}.`);
+      } else if (t0 < firstSeg[1]) {
+        const dockAt = firstSeg[1];
+        const wait = Math.round((dockAt - t0) / 60_000);
+        const plan = first.planArrMs;
+        const vsPlan =
+          plan != null
+            ? ` (${dockAt >= plan ? "+" : ""}${Math.round((dockAt - plan) / 60_000)} min vs planeado ${fmtHM(iso(plan))})`
+            : "";
+        notes.push(`Entrada no pátio ${fmtHM(stop.arrivedAt)} · espera ${wait} min · cais ${fmtHM(iso(dockAt))}${vsPlan}.`);
+        const before = plan != null ? Math.round((Math.min(dockAt, plan) - t0) / 60_000) : 0;
+        if (plan != null && t0 < plan - EARLY_ARRIVAL_REVIEW_MIN * 60_000 && before >= EARLY_WAIT_REVIEW_MIN) {
+          conf = REVIEW;
+          notes.push(
+            `Chegou ${Math.round((plan - t0) / 60_000)} min antes da hora planeada — ` +
+              `${before} min da espera são antes dessa hora; confirmar se contam.`,
+          );
+        } else if (plan == null && wait > LONG_WAIT_REVIEW_MIN) {
+          conf = REVIEW;
+          notes.push(`Espera longa (sem plano de cargas) — confirmar.`);
+        }
+        firstSeg[1] = t0;
+      }
+      if (long) {
+        notes.push(
+          `Estadia longa: carga${loads.length > 1 ? "s" : ""} no fim da estadia ` +
+            `(~${Math.round(need / 60_000)} min antes da saída ${fmtHM(iso(tEnd))}).`,
+        );
+      }
+      if (loads.length === 2) {
+        notes.push(
+          gpsSplit
+            ? `7005 e 7001 separados pelo GPS.`
+            : `7005 + 7001 numa só paragem (docas partilhadas): 7005 primeiro, depois 7001 ` +
+                `(~${Math.round(SHARE_7005 * 100)}% / ${Math.round((1 - SHARE_7005) * 100)}% do tempo de cais).`,
+        );
+      }
+      const note = notes.join(" ");
+      for (const [g, a, b] of segs) {
+        if (inCarga(g) && (g !== first || decided)) noWaitWalk.add(g);
+        const v: WStop = { ...stop, arrivedAt: iso(a), departedAt: iso(b), assigned: true };
+        g.assignedStop = v;
+        if (g === first) g.conf = conf;
+        for (const w of g.rows) {
+          if (w.assignedStop?.id !== stop.id) continue;
+          w.assignedStop = v;
+          if (g === first) w.conf = conf;
+          w.real = g.rota === lastRota
+            ? note
+            : `Regresso: início da visita ao pátio ${fmtHM(stop.arrivedAt)}–${fmtHM(iso(tEnd))} ` +
+              `(a seguir carga da rota ${loads[0].rota}).`;
+        }
+      }
+    }
+  }
+
+  // ----- Step 2c: regresso ao pátio ainda sem hora -----
+  // The route's last row (regresso 7001/7003) left blank by the DP: the truck
+  // often comes back to ANOTHER part of the yard (7003, 7005, parque sem
+  // local) or hours after the plan (entregas atrasadas, fora da janela ±4h).
+  // Regresso = primeira chegada ao pátio depois da última entrega da rota.
+  {
+    const pin = codeCoords.get("7001");
+    const inYard = (s: WStop) =>
+      s.code
+        ? /^700[135]/.test(s.code)
+        : s.lat != null && s.lng != null && !!pin && haversineKm(s.lat, s.lng, pin.lat, pin.lng) <= REGRESSO_YARD_KM;
+    for (const g of groups) {
+      if (g.conf !== "" || g.assignedStop || !g.plate || !g.isTail || !isYardCode(g.code)) continue;
+      const fn = firstDeliveryIdx.get(g.rota);
+      if (fn == null || g.order < fn) continue;
+      let lastDel = -Infinity;
+      for (const w of works) {
+        if (w.rota !== g.rota || isYardCode(w.code) || w.idx > g.order) continue;
+        const t = w.kept
+          ? w.keptDepMs ?? w.keptArrMs
+          : w.conf === "OK" && w.assignedStop
+            ? Date.parse(w.assignedStop.departedAt ?? w.assignedStop.arrivedAt)
+            : null;
+        if (t != null && t > lastDel) lastDel = t;
+      }
+      if (lastDel === -Infinity) continue;
+      const cand = stopsForPlate(g.plate).find((s) => {
+        const a = Date.parse(s.arrivedAt);
+        return a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs && inYard(s);
+      });
+      if (!cand) continue;
+      const a = Date.parse(cand.arrivedAt);
+      const d = Date.parse(cand.departedAt ?? cand.arrivedAt);
+      const w0 = g.rows.find((r) => r.planArrMs != null && r.planDepMs != null);
+      const planDur = w0 ? Math.max(0, w0.planDepMs! - w0.planArrMs!) : 0;
+      const cap = Math.max(planDur, REGRESSO_DEFAULT_MIN * 60_000);
+      const parked = d - a > cap + REGRESSO_PARKED_EXTRA_MIN * 60_000;
+      const v: WStop = { ...cand, departedAt: new Date(parked ? a + cap : d).toISOString(), assigned: true };
+      cand.assigned = true;
+      const note =
+        `Regresso: primeira chegada ao pátio depois da última entrega (${fmtHM(new Date(lastDel).toISOString())}) — ` +
+        `${cand.code ?? "paragem sem local junto ao pátio"} ${fmtHM(cand.arrivedAt)}–${fmtHM(cand.departedAt)}` +
+        (parked ? `; viatura ficou parada, Saída = chegada + ${Math.round(cap / 60000)} min.` : ".");
+      g.conf = "OK";
+      g.assignedStop = v;
+      for (const w of g.rows) {
+        w.conf = "OK";
+        w.assignedStop = v;
+        w.real = note;
+      }
+    }
+  }
+
   // ----- Step 2b: espera pelo cais conta na Chegada das cargas -----
   {
     const yardPins = [...codeCoords]
@@ -1476,7 +1893,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       s.lat != null &&
       s.lng != null &&
       YARD_NON_WAIT_ZONES.some((z) => haversineKm(s.lat!, s.lng!, z.lat, z.lng) <= z.km);
-    const isWaitStop = (s: WStop) => {
+    const isWaitStop = (s: WStop): boolean => {
+      // a merged yard visit (mergeYardVisits) is waiting when every piece is a
+      // gate touch or an uncoded stop (zona de espera) — no dock dwell inside
+      const parts = (s as WStop & { parts?: { code: string | null; a: number; d: number }[] }).parts;
+      if (parts) {
+        return parts.every(
+          (p) => !p.code || (isYardCode(p.code) && p.d - p.a < MIN_LOAD_DWELL_MIN * 60_000),
+        );
+      }
       // a coded yard stop counts only as a gate/dock touch; a real dwell at a
       // dock that no row claimed is some other load, not waiting
       if (s.code) {
@@ -1510,6 +1935,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
 
     const seenRoute = new Set<string>();
     for (const g of heads) {
+      if (noWaitWalk.has(g)) {
+        seenRoute.add(g.rota);
+        continue;
+      }
       const dock = g.assignedStop!;
       const firstOfRoute = !seenRoute.has(g.rota);
       seenRoute.add(g.rota);
@@ -1585,6 +2014,11 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       }
     }
   }
+
+  // A stop already accounted for by a hand-filled (kept) row is that row's
+  // visit — never a "swap" candidate for another route (16-11: 186376676/38
+  // got AD-70-DF 04:49, the visit its own route 186376648 already lists).
+  for (const s of keptClaim.keys()) s.assigned = true;
 
   // ----- Step 3: vehicle-swap suggestion for uncovered store-groups -----
   const rivalRows: SwapRival[] = groups.map((g) => ({
@@ -1835,7 +2269,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // group's/route's plate (see the sibling/route inheritance in the
     // group-building step above), and findVehicleSwap itself treats g.plate
     // as "the planned vehicle" for detecting a swap in the first place.
-    w.out[VV_COL] = (groupMap.get(w.groupKey)?.plate ?? w.plate) ?? "";
+    const rs = routeSwaps.get(w.rota);
+    if (rs && w.conf === "OK") {
+      w.conf = SWAP;
+      w.swapPlate = rs.to;
+      w.real =
+        `Rota planeada com ${rs.from}, que não tem paragens em nenhuma loja da rota; ${rs.to} esteve em ` +
+        `${rs.n}/${rs.of} lojas da rota nas horas previstas — troca de viatura provável, confirmar.` +
+        (w.real ? ` ${w.real}` : "");
+      if (cols.plateCol) w.out[cols.plateCol] = rs.to;
+    }
+    w.out[VV_COL] = rs ? rs.from : (groupMap.get(w.groupKey)?.plate ?? w.plate) ?? "";
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
     // A row whose input Chegada/Saída were rejected as an implausible pre-fill
     // (see placeholderNote above) always carries that explanation — prepended
