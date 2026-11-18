@@ -26,8 +26,8 @@ function hav(aLat: number, aLng: number, bLat: number, bLng: number) {
   const h = Math.sin(r(bLat - aLat) / 2) ** 2 + Math.cos(r(aLat)) * Math.cos(r(bLat)) * Math.sin(r(bLng - aLng) / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
 }
-async function must<T>(p: PromiseLike<{ data: T; error: any }>): Promise<T> {
-  const { data, error } = await p; if (error) throw new Error(error.message); return data;
+async function must<T>(p: PromiseLike<{ data: T; error: any }>): Promise<NonNullable<T>> {
+  const { data, error } = await p; if (error) throw new Error(error.message); return data as NonNullable<T>;
 }
 (async () => {
   if (REVERT) {
