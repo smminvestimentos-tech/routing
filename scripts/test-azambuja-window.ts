@@ -658,8 +658,8 @@ ok("unparseable -> unchanged", normalizeDateTimeCell("mais ou menos agora", "mai
   });
   const r = res.rows[0];
   ok("kept row: Confiança = mantido", String(r["Confiança"]).includes("mantido"));
-  ok("kept row: Chegada re-rendered DD-MM-YYYY", r["Hora Chegada"] === "08-09-2026 00:12", r["Hora Chegada"]);
-  ok("kept row: Saida re-rendered DD-MM-YYYY", r["Hora Saida"] === "08-09-2026 01:30", r["Hora Saida"]);
+  ok("kept row: Chegada re-rendered DD-MM-YYYY", r["Hora Chegada"] === "08-09-2026 00:12:00", r["Hora Chegada"]);
+  ok("kept row: Saida re-rendered DD-MM-YYYY", r["Hora Saida"] === "08-09-2026 01:30:00", r["Hora Saida"]);
   ok("kept row: MATRICULA untouched", r["MATRICULA"] === "AA-11-BB");
 }
 

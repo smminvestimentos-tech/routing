@@ -333,7 +333,7 @@ ok(
   ok("Azambuja kept: E66 conf === KEPT", r.rows[1]["Confiança"] === KEPT, r.rows[1]["Confiança"]);
   ok(
     "Azambuja kept: E66 times untouched",
-    r.rows[1]["Hora Chegada"] === "05-09-2026 07:00" && r.rows[1]["Hora Saida"] === "05-09-2026 07:20",
+    r.rows[1]["Hora Chegada"] === "05-09-2026 07:00:00" && r.rows[1]["Hora Saida"] === "05-09-2026 07:20:00",
   );
   ok("Azambuja kept: E16 + B77 matched OK", r.rows[0]["Confiança"] === "OK" && r.rows[2]["Confiança"] === "OK", [r.rows[0]["Confiança"], r.rows[2]["Confiança"]]);
 }
@@ -1341,7 +1341,7 @@ ok(
   const row7001 = r.rows[1];
 
   ok("33-IV-96 conflict: row 7005 conf kept unchanged", row7005["Confiança"] === KEPT, row7005);
-  ok("33-IV-96 conflict: row 7005 times kept unchanged", row7005["Hora Chegada"] === "15-09-2026 02:50" && row7005["Hora Saida"] === "15-09-2026 03:10", row7005);
+  ok("33-IV-96 conflict: row 7005 times kept unchanged", row7005["Hora Chegada"] === "15-09-2026 02:50:00" && row7005["Hora Saida"] === "15-09-2026 03:10:00", row7005);
   ok("33-IV-96 conflict: row 7001 conf OK unchanged", row7001["Confiança"] === "OK", row7001);
   ok("33-IV-96 conflict: row 7001 times OK unchanged", row7001["Hora Chegada"] === "15-09-2026 02:54:00" && row7001["Hora Saida"] === "15-09-2026 03:34:00", row7001);
 

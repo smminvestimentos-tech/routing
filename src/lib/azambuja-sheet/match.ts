@@ -2636,6 +2636,13 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         raw?.[cols.saidaCol],
         day,
       );
+      // all times in the sheet share one shape, DD-MM-YYYY HH:MM:SS: a
+      // hand-typed HH:MM gets ":00" (the Confiança column already tells it
+      // apart from a GPS time — the user asked for a uniform format)
+      for (const c of [cols.chegadaCol, cols.saidaCol]) {
+        const v = String(w.out[c] ?? "");
+        if (/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/.test(v)) w.out[c] = `${v}:00`;
+      }
       w.out[CONFIANCA_COL] = KEPT;
       w.out[REAL_COL] = "";
       // Kept rows never go through grouping (no swap/typo logic touches

@@ -125,7 +125,7 @@ async function main() {
     ];
     const r = runMatch({ day: "2026-09-15", records, header, cols, stops, platesWithGps: new Set(["33IV96"]), pingWindowByPlate: new Map(), rawRecords: records });
     ok("OK row written with the GPS's real seconds", r.rows[1]["Hora Chegada"] === "15-09-2026 02:54:17" && r.rows[1]["Hora Saida"] === "15-09-2026 03:34:41", [r.rows[1]["Hora Chegada"], r.rows[1]["Hora Saida"]]);
-    ok("kept transporter row stays HH:MM (no invented seconds)", r.rows[0]["Hora Chegada"] === "15-09-2026 02:50" && r.rows[0]["Hora Saida"] === "15-09-2026 03:10", [r.rows[0]["Hora Chegada"], r.rows[0]["Hora Saida"]]);
+    ok("kept transporter row gets :00 (uniform HH:MM:SS)", r.rows[0]["Hora Chegada"] === "15-09-2026 02:50:00" && r.rows[0]["Hora Saida"] === "15-09-2026 03:10:00", [r.rows[0]["Hora Chegada"], r.rows[0]["Hora Saida"]]);
     ok("🔘 conflict still detected with a seconds cell on one side", String(r.rows[1][REAL_COL]).includes("Conflito") && String(r.rows[0][REAL_COL]).includes("Conflito"), [r.rows[0][REAL_COL], r.rows[1][REAL_COL]]);
   }
   {
@@ -193,7 +193,7 @@ async function main() {
         [p2.rows[i][CONFIANCA_COL], p2.rows[i]["Hora Chegada"], p1.rows[i]["Hora Chegada"], p2.rows[i]["Hora Saida"], p1.rows[i]["Hora Saida"]],
       );
     }
-    ok("pass 2: transporter row still HH:MM (no seconds invented on the way round)", p2.rows[2]["Hora Chegada"] === "09-09-2026 10:00");
+    ok("pass 2: transporter row stays 10:00 (only :00 added)", p2.rows[2]["Hora Chegada"] === "09-09-2026 10:00:00");
 
     // The user edited a Chegada in Excel -> Excel stored a date serial.
     const raw3 = raw2.map((r) => ({ ...r }));
