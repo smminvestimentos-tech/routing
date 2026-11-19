@@ -18,6 +18,7 @@ type Summary = {
   routes: number;
   routesOk: number;
   dayStops: number;
+  warehouse?: { linked: number; plateFixes: number; agree: number; disagree: number; blank: number };
 };
 
 type Result = {
@@ -25,6 +26,7 @@ type Result = {
   fileBase64: string;
   day: string;
   summary: Summary;
+  relatorio?: { used: boolean; sheetRoutes: number; reportRoutes: number; common: number; warning?: string };
 };
 
 const XLSX_MIME =
@@ -49,6 +51,8 @@ export function AzambujaSheetClient() {
   const [file, setFile] = useState<File | null>(null);
   const planoRef = useRef<HTMLInputElement>(null);
   const [plano, setPlano] = useState<File | null>(null);
+  const relatorioRef = useRef<HTMLInputElement>(null);
+  const [relatorio, setRelatorio] = useState<File | null>(null);
   const [day, setDay] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +67,7 @@ export function AzambujaSheetClient() {
       const body = new FormData();
       body.append("file", file);
       if (plano) body.append("plano", plano);
+      if (relatorio) body.append("relatorio", relatorio);
       if (day) body.append("day", day);
       const res = await fetch("/api/azambuja-sheet", { method: "POST", body });
       const json = await res.json().catch(() => ({}));
@@ -83,6 +88,8 @@ export function AzambujaSheetClient() {
     setFile(null);
     setPlano(null);
     if (planoRef.current) planoRef.current.value = "";
+    setRelatorio(null);
+    if (relatorioRef.current) relatorioRef.current.value = "";
     setDay("");
     setError(null);
     setResult(null);
@@ -143,6 +150,29 @@ export function AzambujaSheetClient() {
             accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => {
               setPlano(e.target.files?.[0] ?? null);
+              setError(null);
+              setResult(null);
+            }}
+            className="text-sm file:mr-3 file:rounded-md file:border file:border-black/15 file:bg-white/75 file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-white dark:file:border-white/20 dark:file:bg-neutral-900/75 dark:hover:file:bg-neutral-900"
+          />
+        </label>
+
+        <label className="mt-4 flex flex-col gap-2 text-sm">
+          <span className="font-medium">
+            Relatório diário do armazém .xlsx{" "}
+            <span className="font-normal text-black/50 dark:text-white/50">
+              (opcional — mesmo dia; corrige a matrícula, escolhe a visita ao
+              pátio que contém a carga real e acrescenta a coluna «Armazém» para
+              comparar. As horas na folha continuam a ser a entrada e a saída do
+              pátio)
+            </span>
+          </span>
+          <input
+            ref={relatorioRef}
+            type="file"
+            accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => {
+              setRelatorio(e.target.files?.[0] ?? null);
               setError(null);
               setResult(null);
             }}
@@ -248,6 +278,19 @@ export function AzambujaSheetClient() {
                 </span>{" "}
                 {result.summary.review}
               </li>
+              {result.relatorio?.warning && (
+                <li className="text-red-700 dark:text-red-300">⚠️ {result.relatorio.warning}</li>
+              )}
+              {result.summary.warehouse && (
+                <li>
+                  <span className="font-medium">🏭 Relatório do armazém:</span>{" "}
+                  {result.summary.warehouse.linked} linhas ligadas ·{" "}
+                  {result.summary.warehouse.plateFixes} rotas com matrícula corrigida · pátio:{" "}
+                  {result.summary.warehouse.agree} batem com a carga real,{" "}
+                  {result.summary.warehouse.disagree} não batem (Rever),{" "}
+                  {result.summary.warehouse.blank} sem visita GPS
+                </li>
+              )}
               <li className="text-black/50 dark:text-white/50">
                 {result.summary.dayStops} paragens nossas nesse dia
                 {result.summary.passthrough > 0

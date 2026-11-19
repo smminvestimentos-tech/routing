@@ -86,6 +86,7 @@ import {
   type TrackitCandidateMap,
 } from "@/lib/sheet-match/trackit-candidates";
 import type { PlanLine } from "@/lib/azambuja-sheet/plano";
+import type { WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
 
 export {
   CONFIANCA_COL,
@@ -184,11 +185,28 @@ export type MatchSummary = {
   /** distinct (ROTA) count and how many matched cleanly */
   routes: number;
   routesOk: number;
+  /** Relatório diário do armazém (quando vem no upload) */
+  warehouse?: WarehouseSummary;
+};
+
+export type WarehouseSummary = {
+  /** linhas da folha ligadas a uma linha do relatório */
+  linked: number;
+  /** rotas com a matrícula corrigida pela do relatório */
+  plateFixes: number;
+  /** linhas do pátio com hora real no relatório e hora da app: a visita da app contém a carga real */
+  agree: number;
+  /** …e não contém (vão para Rever) */
+  disagree: number;
+  /** linhas do pátio com hora real no relatório e sem hora da app */
+  blank: number;
 };
 
 export type RunMatchArgs = {
   /** Plano de Cargas do mesmo dia (opcional, em memória) — ver plano.ts */
   plan?: readonly PlanLine[];
+  /** Relatório diário do armazém (opcional, em memória) — ver relatorio.ts */
+  warehouse?: readonly WarehouseLine[];
   day: string; // YYYY-MM-DD
   records: SheetRecord[];
   /** same rows, read with raw:true — Excel serials as numbers (for kept-row
@@ -425,6 +443,9 @@ export function parseCiclo(raw: unknown): { ini: string; fim: string } {
 
 const DAY_MIN = 24 * 60;
 const CICLO_PAD_MS = 3 * 3_600_000;
+// a carga may start this long before its route's window (see
+// cargaOverlapsStart in runMatch) — the stops query must reach back as far
+export const CARGA_LOOKBACK_MS = 6 * 3_600_000;
 
 // Epoch-ms [lo, hi) bounds a single CICLO's real stops may fall in, on `day`.
 //
@@ -634,6 +655,8 @@ type Work = {
   /** kept rows only: their Chegada/Saída as epoch-ms (Lisbon wall-clock) */
   keptArrMs: number | null;
   keptDepMs: number | null;
+  /** linha do relatório do armazém ligada a esta (quando vem no upload) */
+  wh: WarehouseLine | null;
 };
 
 // "DD-MM-YYYY HH:MM[:SS]" (normalizeDateTimeCell's output, Lisbon wall-clock)
@@ -674,6 +697,18 @@ type StoreGroup = {
 };
 
 const PLAN_WINDOW_MS = 4 * 3_600_000;
+// coluna de saída com as horas reais do relatório do armazém (só quando vem)
+export const ARMAZEM_COL = "Armazém";
+// Relatório do armazém: a visita GPS escolhida tem de tocar na hora real da
+// carga com esta folga (relógios / cais registado uns minutos depois).
+const WH_PAD_MS = 30 * 60_000;
+function whRealWindow(code: string, l: WarehouseLine): { lo: number; hi: number; a: number; b: number } | null {
+  const is7003 = /^7003/.test(code);
+  const a = is7003 ? (l.portaInMs ?? l.iniMs) : l.iniMs;
+  if (a == null) return null;
+  const b = (is7003 ? (l.portaOutMs ?? l.fimMs) : l.fimMs) ?? a;
+  return { lo: a - WH_PAD_MS, hi: b + WH_PAD_MS, a, b };
+}
 // Kept (hand-filled) delivery rows are order anchors for the rest of their
 // route: a row listed after one can't take a stop that arrived before it, and
 // vice versa. Slack for clock rounding / a stop recorded a bit early.
@@ -714,6 +749,10 @@ const LOAD_MIN_7005 = 20;
 const LONG_STAY_EXTRA_MIN = 60;
 // 7001 + 7005 numa só visita: parte do 7005 (relatório 05-11: 7001 ≈ 58%).
 const SHARE_7005 = 0.42;
+// a 7001 GPS piece after the 7005 dock counts as the 7001 load (GPS split) only
+// from this long — shorter is the exit touch (18-11 47-LF-63: 7005 03:00–04:45,
+// 7001 04:50–04:55; real 7005 03:50, 7001 04:01–04:25 at the 7005 docks)
+const GPS_SPLIT_7001_MIN = 10;
 // paragens seguidas na zona 7001/7005 com intervalos até isto = uma visita
 const YARD_VISIT_GAP_MIN = 20; // = YARD_CHAIN_GAP_MIN (espera)
 // Docas 54-59 (pino 7005) servem também o 7001 (relatório do armazém 05-11/
@@ -830,6 +869,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   for (const c of [diaCol, cols.chegadaCol, cols.saidaCol, CONFIANCA_COL, REAL_COL]) {
     if (!outHeader.includes(c)) outHeader.push(c);
   }
+  if (args.warehouse && args.warehouse.length > 0 && !outHeader.includes(ARMAZEM_COL)) outHeader.push(ARMAZEM_COL);
   if (cols.viaturaPlaneadoCol) {
     for (const c of [centroCustoColOut, nDedicadoColOut]) {
       if (!outHeader.includes(c)) outHeader.push(c);
@@ -921,6 +961,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       assignedStop: null,
       keptArrMs: kept ? dmyhmEpoch(normalizeDateTimeCell(rawChegada, chegadaRaw, day)) : null,
       keptDepMs: kept ? dmyhmEpoch(normalizeDateTimeCell(rawSaida, saidaRaw, day)) : null,
+      wh: null,
     };
   });
 
@@ -947,6 +988,35 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       w.planDepMs = pl.depMs;
       w.carga = pl.tipo === "C" ? pl.carga : 0;
       planMatched++;
+    }
+  }
+
+  // Relatório diário do armazém -> each sheet row: same ROTA, same code, in
+  // SEQ order (as the plan above). Only informs: real plate per route, which
+  // GPS visit holds the real load, and the «Armazém» comparison column.
+  const warehouse = args.warehouse && args.warehouse.length > 0 ? args.warehouse : null;
+  const whPlateByRota = new Map<string, string>();
+  let whLinked = 0;
+  if (warehouse) {
+    const byRota = new Map<string, WarehouseLine[]>();
+    for (const l of warehouse) (byRota.get(l.rota) ?? byRota.set(l.rota, []).get(l.rota)!).push(l);
+    for (const [rota, arr] of byRota) {
+      arr.sort((a, b) => a.seq - b.seq);
+      const tally = new Map<string, number>();
+      for (const l of arr) if (l.plate) tally.set(l.plate, (tally.get(l.plate) ?? 0) + 1);
+      const best = [...tally].sort((a, b) => b[1] - a[1])[0];
+      if (best) whPlateByRota.set(rota, best[0]);
+    }
+    const used = new Set<WarehouseLine>();
+    for (const w of works) {
+      if (w.empty || !w.rota || !w.code) continue;
+      const l = (byRota.get(w.rota) ?? []).find(
+        (x) => !used.has(x) && normalizeStoreCode(x.code).toUpperCase() === w.code.toUpperCase(),
+      );
+      if (!l) continue;
+      used.add(l);
+      w.wh = l;
+      whLinked++;
     }
   }
 
@@ -1089,6 +1159,23 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (routePlate) for (const g of routeGroups) if (!g.plate) g.plate = routePlate;
   }
 
+  // ----- Matrícula real do relatório do armazém -----
+  // The warehouse writes down the truck that actually loaded (18-11: ~10% of
+  // routes differ from the sheet's MATRICULA, e.g. 03-QA-37 → 03-QA-31). When
+  // that truck is one of ours, the whole route follows it.
+  const whPlateFixes = new Map<string, { from: string | null; to: string }>();
+  {
+    const platesWithStops = new Set<string>();
+    for (const s of stops) if (s.plate) platesWithStops.add(s.plate);
+    for (const [rota, rg] of routeMap) {
+      const real = whPlateByRota.get(rota);
+      const planned = rg.find((g) => g.plate)?.plate ?? null;
+      if (!real || real === planned || !platesWithStops.has(real)) continue;
+      whPlateFixes.set(rota, { from: planned, to: real });
+      for (const g of rg) g.plate = real;
+    }
+  }
+
   // ----- Troca de viatura ao nível da rota -----
   // The planned truck has NO stop at any of the route's delivery stores in
   // their windows, while exactly one other truck visited most of them: that
@@ -1134,7 +1221,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       const nCodes = new Set(dels.map((d) => d.code)).size;
       // only a truck of ours that did something else that day; an unknown
       // plate is a typo case (findPlateTypo, Step 3)
-      if (!P || nCodes === 0 || !platesWithGps.has(P) || hits(P, dels) > 0) continue;
+      if (!P || whPlateFixes.has(rota) || whPlateByRota.has(rota) || nCodes === 0 || !platesWithGps.has(P) || hits(P, dels) > 0) continue;
       let best: string | null = null;
       let bestN = 0;
       let tie = false;
@@ -1250,6 +1337,46 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     }
   }
 
+  // Relatório do armazém: the real yard time of a group (7001/7005 = carga no
+  // cais; 7003 = portaria, else cais), padded — see WH_PAD_MS.
+  const whWindow = (g: StoreGroup): { lo: number; hi: number } | null => {
+    if (!/^700[135]/.test(g.code)) return null;
+    const l = g.rows.find((w) => w.wh)?.wh;
+    return l ? whRealWindow(g.code, l) : null;
+  };
+  const visitOverlaps = (s: WStop, ww: { lo: number; hi: number }) => {
+    const a = Date.parse(s.arrivedAt);
+    const d = Date.parse(s.departedAt ?? s.arrivedAt);
+    return a <= ww.hi && d >= ww.lo;
+  };
+  /** the stop may serve the group as far as the warehouse time goes */
+  const whOk = (g: StoreGroup, s: WStop) => {
+    const ww = whWindow(g);
+    return !ww || visitOverlaps(s, ww);
+  };
+  /** minutes between the real start (portaria/cais) and the stop; 0 = inside */
+  const whDevMin = (g: StoreGroup, s: WStop): number | null => {
+    const l = /^700[135]/.test(g.code) ? g.rows.find((w) => w.wh)?.wh : null;
+    const win = l ? whRealWindow(g.code, l) : null;
+    if (!win) return null;
+    const a = Date.parse(s.arrivedAt);
+    const d = Date.parse(s.departedAt ?? s.arrivedAt);
+    return win.a >= a && win.a <= d ? 0 : Math.min(Math.abs(win.a - a), Math.abs(win.a - d)) / 60_000;
+  };
+
+  // Carga (yard row before the route's first delivery) of a route whose window
+  // starts at the service day (same-day/free-text CICLO): the truck often
+  // starts loading before midnight — a yard visit that ARRIVED up to
+  // CARGA_LOOKBACK_MS before the window and is still there at its start counts
+  // (18-11: 02:00|14:00 AN-38-VF 7005 23:10, 01:00|13:00 BC-88-TC visit from
+  // 22:40, Partenariados BB-17-GA 23:10 — all blank before).
+  const cargaOverlapsStart = (g: StoreGroup, s: WStop): boolean => {
+    if (!isYardType(g.code) || !(g.order < (firstNonYardIdx.get(g.rota) ?? Infinity))) return false;
+    const a = Date.parse(s.arrivedAt);
+    const d = Date.parse(s.departedAt ?? s.arrivedAt);
+    return a < g.winLoMs && a >= g.winLoMs - CARGA_LOOKBACK_MS && d > g.winLoMs && d < g.winDepHiMs;
+  };
+
   const SCORE_EXACT = 1000;
   const SCORE_YARD_ALT = 990;
   const SCORE_SHARED = 980;
@@ -1261,6 +1388,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   const PLAN_MAX_DEV_MIN = 240;
   const MIN_LOAD_DWELL_MIN = 5;
   const SCORE_TOUCH_PENALTY = 100;
+  const SCORE_STORE_BONUS = 50;
   const dwellMin = (s: WStop) =>
     s.departedAt ? (Date.parse(s.departedAt) - Date.parse(s.arrivedAt)) / 60000 : Infinity;
   const planDevMin = (g: StoreGroup, s: WStop) =>
@@ -1339,7 +1467,14 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         const alt = sharedDockAlt(g.code);
         return plateStops.map((s) => {
           if (s.assigned) return 0;
-          if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs)) return 0;
+          // with the warehouse's real time, the visit must contain it (± pad)
+          // — it replaces the CICLO window, which the real loads often miss
+          const ww = whWindow(g);
+          if (ww) {
+            if (!visitOverlaps(s, ww)) return 0;
+          } else if (!stopInWindow(s.arrivedAt, s.departedAt, g.winLoMs, g.winHiMs, g.winDepHiMs) && !cargaOverlapsStart(g, s)) {
+            return 0;
+          }
           const arrMs = Date.parse(s.arrivedAt);
           if (arrMs < g.anchorLoMs || arrMs > g.anchorHiMs) return 0;
           const claimer = keptClaim.get(s);
@@ -1352,10 +1487,22 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           const dev = planDevMin(g, s);
           if (dev != null && dev > PLAN_MAX_DEV_MIN) return 0;
           let base = 0;
-          if (codeEq(s.code, g.code, coLocatedGroups)) base = SCORE_EXACT;
+          // a merged yard visit counts as exact when ANY of its parts has the
+          // row's code (18-11 AD-49-DH: 7001 toque 02:25 + 7005 02:35–03:00
+          // was labelled 7005, so the 7001 regresso skipped it for 03:15)
+          const partsExact = (s as WStop & { parts?: { code: string | null }[] }).parts?.some((p) =>
+            codeEq(p.code, g.code, coLocatedGroups),
+          );
+          if (codeEq(s.code, g.code, coLocatedGroups) || partsExact) base = SCORE_EXACT;
           else if (alt.some((c) => codeEq(s.code, c, coLocatedGroups))) base = SCORE_YARD_ALT;
           else if (/^7005/.test(g.code) && servesDocks7005(s)) base = SCORE_YARD_ALT;
           if (base > 0 && g.carga > 0 && dwellMin(s) < MIN_LOAD_DWELL_MIN) base -= SCORE_TOUCH_PENALTY;
+          // with the same number of matches, a solution that places a STORE
+          // wins over one that places one more yard row: the yard is visited
+          // all the time, a store stop is unambiguous (18-11 39-XR-38: carga
+          // 7001 took 17-11 18:20 + regresso 07:19 instead of 12 at 10:04 and
+          // carga 07:19; real 07:17)
+          if (base > 0 && !/^700[135]/.test(g.code) && !isYardType(g.code)) base += SCORE_STORE_BONUS;
           return base;
         });
       });
@@ -1375,6 +1522,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
             /^700[15]/.test(G[0].code) &&
             /^700[15]/.test(prevTail.stop.code ?? ""))) &&
         stopInWindow(prevTail.stop.arrivedAt, prevTail.stop.departedAt, G[0].winLoMs, G[0].winHiMs, G[0].winDepHiMs) &&
+        whOk(G[0], prevTail.stop) &&
         Date.parse(prevTail.stop.arrivedAt) >= G[0].anchorLoMs &&
         Date.parse(prevTail.stop.arrivedAt) <= G[0].anchorHiMs
       ) {
@@ -1402,7 +1550,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           if (v === -Infinity) continue;
           const L = (st >> 1) - 1;
           const f = st & 1;
-          relax(st, v, { prev: st, kind: "skip", k: -1 });
+          // skipping a group ends the "may be shared" chance: only CONSECUTIVE
+          // groups share a stop (18-11 51-JG-01: regresso shared the carga visit
+          // across the skipped delivery 368 and both cargas went blank)
+          relax(st & ~1, v, { prev: st, kind: "skip", k: -1 });
           if (f === 1 && L >= 0 && compat[i][L] > 0) {
             // L was taken by group i-1 on this path; share it once
             relax((L + 1) * 2, v + SCORE_SHARED, { prev: st, kind: "share", k: L });
@@ -1416,8 +1567,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           for (let k = L + 1; k < m; k++) {
             const c = compat[i][k];
             if (c > 0) {
+              const wd = whDevMin(G[i], plateStops[k]);
               const dev = planDevMin(G[i], plateStops[k]);
-              const pen = dev != null ? Math.min(9, dev / 30) : skipped;
+              const pen = wd != null ? Math.min(9, wd / 10) : dev != null ? Math.min(9, dev / 30) : skipped;
               relax((k + 1) * 2 + 1, v + c - pen, { prev: st, kind: "match", k });
               skipped++;
             }
@@ -1445,6 +1597,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       if (
         kinds[0] === "match" &&
         G[0].planArrMs == null && // with a plan, closeness to the planned time already decided
+        whWindow(G[0]) == null && // …or the warehouse's real time
         G[0].rows.length === 1 &&
         !(n > 1 && kinds[1] === "share")
       ) {
@@ -1482,6 +1635,9 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           };
           const better = (i: number, k: number, cur: number) => {
             if (compat[i][k] !== compat[i][cur]) return compat[i][k] > compat[i][cur];
+            const wk = whDevMin(G[i], plateStops[k]);
+            const wc = whDevMin(G[i], plateStops[cur]);
+            if (wk != null && wc != null && wk !== wc) return wk < wc;
             const dk = dwellMin(plateStops[k]) >= MIN_LOAD_DWELL_MIN;
             const dc = dwellMin(plateStops[cur]) >= MIN_LOAD_DWELL_MIN;
             if (dk !== dc) return dk;
@@ -1514,6 +1670,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
               const s = plateStops[headShareK];
               if (
                 stopInWindow(s.arrivedAt, s.departedAt, G[i].winLoMs, G[i].winHiMs, G[i].winDepHiMs) &&
+                whOk(G[i], s) &&
                 (planDevMin(G[i], s) ?? 0) <= PLAN_MAX_DEV_MIN
               ) {
                 best = headShareK;
@@ -1532,6 +1689,28 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
             if (best >= 0) {
               used.add(best);
               if (!usedBy.has(best)) usedBy.set(best, i);
+            }
+          }
+          // O armazém carrega SEMPRE o 7005 antes do 7001 (relatórios 05-11,
+          // 29-09, 18-11). Um 7001 vizinho do 7005 numa visita ANTES da dele,
+          // ou depois de outra carga da rota (7003) que já vem a seguir ao
+          // 7005, é a visita errada: as duas cargas ficam na visita do 7005
+          // (dividida no Step 2a) e a outra visita fica livre para as rotas
+          // seguintes da viatura (18-11 77-MB-49: 7001 da 186391084 em 04:35,
+          // real 10:35; a 186394322 ficava sem a sua carga das 04:36).
+          // Se o 7005 só tem um toque e o 7001 tem permanência, junta-se o
+          // 7005 à visita do 7001 (18-11 50-JG-92).
+          for (let i = 0; i < b; i++) {
+            if (!/^7005/.test(G[i].code) || pickK[i] < 0) continue;
+            for (const j of [i - 1, i + 1]) {
+              if (j < 0 || j >= b || !/^7001/.test(G[j].code) || pickK[j] < 0 || pickK[j] === pickK[i]) continue;
+              const k5 = pickK[i], k1 = pickK[j];
+              const between = k1 > k5 && pickK.slice(0, b).some((k, x) => x !== i && x !== j && k > k5 && k < k1);
+              if (k1 > k5 && !between) continue;
+              const touch5 = dwellMin(plateStops[k5]) < MIN_LOAD_DWELL_MIN;
+              if (touch5 && dwellMin(plateStops[k1]) >= MIN_LOAD_DWELL_MIN) {
+                if (whOk(G[i], plateStops[k1])) pickK[i] = k1;
+              } else if (whOk(G[j], plateStops[k5])) pickK[j] = k5;
             }
           }
         }
@@ -1708,17 +1887,41 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       // …ou o 7001 ficou num toque (<5 min) ANTES do 7005 — o armazém carrega
       // sempre 7005 primeiro (16-11 47-LF-63: 7001 09:05–09:05, 7005 09:15–10:10)
       const t5 = Date.parse(g.assignedStop.arrivedAt);
-      const touchBefore = (s: WStop | null) =>
-        !!s &&
-        Date.parse(s.departedAt ?? s.arrivedAt) - Date.parse(s.arrivedAt) < MIN_LOAD_DWELL_MIN * 60_000 &&
-        Date.parse(s.arrivedAt) < t5;
+      const t5End = Date.parse(g.assignedStop.departedAt ?? g.assignedStop.arrivedAt);
+      // …ou o 7001 ficou numa visita ANTES do 7005 (impossível: 18-11 77-MB-49
+      // 7001 04:35 / 7005 10:19, real 7005 10:22 → 7001 10:35), ou bem depois
+      // dele com outra carga da rota (7003) pelo meio (18-11 72-XR-33: 7005
+      // 09:20–10:23, 7003 10:34, 7001 14:30; real 7001 09:39–10:29).
+      const wrongVisit = (h: StoreGroup) => {
+        const s = h.assignedStop;
+        if (!s || s.id === g.assignedStop!.id) return false;
+        const a = Date.parse(s.arrivedAt);
+        if (a < t5) return true;
+        return a > t5End + 30 * 60_000 && groups.some((o) =>
+          o.rota === g.rota && o !== g && o !== h && o.conf === "OK" && o.assignedStop && inCarga(o) &&
+          Date.parse(o.assignedStop.arrivedAt) >= t5End && Date.parse(o.assignedStop.arrivedAt) < a);
+      };
       const mate = groups.find(
         (h) =>
           h !== g && h.rota === g.rota && h.plate === g.plate && /^7001/.test(h.code) &&
-          (!h.assignedStop || (h.conf === "OK" && touchBefore(h.assignedStop))) &&
-          !h.rows.some((w) => w.kept) && inCarga(h) && Math.abs(h.order - g.order) === 1,
+          (!h.assignedStop || (h.conf === "OK" && wrongVisit(h))) &&
+          !h.rows.some((w) => w.kept) && inCarga(h) && Math.abs(h.order - g.order) === 1 &&
+          whOk(h, g.assignedStop!),
       );
       if (!mate) continue;
+      // o 7005 ficou num toque e o 7001 numa visita com permanência: é essa a
+      // visita das duas cargas (18-11 50-JG-92: 7005 toque 12:59 depois do
+      // 7003, 7001 11:39–12:25; real 7005 11:44, 7001 12:14–13:20)
+      const dwellOf = (s: WStop) => Date.parse(s.departedAt ?? s.arrivedAt) - Date.parse(s.arrivedAt);
+      if (
+        mate.assignedStop && dwellOf(g.assignedStop) < MIN_LOAD_DWELL_MIN * 60_000 &&
+        dwellOf(mate.assignedStop) >= MIN_LOAD_DWELL_MIN * 60_000
+      ) {
+        if (!whOk(g, mate.assignedStop)) continue;
+        g.assignedStop = mate.assignedStop;
+        for (const w of g.rows) w.assignedStop = mate.assignedStop;
+        continue;
+      }
       mate.conf = "OK";
       mate.assignedStop = g.assignedStop;
       for (const w of mate.rows) {
@@ -1784,13 +1987,34 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       }
       let gpsSplit = false;
       if (loads.length === 2) {
-        const i5 = parts.findIndex((p) => /^7005/.test(p.code ?? "") && isDwell(p) && p.d > loadStart);
-        const p1 = i5 >= 0 ? parts.slice(i5 + 1).find((p) => /^7001/.test(p.code ?? "") && isDwell(p)) : undefined;
-        if (!long && p1) {
+        // estadia longa: o GPS ainda pode mostrar a doca do 7005 seguida da do
+        // 7001 — usa a ÚLTIMA paragem 7005 com uma doca 7001 a seguir (18-11
+        // CG-53-PT: 7005 05:14–06:13, SON 06:30–08:24; real 05:40–06:10 /
+        // 06:10–08:25 — ancorar no fim dava 7005 até 07:58)
+        let i5 = -1;
+        let p1: Part | undefined;
+        for (let j = 0; j < parts.length; j++) {
+          const p = parts[j];
+          if (!/^7005/.test(p.code ?? "") || !isDwell(p) || p.d <= (long ? cursor : loadStart)) continue;
+          const nx = parts.slice(j + 1).find((q) => /^7001/.test(q.code ?? "") && q.d - q.a >= GPS_SPLIT_7001_MIN * 60_000);
+          if (nx || i5 < 0) {
+            i5 = j;
+            p1 = nx;
+          }
+          if (!long) break;
+        }
+        if (p1) {
           gpsSplit = true;
+          if (long) {
+            long = false;
+            loadStart = Math.max(cursor, parts[i5].a);
+          }
           segs.push([loads[0], loadStart, parts[i5].d], [loads[1], p1.a, tEnd]);
         } else {
-          const cut = Math.round((loadStart + SHARE_7005 * (tEnd - loadStart)) / 60_000) * 60_000;
+          const cut = Math.min(
+            tEnd,
+            Math.max(loadStart, Math.round((loadStart + SHARE_7005 * (tEnd - loadStart)) / 60_000) * 60_000),
+          );
           segs.push([loads[0], loadStart, cut], [loads[1], cut, tEnd]);
         }
       } else segs.push([loads[0], loadStart, tEnd]);
@@ -1900,8 +2124,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         }
         otherEnds.push(...m.values());
       }
+      const ww = whWindow(g);
       const cand = stopsForPlate(g.plate).find((s) => {
         const a = Date.parse(s.arrivedAt);
+        if (ww && !visitOverlaps(s, ww)) return false;
         return (
           a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs && inYard(s) &&
           !otherEnds.some((t) => t > lastDel && t < a)
@@ -1916,10 +2142,35 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       const parked = d - a > cap + REGRESSO_PARKED_EXTRA_MIN * 60_000;
       const v: WStop = { ...cand, departedAt: new Date(parked ? a + cap : d).toISOString(), assigned: true };
       cand.assigned = true;
+      // a mesma visita já é a carga de OUTRA rota (regresso → carga seguinte):
+      // o regresso fica no início e a carga começa a seguir, como no Step 2a
+      // (18-11 77-MB-49: regresso 186394322 e 7005/7001 da 186391084 todos
+      // 10:19–…, sobrepostos)
+      const sharers = groups.filter(
+        (h) => h !== g && h.plate === g.plate && h.rota !== g.rota && h.conf === "OK" &&
+          h.assignedStop?.id === cand.id && isYardCode(h.code) && !h.rows.some((w) => w.kept),
+      );
+      let sharedNote = "";
+      if (sharers.length) {
+        const segEnd = Math.round((a + Math.min(cap, (d - a) / 3)) / 60_000) * 60_000;
+        v.departedAt = new Date(segEnd).toISOString();
+        for (const h of sharers) {
+          const hs = h.assignedStop!;
+          if (Date.parse(hs.arrivedAt) >= segEnd || Date.parse(hs.departedAt ?? hs.arrivedAt) <= segEnd) continue;
+          const nv: WStop = { ...hs, arrivedAt: new Date(segEnd).toISOString() };
+          h.assignedStop = nv;
+          for (const w of h.rows) {
+            if (w.assignedStop?.id !== hs.id) continue;
+            w.assignedStop = nv;
+            w.real = `Viatura já no pátio (regresso da rota ${g.rota} ${fmtHM(cand.arrivedAt)}); carga às ${fmtHM(nv.arrivedAt)}.`;
+          }
+        }
+        sharedNote = ` A seguir, carga da rota ${sharers[0].rota} na mesma visita.`;
+      }
       const note =
         `Regresso: primeira chegada ao pátio depois da última entrega (${fmtHM(new Date(lastDel).toISOString())}) — ` +
         `${cand.code ?? "paragem sem local junto ao pátio"} ${fmtHM(cand.arrivedAt)}–${fmtHM(cand.departedAt)}` +
-        (parked ? `; viatura ficou parada, Saída = chegada + ${Math.round(cap / 60000)} min.` : ".");
+        (sharers.length ? "." + sharedNote : parked ? `; viatura ficou parada, Saída = chegada + ${Math.round(cap / 60000)} min.` : ".");
       g.conf = "OK";
       g.assignedStop = v;
       for (const w of g.rows) {
@@ -2319,6 +2570,41 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
   let swap = 0;
   let swapOutOfWindow = 0;
   let plateTypo = 0;
+  let whAgree = 0;
+  let whDisagree = 0;
+  let whBlank = 0;
+  // «Armazém»: what the warehouse recorded for this row, and whether our yard
+  // visit (entrada → saída do pátio) contains the real load. The sheet keeps
+  // the yard entry/exit; the warehouse time only checks it.
+  const compareWarehouse = (
+    w: Work,
+  ): { text: string; verdict: "none" | "info" | "agree" | "disagree" | "blank"; note: string } => {
+    const l = w.wh;
+    if (!l) return { text: "", verdict: "none", note: "" };
+    const hh = (ms: number | null) => (ms == null ? "?" : fmtHM(new Date(ms).toISOString()));
+    const bits: string[] = [];
+    if (l.portaInMs != null) bits.push(`Portaria ${hh(l.portaInMs)}–${hh(l.portaOutMs)}`);
+    if (l.iniMs != null) bits.push(`Cais${l.cais ? " " + l.cais : ""} ${hh(l.iniMs)}–${hh(l.fimMs)}`);
+    if (l.plate) bits.push(`Matrícula ${l.plate}`);
+    const text = bits.join(" · ");
+    const win = /^700[135]/.test(w.code) && !w.kept ? whRealWindow(w.code, l) : null;
+    if (!win) return { text, verdict: "info", note: "" };
+    if (!w.assignedStop) {
+      return {
+        text,
+        verdict: "blank",
+        note: `Armazém: ${hh(win.a)}–${hh(win.b)} — sem visita GPS ao pátio a essa hora.`,
+      };
+    }
+    const a = Date.parse(w.assignedStop.arrivedAt);
+    const d = Date.parse(w.assignedStop.departedAt ?? w.assignedStop.arrivedAt);
+    if (a <= win.hi && d >= win.lo) return { text, verdict: "agree", note: "" };
+    return {
+      text,
+      verdict: "disagree",
+      note: `Hora fora da carga real do armazém (${hh(win.a)}–${hh(win.b)}) — confirmar.`,
+    };
+  };
   let trackitFallback = 0;
   for (const w of works) {
     // Stamp the service day on every row (blank ones included) so a
@@ -2356,6 +2642,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       // them), so there's no g.plate to inherit from — the row's own
       // resolved plate IS the planned one.
       w.out[VV_COL] = w.plate ?? "";
+      if (warehouse) w.out[ARMAZEM_COL] = compareWarehouse(w).text;
       kept++;
       continue;
     }
@@ -2402,6 +2689,28 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       if (cols.plateCol) w.out[cols.plateCol] = rs.to;
     }
     w.out[VV_COL] = rs ? rs.from : (groupMap.get(w.groupKey)?.plate ?? w.plate) ?? "";
+    // Relatório do armazém: matrícula real + comparação com a hora da carga
+    const wf = whPlateFixes.get(w.rota);
+    if (wf) {
+      if (cols.plateCol) w.out[cols.plateCol] = wf.to;
+      w.out[VV_COL] = wf.from ?? "";
+      w.real =
+        `Matrícula corrigida pelo relatório do armazém: ${wf.to} (folha: ${wf.from ?? "sem matrícula"}).` +
+        (w.real ? ` ${w.real}` : "");
+    }
+    if (warehouse) {
+      const cmp = compareWarehouse(w);
+      w.out[ARMAZEM_COL] = cmp.text;
+      if (cmp.verdict === "disagree") {
+        whDisagree++;
+        w.conf = REVIEW;
+        w.real = (w.real ? `${w.real} ` : "") + cmp.note;
+      } else if (cmp.verdict === "agree") whAgree++;
+      else if (cmp.verdict === "blank") {
+        whBlank++;
+        w.real = (w.real ? `${w.real} ` : "") + cmp.note;
+      }
+    }
     w.out[CONFIANCA_COL] = w.conf || REVIEW;
     // A row whose input Chegada/Saída were rejected as an implausible pre-fill
     // (see placeholderNote above) always carries that explanation — prepended
@@ -2483,6 +2792,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       trackitFallback,
       routes: routeMap.size,
       routesOk,
+      ...(warehouse
+        ? {
+            warehouse: {
+              linked: whLinked,
+              plateFixes: whPlateFixes.size,
+              agree: whAgree,
+              disagree: whDisagree,
+              blank: whBlank,
+            },
+          }
+        : {}),
     },
     pendingTrackitPlates: [...pendingTrackitPlates],
   };

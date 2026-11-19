@@ -17,6 +17,7 @@ import {
 } from "@/lib/azambuja-sheet/match";
 import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 import { parsePlanoCargas, type PlanLine } from "@/lib/azambuja-sheet/plano";
+import { parseRelatorioDiario, relatorioOverlap, type WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
 import {
   formatTrackitDate,
   resolveTrackitFallback,
@@ -152,6 +153,46 @@ export async function POST(request: NextRequest) {
       { error: cols.errors.join(" "), errors: cols.errors },
       { status: 422 },
     );
+  }
+
+  // Relatório diário do armazém (opcional): lido em memória. Corrige a
+  // matrícula, escolhe a visita que contém a carga real e preenche a coluna
+  // «Armazém» — a folha continua com a entrada/saída do pátio (relatorio.ts).
+  let warehouse: WarehouseLine[] | undefined;
+  let relatorioInfo:
+    | { used: boolean; sheetRoutes: number; reportRoutes: number; common: number; warning?: string }
+    | undefined;
+  const relFile = form.get("relatorio");
+  if (relFile instanceof File && relFile.size > 0) {
+    let rwb: XLSX.WorkBook;
+    try {
+      rwb = XLSX.read(Buffer.from(await relFile.arrayBuffer()), { type: "buffer" });
+    } catch {
+      return NextResponse.json(
+        { error: "Não consegui abrir o relatório diário como .xlsx." },
+        { status: 400 },
+      );
+    }
+    const parsed = parseRelatorioDiario(rwb);
+    if ("error" in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 422 });
+    }
+    const ov = relatorioOverlap(parsed.lines, records.map((r) => String(r[cols.rotaCol] ?? "")));
+    // stale reports happen (07-11 and 16-11 carried 04/05-11): use it only
+    // when it covers at least half of the sheet's routes
+    const used = ov.sheetRoutes > 0 && ov.common >= Math.ceil(ov.sheetRoutes / 2);
+    relatorioInfo = {
+      used,
+      ...ov,
+      ...(used
+        ? {}
+        : {
+            warning:
+              `O relatório diário só tem ${ov.common} das ${ov.sheetRoutes} rotas da folha — parece ser de ` +
+              `outro dia; foi ignorado.`,
+          }),
+    };
+    if (used) warehouse = parsed.lines;
   }
 
   // The transporter's raw sheet carries no service-day column, so the day is
@@ -464,6 +505,7 @@ export async function POST(request: NextRequest) {
     codeTypes,
     codeCoords,
     plan,
+    warehouse,
   };
   const tPass1 = Date.now();
   let matched = runMatch(matchArgs);
@@ -530,6 +572,7 @@ export async function POST(request: NextRequest) {
       dayStops: stops.length,
     },
     ...(trackitDiagnostics ? { trackitFallback: trackitDiagnostics } : {}),
+    ...(relatorioInfo ? { relatorio: relatorioInfo } : {}),
     // Tempo de cada fase do pedido — para afinar ROUTE_SAFETY_MARGIN_MS
     // (trackit-fallback.ts) com números reais: a margem tem de cobrir pass2 + excel.
     timingsMs: {

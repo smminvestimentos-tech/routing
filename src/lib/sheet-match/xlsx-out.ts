@@ -327,6 +327,11 @@ export async function buildSheetWorkbook(
     const i = outHeader.indexOf(n);
     if (i >= 0) ws.getColumn(i + 1).width = n === REAL_COL ? 60 : 26;
   }
+  // «Armazém» (relatório diário do armazém, quando vem no upload)
+  {
+    const i = outHeader.indexOf("Armazém");
+    if (i >= 0) ws.getColumn(i + 1).width = 44;
+  }
 
   // Populate WW with a live formula per row: minutes between Chegada and
   // Saída, tolerant of both time shapes this app ever writes into those
