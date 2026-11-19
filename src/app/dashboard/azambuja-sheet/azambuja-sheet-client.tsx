@@ -84,6 +84,20 @@ export function AzambujaSheetClient() {
     }
   }
 
+  // aviso quando o nome do ficheiro sugere que foi para o campo errado
+  const looksRelatorio = (f: File | null) => !!f && /relat/i.test(f.name);
+  const looksPlano = (f: File | null) => !!f && /plano|carga/i.test(f.name);
+  const looksFolha = (f: File | null) => !!f && /hor[aá]rio/i.test(f.name);
+  const wrongSlot: string[] = [];
+  if (looksRelatorio(file) || looksRelatorio(plano))
+    wrongSlot.push(
+      "O relatório diário parece estar no campo errado — deve ir em «Relatório diário do armazém».",
+    );
+  if (looksFolha(plano) || looksFolha(relatorio) || looksPlano(relatorio))
+    wrongSlot.push(
+      "Um dos ficheiros parece estar no campo errado — a folha de horários vai em «Ficheiro .xlsx».",
+    );
+
   function reset() {
     setFile(null);
     setPlano(null);
@@ -205,17 +219,27 @@ export function AzambujaSheetClient() {
           >
             {busy ? "A processar…" : "Processar e descarregar"}
           </button>
-          {(file || result) && (
-            <button
-              type="button"
-              onClick={reset}
-              className={chipClass}
-              disabled={busy}
-            >
-              Limpar
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={reset}
+            className={chipClass}
+            disabled={busy || !(file || plano || relatorio || day || result || error)}
+          >
+            Limpar
+          </button>
         </div>
+
+        {!busy && !file && (plano || relatorio) && (
+          <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+            Falta a folha de horários no primeiro campo («Ficheiro .xlsx») —
+            sem ela não dá para processar.
+          </p>
+        )}
+        {wrongSlot.map((w) => (
+          <p key={w} className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+            {w}
+          </p>
+        ))}
 
         {error && (
           <div className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
