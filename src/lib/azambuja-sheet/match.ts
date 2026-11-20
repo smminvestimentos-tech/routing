@@ -1444,8 +1444,15 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       // 02:34, before 186377945 — the earlier route — had even left).
       let floor = -Infinity;
       for (const rota of routeOrder) {
-        for (const g of routeGroups.get(rota) ?? []) {
-          if (isYardType(g.code)) g.anchorLoMs = Math.max(g.anchorLoMs, floor);
+        // …unless the warehouse shows this route loading BEFORE that floor:
+        // the two routes ran in parallel on the same truck (crossdocking
+        // peixe, 19-11 03QA37: 186398768 7007 20:30 + 7003 22:24 while
+        // 186398766's kept deliveries run until 05:56)
+        const rg = routeGroups.get(rota) ?? [];
+        const whLo = Math.min(...rg.map((g) => whWindow(g)?.lo ?? Infinity));
+        const parallel = whLo < floor;
+        for (const g of rg) {
+          if (isYardType(g.code) && !parallel) g.anchorLoMs = Math.max(g.anchorLoMs, floor);
         }
         for (const w of works) {
           if (w.rota !== rota || w.plate !== plate || !w.kept || !w.code || isYardType(w.code)) continue;
@@ -1461,6 +1468,18 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     for (const rota of routeOrder) {
       const G = routeGroups.get(rota)!;
       const n = G.length;
+
+      // Relatório: nothing listed after the route's first real load can
+      // happen before it (19-11 AB-22-BP: o regresso 7001 D apanhou 01:42 da
+      // noite anterior e a carga real das 15:55 ficou sem hora).
+      // The earliest real load of the route counts (the sheet may list 7001
+      // before 7005 — 18-11 BG-96-ID).
+      {
+        const los = G.map((g) => whWindow(g)?.lo).filter((x): x is number => x != null);
+        const whLo = los.length ? Math.min(...los) : null;
+        const first = G.findIndex((g) => whWindow(g) != null);
+        if (whLo != null) for (const g of G.slice(first + 1)) g.anchorLoMs = Math.max(g.anchorLoMs, whLo);
+      }
 
       // 0 = incompatible, else the base score of matching group i to stop k
       const compat: number[][] = G.map((g) => {
@@ -2125,11 +2144,17 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         otherEnds.push(...m.values());
       }
       const ww = whWindow(g);
+      // only the Azambuja yard (7001/7005/7003) is "any part of the yard"; a
+      // platform elsewhere (7007 Peniche, 7008 Faro, 7030 Almada) needs a
+      // stop at that platform (19-11 41-XR-50: 7007 final apanhou o 7001)
+      const azYard = /^700[135]/.test(g.code);
       const cand = stopsForPlate(g.plate).find((s) => {
         const a = Date.parse(s.arrivedAt);
         if (ww && !visitOverlaps(s, ww)) return false;
+        if (!azYard && !codeEq(s.code, g.code, coLocatedGroups)) return false;
         return (
-          a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs && inYard(s) &&
+          a >= lastDel - ANCHOR_SLACK_MS && a <= lastDel + REGRESSO_MAX_H * 3_600_000 && a <= g.anchorHiMs &&
+          (azYard ? inYard(s) : true) &&
           !otherEnds.some((t) => t > lastDel && t < a)
         );
       });
@@ -2365,13 +2390,25 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           lastDel = Math.max(lastDel, Date.parse(h.assignedStop.departedAt ?? h.assignedStop.arrivedAt));
         }
         const slack = 5 * 60_000;
+        // …and a regresso can't come before the route's own carga, even when
+        // its deliveries are still blank (19-11 47-LF-63: carga 12:28,
+        // regresso 06:50 — a visita era da rota anterior)
+        let lastCarga = -Infinity;
+        for (const h of groups) {
+          if (h.rota !== g.rota || h === g || !isYardCode(h.code) || h.order >= fn || !h.assignedStop) continue;
+          lastCarga = Math.max(lastCarga, Date.parse(h.assignedStop.arrivedAt));
+        }
+        const beforeCarga = g.isTail && g.order > fn && lastCarga > -Infinity && a < lastCarga - slack;
         const bad =
-          g.order < fn ? firstDel < Infinity && a > firstDel + slack : g.isTail && lastDel > -Infinity && a < lastDel - slack;
+          beforeCarga ||
+          (g.order < fn ? firstDel < Infinity && a > firstDel + slack : g.isTail && lastDel > -Infinity && a < lastDel - slack);
         if (bad) {
-          const note =
-            `${g.order < fn ? "Carga" : "Regresso"} fora de ordem: ${fmtHM(g.assignedStop.arrivedAt)} vs entregas da rota ` +
-            `${fmtHM(new Date(firstDel).toISOString())}–${fmtHM(new Date(lastDel).toISOString())} — ` +
-            `confirmar (a viatura pode ter feito as rotas noutra ordem).`;
+          const note = beforeCarga
+            ? `Regresso fora de ordem: ${fmtHM(g.assignedStop.arrivedAt)} é antes da carga da própria rota ` +
+              `(${fmtHM(new Date(lastCarga).toISOString())}) — confirmar.`
+            : `${g.order < fn ? "Carga" : "Regresso"} fora de ordem: ${fmtHM(g.assignedStop.arrivedAt)} vs entregas da rota ` +
+              `${fmtHM(new Date(firstDel).toISOString())}–${fmtHM(new Date(lastDel).toISOString())} — ` +
+              `confirmar (a viatura pode ter feito as rotas noutra ordem).`;
           g.conf = REVIEW;
           for (const w of g.rows) {
             w.conf = REVIEW;
@@ -2389,6 +2426,130 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
           w.conf = REVIEW;
           w.real = w.real ? `${w.real} ${note}` : note;
         }
+      }
+    }
+  }
+
+  // Last row of a route at a place that is the SAME SITE as a warehouse
+  // (3 Fábrica do Peixe ↔ 7007 Peniche; 145/33 ↔ 7008 Faro): the truck parks
+  // there, so a stay > YARD_LONG_REVIEW_H is "Rever", like the yard
+  // (19-11 03-QA-31: «3 C» 06:50–21:15, a saída já é a carga seguinte).
+  {
+    const yardMate = (code: string) =>
+      coLocatedGroups.some((s) => s.has(code) && [...s].some((c) => c !== code && isYardType(c)));
+    for (const g of groups) {
+      if (!g.isTail || isYardCode(g.code) || !yardMate(g.code) || g.conf !== "OK" || !g.assignedStop) continue;
+      if (g.rows.some((w) => w.kept)) continue;
+      const a = Date.parse(g.assignedStop.arrivedAt);
+      const d = Date.parse(g.assignedStop.departedAt ?? g.assignedStop.arrivedAt);
+      if (d - a <= YARD_LONG_REVIEW_H * 3_600_000) continue;
+      const note =
+        `Viatura ${Math.round((d - a) / 3_600_000)} h parada (${fmtHM(g.assignedStop.arrivedAt)}–` +
+        `${fmtHM(g.assignedStop.departedAt)}) — a chegada é o regresso; confirmar a saída.`;
+      g.conf = REVIEW;
+      for (const w of g.rows) {
+        w.conf = REVIEW;
+        w.real = w.real ? `${w.real} ${note}` : note;
+      }
+    }
+  }
+
+  // ----- Step 2e: linha do pátio sem hora, visita confirmada pelo armazém -----
+  // The DP never gives one physical visit to two rows outside its sharing
+  // rules, and a visit claimed by a hand-filled row is off-limits. With the
+  // warehouse's real time the right visit is known, so a yard row still blank
+  // takes the plate's yard visit that contains its real load — even when
+  // another row already holds it (19-11: 41-XR-50 duas rotas no mesmo 7003
+  // 22:44–00:24; 50-JG-93 carga na mesma visita do regresso escrito à mão;
+  // AN-38-VF 7005 na visita do 7001 escrito à mão). Hand-filled rows of the
+  // same route bound it so they don't overlap; two blank rows of the same
+  // route in one visit split at the warehouse's boundary between them.
+  if (warehouse) {
+    const yardSite = (c: string | null | undefined) =>
+      !c ? null : /^7003/.test(c) ? "7003" : /^700[15]/.test(c) ? "7001" : null;
+    const taken = new Map<string, { a: number; d: number }[]>(); // stop id → spans given here
+    for (const g of groups) {
+      if (g.assignedStop || g.conf === "OK" || !g.plate || !yardSite(g.code)) continue;
+      // Step 2a's split writes the rows, not the group
+      if (g.rows.some((w) => w.kept || w.assignedStop)) continue;
+      const l = g.rows.find((w) => w.wh)?.wh;
+      const win = l ? whRealWindow(g.code, l) : null;
+      if (!win) continue;
+      // the warehouse names another truck (sem GPS): this plate's visit isn't it
+      if (l!.plate && l!.plate !== g.plate) continue;
+      const site = yardSite(g.code);
+      let best: DayStop | null = null;
+      let bestDev = Infinity;
+      for (const s of stopsForPlate(g.plate)) {
+        if (yardSite(s.code) !== site) continue;
+        const a = Date.parse(s.arrivedAt);
+        const d = Date.parse(s.departedAt ?? s.arrivedAt);
+        // the real load itself, no pad (a gate touch right after it is not
+        // the visit — 18-11 AB-81-BP 7001 01:01 a caminho do 7003)
+        if (a > win.b || d < win.a) continue;
+        const dev = win.a >= a && win.a <= d ? 0 : Math.min(Math.abs(win.a - a), Math.abs(win.a - d));
+        if (dev < bestDev) [best, bestDev] = [s, dev];
+      }
+      if (!best) continue;
+      let a = Date.parse(best.arrivedAt);
+      let d = Date.parse(best.departedAt ?? best.arrivedAt);
+      const myIdx = Math.min(...g.rows.map((w) => w.idx));
+      // hand-filled rows of the same route inside the visit bound it
+      for (const w of works) {
+        if (!w.kept || w.rota !== g.rota || w.keptArrMs == null) continue;
+        const ka = w.keptArrMs;
+        const kd = w.keptDepMs ?? ka;
+        if (w.idx > myIdx && ka > a && ka < d) d = ka;
+        if (w.idx < myIdx && kd > a && kd < d) a = kd;
+      }
+      // another blank row of this route already took part of the visit here
+      for (const sp of taken.get(`${g.rota}|${best.id}`) ?? []) {
+        if (sp.d > a && sp.a < d) a = Math.max(a, sp.d);
+      }
+      // …and the next blank row of the route in the same visit starts at its
+      // own real load: end this one there
+      for (const h of groups) {
+        if (h === g || h.rota !== g.rota || h.assignedStop || h.rows.some((w) => w.kept || w.assignedStop)) continue;
+        if (Math.min(...h.rows.map((w) => w.idx)) <= myIdx || yardSite(h.code) !== site) continue;
+        const hl = h.rows.find((w) => w.wh)?.wh;
+        const hw = hl ? whRealWindow(h.code, hl) : null;
+        if (hw && hw.a > a && hw.a < d && hw.a >= win.a) {
+          d = Math.min(d, Math.round(hw.a / 60_000) * 60_000);
+          break;
+        }
+      }
+      if (d < a) continue;
+      const k = `${g.rota}|${best.id}`;
+      taken.set(k, [...(taken.get(k) ?? []), { a, d }]);
+      const v: WStop = {
+        ...best,
+        arrivedAt: new Date(a).toISOString(),
+        departedAt: new Date(d).toISOString(),
+        assigned: true,
+      };
+      const long = d - a > YARD_LONG_REVIEW_H * 3_600_000;
+      const note =
+        `Visita ao pátio ${best.code} ${fmtHM(best.arrivedAt)}–${fmtHM(best.departedAt) || "?"} ` +
+        `(partilhada com outra linha) — o relatório do armazém confirma a carga às ${fmtHM(new Date(win.a).toISOString())}.` +
+        (long ? ` Viatura ${Math.round((d - a) / 3_600_000)} h no pátio — confirmar.` : "");
+      setGroup(g, long ? REVIEW : "OK", v, note);
+      // the warehouse-confirmed time wins over route rows now out of order
+      // with it (18-11 03QA31: 7007 inicial ficou 07:34, depois do 7003 D
+      // confirmado às 23:30 da véspera)
+      const myOrder = g.order;
+      for (const h of groups) {
+        if (h === g || h.rota !== g.rota || !h.assignedStop || h.rows.some((w) => w.kept)) continue;
+        if (h.rows.some((w) => w.wh)) continue;
+        const ha = Date.parse(h.assignedStop.arrivedAt);
+        const bad = (h.order < myOrder && ha > d) || (h.order > myOrder && ha < a);
+        if (!bad) continue;
+        setGroup(
+          h,
+          REVIEW,
+          null,
+          `Visita ${fmtHM(h.assignedStop.arrivedAt)} fora de ordem face à linha ${g.code} confirmada pelo armazém ` +
+            `(${fmtHM(v.arrivedAt)}–${fmtHM(v.departedAt)}) — sem hora; confirmar.`,
+        );
       }
     }
   }

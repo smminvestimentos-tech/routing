@@ -117,5 +117,52 @@ ok("hora do armazém sem visita GPS -> sem hora + Rever + nota",
   res2.rows[0]["Hora Chegada"] === "" && res2.rows[0]["Confiança"] === REVIEW && String(res2.rows[0].Real).includes("sem visita GPS ao pátio"),
   [res2.rows[0]["Hora Chegada"], res2.rows[0]["Confiança"], res2.rows[0].Real]);
 
+// --- duas rotas, mesma viatura, mesma visita ao 7003 (19-11 41-XR-50) -------
+console.log("\n== visita partilhada confirmada pelo armazém ==");
+{
+  const wl = (rota: string, seq: number, code: string, tipo: string, a: string, b: string) => ({
+    rota, seq, code, tipo, plate: "41XR50", iniMs: null, fimMs: null, cais: "6",
+    portaInMs: Date.parse(`2026-11-19T${a}:00Z`), portaOutMs: Date.parse(`2026-11-19T${b}:00Z`),
+  });
+  const rec = (rota: string, code: string, tipo: string): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code, MATRICULA: "41-XR-50", "Hora Chegada": "", "Hora Saida": "", CICLO: "08:00 | 20:00", TIPO: tipo,
+  });
+  // a 1.ª rota ainda tem o 7007 depois do 7003 (não é o regresso → a regra
+  // regresso → carga seguinte não se aplica)
+  const recs = [rec("186398779", "7003", "D"), rec("186398779", "7007", "C"), rec("186398770", "7003", "C"), rec("186398770", "12", "D")];
+  const sts: DayStop[] = [
+    { id: "x1", vehicleId: 9, plate: "41XR50", code: "7003", arrivedAt: "2026-11-19T10:44:00Z", departedAt: "2026-11-19T12:24:00Z" },
+    { id: "x2", vehicleId: 9, plate: "41XR50", code: "12", arrivedAt: "2026-11-19T13:19:00Z", departedAt: "2026-11-19T14:00:00Z" },
+  ];
+  const r = runMatch({
+    day: "2026-11-19", records: recs, header, cols, stops: sts, platesWithGps: new Set(["41XR50"]), pingWindowByPlate: new Map(),
+    warehouse: [wl("186398779", 2, "7003", "D", "10:43", "12:25"), wl("186398770", 1, "7003", "C", "10:43", "12:25")],
+  });
+  ok("as duas linhas 7003 ficam com a visita 10:44–12:24", [r.rows[0], r.rows[2]].every((x) => t(x) === "10:44-12:24"), r.rows.map(t));
+  ok("a segunda diz que é partilhada e confirmada pelo armazém",
+    [r.rows[0], r.rows[2]].some((x) => String(x.Real).includes("partilhada com outra linha")), r.rows.map((x) => x.Real));
+}
+
+// --- regresso não pode ficar antes da carga real (19-11 AB-22-BP) -------------
+console.log("\n== rota ancorada na carga real ==");
+{
+  const rec = (code: string, tipo: string): SheetRecord => ({
+    ROTA: "186407883", N_LOJA: code, NOME: code, MATRICULA: "AB-22-BP", "Hora Chegada": "", "Hora Saida": "", CICLO: "12:30 | 00:30+1", TIPO: tipo,
+  });
+  const recs = [rec("7001", "C"), rec("12", "D"), rec("7001", "D")];
+  const sts: DayStop[] = [
+    { id: "y1", vehicleId: 8, plate: "AB22BP", code: "7001", arrivedAt: "2026-11-19T01:42:00Z", departedAt: "2026-11-19T03:35:00Z" },
+    { id: "y2", vehicleId: 8, plate: "AB22BP", code: "7001", arrivedAt: "2026-11-19T15:55:00Z", departedAt: "2026-11-19T16:31:00Z" },
+    { id: "y3", vehicleId: 8, plate: "AB22BP", code: "12", arrivedAt: "2026-11-19T18:00:00Z", departedAt: "2026-11-19T18:40:00Z" },
+  ];
+  const r = runMatch({
+    day: "2026-11-19", records: recs, header, cols, stops: sts, platesWithGps: new Set(["AB22BP"]), pingWindowByPlate: new Map(),
+    warehouse: [{ rota: "186407883", seq: 1, code: "7001", tipo: "C", plate: "AB22BP", iniMs: Date.parse("2026-11-19T15:55:00Z"),
+      fimMs: Date.parse("2026-11-19T16:40:00Z"), portaInMs: null, portaOutMs: null, cais: "62" }],
+  });
+  ok("carga 7001 = 15:55–16:31", t(r.rows[0]) === "15:55-16:31", r.rows.map(t));
+  ok("regresso não fica com a visita das 01:42", !t(r.rows[2]).startsWith("01:42"), r.rows.map(t));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
