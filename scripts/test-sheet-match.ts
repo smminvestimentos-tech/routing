@@ -271,7 +271,7 @@ ok(
   });
   console.log("\nAzambuja summary:", JSON.stringify(r.summary));
   ok("Azambuja: 3 rows flagged 🔤", r.summary.plateTypo === 3, r.summary);
-  ok("Azambuja: MATRICULA corrected to 32OG64", r.rows.every((x) => x["MATRICULA"] === "32OG64"));
+  ok("Azambuja: MATRICULA corrected to 32-OG-64", r.rows.every((x) => x["MATRICULA"] === "32-OG-64"));
 }
 
 // ---------------------------------------------------------------------------

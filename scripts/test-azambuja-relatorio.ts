@@ -4,7 +4,7 @@
 
 import * as XLSX from "xlsx";
 import { parseRelatorioDiario, relatorioOverlap } from "@/lib/azambuja-sheet/relatorio";
-import { ARMAZEM_COL, resolveColumns, runMatch, REVIEW, type DayStop, type SheetRecord } from "@/lib/azambuja-sheet/match";
+import { ARMAZEM_COL, dashPlate, resolveColumns, runMatch, REVIEW, type DayStop, type SheetRecord } from "@/lib/azambuja-sheet/match";
 
 let pass = 0;
 let fail = 0;
@@ -95,7 +95,7 @@ const base = { day: "2026-11-18", records, header, cols, stops, platesWithGps: n
 const res = runMatch({ ...base, warehouse: lines });
 const out = res.rows;
 const t = (r: SheetRecord) => `${String(r["Hora Chegada"]).slice(11, 16)}-${String(r["Hora Saida"]).slice(11, 16)}`;
-ok("matrícula corrigida para a do armazém", out.every((r) => r.MATRICULA === "AN38VF"), out.map((r) => r.MATRICULA));
+ok("matrícula corrigida para a do armazém", out.every((r) => r.MATRICULA === "AN-38-VF"), out.map((r) => r.MATRICULA));
 ok("nota da correção", String(out[0].Real).includes("Matrícula corrigida pelo relatório do armazém: AN38VF"), out[0].Real);
 ok("7005 = entrada no pátio 22:50 (a carga real 23:10 está dentro)", t(out[0]).startsWith("22:50"), t(out[0]));
 ok("7001 na mesma visita, termina na saída do pátio 00:04", t(out[1]).endsWith("00:04"), t(out[1]));
@@ -208,11 +208,26 @@ console.log("\n== RAQ ==");
 
   const r0 = runMatch(base);
   ok("sem RAQ: Gaia não vai para o AS-16-CH (rota já no pátio às 17:35)", t(r0.rows[1]) === "-" && r0.rows[1].MATRICULA === "CG-53-PT", r0.rows[1]);
-  ok("sem RAQ: a anulada 32 vira troca para ZZ99ZZ (sem RAQ não se sabe)", r0.rows[3].MATRICULA === "ZZ99ZZ", r0.rows[3]);
+  ok("sem RAQ: a anulada 32 vira troca para ZZ99ZZ (sem RAQ não se sabe)", r0.rows[3].MATRICULA === "ZZ-99-ZZ", r0.rows[3]);
 
   // RAQ sem visita da viatura à loja nova: fica a original, com nota
   const r2 = runMatch({ ...base, stops: sts.filter((s) => s.id !== "c2"), storeChanges: changes });
   ok("sem visita a 38: código fica 8 e nota RAQ", r2.rows[1].N_LOJA === "8" && String(r2.rows[1].Real).includes("alterou esta loja para 38 Auchan Sintra"), r2.rows[1]);
+}
+
+// --- matrículas com hífenes (pedido da Azambuja) -----------------------------
+console.log("\n== matrículas com hífenes ==");
+ok("74RM63 → 74-RM-63", dashPlate("74RM63") === "74-RM-63");
+ok("74 rm-63 → 74-RM-63", dashPlate("74 rm-63") === "74-RM-63");
+ok("já com hífenes fica igual", dashPlate("CG-53-PT") === "CG-53-PT");
+ok("n/a e estrangeiras ficam como estão", dashPlate("n/a") === "n/a" && dashPlate("1234ABC") === "1234ABC");
+{
+  const recs: SheetRecord[] = [
+    { ROTA: "1", N_LOJA: "53", NOME: "53", MATRICULA: "74RM63", "Hora Chegada": "", "Hora Saida": "", CICLO: "08:00 | 20:00", TIPO: "D" },
+    { ROTA: "2", N_LOJA: "53", NOME: "53", MATRICULA: "74rm63", "Hora Chegada": "18-11-2026 10:00", "Hora Saida": "18-11-2026 10:30", CICLO: "08:00 | 20:00", TIPO: "D" },
+  ];
+  const r = runMatch({ day: "2026-11-18", records: recs, header, cols, stops: [], platesWithGps: new Set(), pingWindowByPlate: new Map() });
+  ok("folha gerada: todas as MATRICULA com hífenes", r.rows.every((x) => x.MATRICULA === "74-RM-63"), r.rows.map((x) => x.MATRICULA));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

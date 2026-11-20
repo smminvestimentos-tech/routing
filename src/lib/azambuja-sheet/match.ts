@@ -845,6 +845,12 @@ function mergeYardVisits<T extends DayStop & { assigned: boolean }>(
   return out;
 }
 
+/** "74RM63" / "74 rm-63" -> "74-RM-63"; anything not 6 letters/digits unchanged */
+export function dashPlate(raw: string): string {
+  const n = normalizePlate(raw);
+  return /^[A-Z0-9]{6}$/.test(n) ? `${n.slice(0, 2)}-${n.slice(2, 4)}-${n.slice(4)}` : raw;
+}
+
 export function runMatch(args: RunMatchArgs): RunMatchResult {
   const { day, records, rawRecords, header, cols, platesWithGps } = args;
   const pingWindowByPlate = args.pingWindowByPlate ?? new Map();
@@ -3034,6 +3040,21 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     coLocatedGroups,
     codeCoords,
   });
+
+  // A Azambuja escreve todas as matrículas com hífenes (AA-00-AA): a folha
+  // vem misturada (CG-53-PT / 74RM63) e as sugestões/correções saíam sem
+  // hífenes (AS16CH). Só matrículas portuguesas de 6 caracteres; o resto
+  // (n/a, estrangeiras) fica como está. As regras de cor do xlsx ignoram
+  // hífenes, e o ZZ é tirado desta mesma célula.
+  for (const w of works) {
+    if (w.empty) continue;
+    for (const c of [cols.plateCol, VV_COL]) {
+      if (!c) continue;
+      const v = w.out[c];
+      if (v == null || v === "") continue;
+      w.out[c] = dashPlate(String(v));
+    }
+  }
 
   const routesOk = [...routeMap.values()].filter(
     (rg) => rg.length > 0 && rg.every((g) => g.conf === "OK"),
