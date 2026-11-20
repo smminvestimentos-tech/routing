@@ -164,5 +164,56 @@ console.log("\n== rota ancorada na carga real ==");
   ok("regresso não fica com a visita das 01:42", !t(r.rows[2]).startsWith("01:42"), r.rows.map(t));
 }
 
+// --- RAQ: loja trocada / anulada pelo Auchan (19-11 186408319 8 → 38) -------
+console.log("\n== RAQ ==");
+{
+  const raqWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(raqWb, XLSX.utils.aoa_to_sheet(dhl), "Real Time - DHL");
+  XLSX.utils.book_append_sheet(raqWb, XLSX.utils.aoa_to_sheet([
+    ["RAQ"], [],
+    ["Data", "Rota", "Cod_Loja Inicial", "Loja Inicial", "Departamento", "Ação", "Motivo", "Pedido por:", "Cod_Loja alterada", "Loja Alterada"],
+    ["11/19/26", "186408319", "8", "Auchan Gaia", "AL-PBS", "ALTERADA", "OUTROS", "AUCHAN", "38", "Auchan Sintra"],
+    ["11/19/26", "186399599", "32", "Auchan Aveiro", "AL-PBS", "ANULADA", "SEM VOLUME", "AUCHAN", "", ""],
+    ["11/19/26", "EXTRA 1", "461", "My Auchan Baixa da Banheira", "AL-PBS", "EXTRA", "OUTROS", "AUCHAN", "", ""],
+  ]), "RAQ");
+  const pr = parseRelatorioDiario(raqWb);
+  const changes = "error" in pr ? [] : pr.changes;
+  ok("lê 2 trocas (EXTRA fica de fora)", changes.length === 2, changes);
+  ok("8 → 38 Auchan Sintra", changes[0]?.action === "ALTERADA" && changes[0]?.from === "8" && changes[0]?.to === "38" && changes[0]?.toName === "Auchan Sintra", changes[0]);
+  ok("32 anulada", changes[1]?.action === "ANULADA" && changes[1]?.to === null, changes[1]);
+
+  const rec = (rota: string, code: string, tipo: string, mat = "CG-53-PT"): SheetRecord => ({
+    ROTA: rota, N_LOJA: code, NOME: code === "8" ? "Auchan Gaia" : code, MATRICULA: mat, "Hora Chegada": "", "Hora Saida": "", CICLO: "11:30 | 23:30", TIPO: tipo,
+  });
+  const recs = [rec("186408319", "7001", "C"), rec("186408319", "8", "D"), rec("186408319", "7001", "C"), rec("186399599", "32", "D", "AA-11-BB")];
+  const sts: DayStop[] = [
+    { id: "c1", vehicleId: 1, plate: "CG53PT", code: "7001", arrivedAt: "2026-11-19T13:35:00Z", departedAt: "2026-11-19T14:34:00Z" },
+    { id: "c2", vehicleId: 1, plate: "CG53PT", code: "38", arrivedAt: "2026-11-19T15:34:00Z", departedAt: "2026-11-19T16:31:00Z" },
+    { id: "c3", vehicleId: 1, plate: "CG53PT", code: "7001", arrivedAt: "2026-11-19T17:35:00Z", departedAt: "2026-11-19T18:15:00Z" },
+    // outro camião em Gaia pela rota dele, à hora do regresso desta
+    { id: "o1", vehicleId: 2, plate: "AS16CH", code: "8", arrivedAt: "2026-11-19T17:34:00Z", departedAt: "2026-11-19T18:40:00Z" },
+    { id: "o2", vehicleId: 3, plate: "ZZ99ZZ", code: "32", arrivedAt: "2026-11-19T10:00:00Z", departedAt: "2026-11-19T10:40:00Z" },
+  ];
+  const span = { min: Date.parse("2026-11-19T00:00:00Z"), max: Date.parse("2026-11-20T06:00:00Z") };
+  const base = {
+    day: "2026-11-19", records: recs, header, cols, stops: sts, platesWithGps: new Set(["CG53PT", "AS16CH", "AA11BB", "ZZ99ZZ"]),
+    pingWindowByPlate: new Map([["CG53PT", span], ["AA11BB", span]]),
+  };
+  const r = runMatch({ ...base, storeChanges: changes });
+  ok("linha passa a 38 Auchan Sintra", r.rows[1].N_LOJA === "38" && r.rows[1].NOME === "Auchan Sintra", r.rows[1]);
+  ok("com as horas de Sintra 15:34–16:31, OK", t(r.rows[1]) === "15:34-16:31" && r.rows[1]["Confiança"] === "OK", r.rows[1]);
+  ok("nota da troca", String(r.rows[1].Real).startsWith("Loja alterada pelo Auchan (RAQ): 8 Auchan Gaia → 38 Auchan Sintra."), r.rows[1].Real);
+  ok("regresso 17:35–18:15", t(r.rows[2]) === "17:35-18:15", r.rows.map(t));
+  ok("anulada: sem troca de viatura, nota RAQ", t(r.rows[3]) === "-" && String(r.rows[3].Real).startsWith("Loja anulada pelo Auchan (RAQ: SEM VOLUME)"), r.rows[3]);
+
+  const r0 = runMatch(base);
+  ok("sem RAQ: Gaia não vai para o AS-16-CH (rota já no pátio às 17:35)", t(r0.rows[1]) === "-" && r0.rows[1].MATRICULA === "CG-53-PT", r0.rows[1]);
+  ok("sem RAQ: a anulada 32 vira troca para ZZ99ZZ (sem RAQ não se sabe)", r0.rows[3].MATRICULA === "ZZ99ZZ", r0.rows[3]);
+
+  // RAQ sem visita da viatura à loja nova: fica a original, com nota
+  const r2 = runMatch({ ...base, stops: sts.filter((s) => s.id !== "c2"), storeChanges: changes });
+  ok("sem visita a 38: código fica 8 e nota RAQ", r2.rows[1].N_LOJA === "8" && String(r2.rows[1].Real).includes("alterou esta loja para 38 Auchan Sintra"), r2.rows[1]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

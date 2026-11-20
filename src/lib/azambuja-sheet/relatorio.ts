@@ -37,6 +37,19 @@ export type WarehouseLine = {
   cais: string;
 };
 
+/** Folha «RAQ»: lojas que o Auchan trocou (ALTERADA) ou cancelou (ANULADA) */
+export type StoreChange = {
+  rota: string;
+  from: string;
+  fromName: string;
+  /** "ALTERADA" | "ANULADA" | outra ação, em maiúsculas */
+  action: string;
+  motivo: string;
+  /** loja nova (só em ALTERADA) */
+  to: string | null;
+  toName: string;
+};
+
 const SHEETS = ["Real Time - DHL", "Real Time - SLV"];
 
 const norm = (s: unknown) =>
@@ -73,7 +86,48 @@ function nearest(min: number, refYmd: string, refMs: number): number {
   return best;
 }
 
-export function parseRelatorioDiario(wb: XLSX.WorkBook): { lines: WarehouseLine[] } | { error: string } {
+// RAQ (19-11: 186408319 8 Auchan Gaia → 38 Auchan Sintra). Linhas sem rota
+// numérica (EXTRA 1) ficam de fora.
+function parseRaq(wb: XLSX.WorkBook): StoreChange[] {
+  const ws = wb.Sheets["RAQ"];
+  if (!ws) return [];
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false, defval: "" });
+  const hi = aoa.findIndex((r) => r.some((c) => norm(c) === "rota") && r.some((c) => norm(c) === "acao"));
+  if (hi < 0) return [];
+  const head = aoa[hi].map(norm);
+  const c = (n: string) => head.indexOf(n);
+  const [cRota, cFrom, cFromN, cAct, cMot, cTo, cToN] = [
+    c("rota"),
+    c("cod loja inicial"),
+    c("loja inicial"),
+    c("acao"),
+    c("motivo"),
+    c("cod loja alterada"),
+    c("loja alterada"),
+  ];
+  if (cRota < 0 || cFrom < 0 || cAct < 0) return [];
+  const out: StoreChange[] = [];
+  for (const r of aoa.slice(hi + 1)) {
+    const rota = String(r[cRota] ?? "").trim();
+    const from = normalizeStoreCode(r[cFrom]);
+    if (!/^\d{6,}$/.test(rota) || !from) continue;
+    const to = cTo >= 0 ? normalizeStoreCode(r[cTo]) : "";
+    out.push({
+      rota,
+      from,
+      fromName: cFromN >= 0 ? String(r[cFromN] ?? "").trim() : "",
+      action: norm(r[cAct]).toUpperCase(),
+      motivo: cMot >= 0 ? String(r[cMot] ?? "").trim() : "",
+      to: to || null,
+      toName: cToN >= 0 ? String(r[cToN] ?? "").trim() : "",
+    });
+  }
+  return out;
+}
+
+export function parseRelatorioDiario(
+  wb: XLSX.WorkBook,
+): { lines: WarehouseLine[]; changes: StoreChange[] } | { error: string } {
   const present = SHEETS.filter((n) => wb.Sheets[n]);
   if (present.length === 0) {
     return { error: `O relatório diário não tem as folhas «${SHEETS.join("» / «")}».` };
@@ -175,7 +229,7 @@ export function parseRelatorioDiario(wb: XLSX.WorkBook): { lines: WarehouseLine[
   }
   const out = [...byKey.values()];
   if (out.length === 0) return { error: "O relatório diário não tem linhas de rotas." };
-  return { lines: out };
+  return { lines: out, changes: parseRaq(wb) };
 }
 
 /** how many of the sheet's routes the report covers */

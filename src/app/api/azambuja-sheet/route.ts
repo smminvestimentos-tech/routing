@@ -17,7 +17,7 @@ import {
 } from "@/lib/azambuja-sheet/match";
 import { buildSheetWorkbook } from "@/lib/sheet-match/xlsx-out";
 import { parsePlanoCargas, type PlanLine } from "@/lib/azambuja-sheet/plano";
-import { parseRelatorioDiario, relatorioOverlap, type WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
+import { parseRelatorioDiario, relatorioOverlap, type StoreChange, type WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
 import {
   formatTrackitDate,
   resolveTrackitFallback,
@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
   // matrícula, escolhe a visita que contém a carga real e preenche a coluna
   // «Armazém» — a folha continua com a entrada/saída do pátio (relatorio.ts).
   let warehouse: WarehouseLine[] | undefined;
+  let storeChanges: StoreChange[] | undefined;
   let relatorioInfo:
     | { used: boolean; sheetRoutes: number; reportRoutes: number; common: number; warning?: string }
     | undefined;
@@ -192,7 +193,10 @@ export async function POST(request: NextRequest) {
               `outro dia; foi ignorado.`,
           }),
     };
-    if (used) warehouse = parsed.lines;
+    if (used) {
+      warehouse = parsed.lines;
+      storeChanges = parsed.changes;
+    }
   }
 
   // The transporter's raw sheet carries no service-day column, so the day is
@@ -506,6 +510,7 @@ export async function POST(request: NextRequest) {
     codeCoords,
     plan,
     warehouse,
+    storeChanges,
   };
   const tPass1 = Date.now();
   let matched = runMatch(matchArgs);

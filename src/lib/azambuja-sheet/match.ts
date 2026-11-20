@@ -53,6 +53,7 @@ import {
   implausibleKeptNote,
   KEPT,
   lisbonEpoch,
+  LOJA_MIN_PLAUSIBLE_DURATION_MIN,
   mergeFragmentedStops,
   minutesBetweenKeptCells,
   noGpsCoverageNote,
@@ -86,7 +87,7 @@ import {
   type TrackitCandidateMap,
 } from "@/lib/sheet-match/trackit-candidates";
 import type { PlanLine } from "@/lib/azambuja-sheet/plano";
-import type { WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
+import type { StoreChange, WarehouseLine } from "@/lib/azambuja-sheet/relatorio";
 
 export {
   CONFIANCA_COL,
@@ -207,6 +208,8 @@ export type RunMatchArgs = {
   plan?: readonly PlanLine[];
   /** Relatório diário do armazém (opcional, em memória) — ver relatorio.ts */
   warehouse?: readonly WarehouseLine[];
+  /** folha «RAQ» do mesmo relatório: lojas trocadas/anuladas pelo Auchan */
+  storeChanges?: readonly StoreChange[];
   day: string; // YYYY-MM-DD
   records: SheetRecord[];
   /** same rows, read with raw:true — Excel serials as numbers (for kept-row
@@ -657,6 +660,10 @@ type Work = {
   keptDepMs: number | null;
   /** linha do relatório do armazém ligada a esta (quando vem no upload) */
   wh: WarehouseLine | null;
+  /** RAQ: nota da loja trocada/anulada pelo Auchan (vai à frente do «Real») */
+  raqNote: string;
+  /** RAQ: loja anulada — nunca sugerir outra viatura para ela */
+  annulled: boolean;
 };
 
 // "DD-MM-YYYY HH:MM[:SS]" (normalizeDateTimeCell's output, Lisbon wall-clock)
@@ -876,13 +883,65 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     }
   }
 
+  // RAQ (relatório do armazém): o Auchan troca lojas depois da folha feita
+  // (19-11 186408319: 8 Gaia → 38 Sintra; a linha ficou com a visita a Gaia de
+  // OUTRO camião). Uma loja ALTERADA passa a ser a nova na folha — código,
+  // nome e horas — quando a viatura da rota esteve lá nesse dia; sem visita
+  // fica a original e uma nota (o RAQ às vezes não bate: 186402815 35→26 e o
+  // camião foi a 8 Gaia).
+  const raqUsed = new Set<StoreChange>();
+  const raqDayLo = lisbonEpoch(day, 0) - 12 * 36e5;
+  const raqDayHi = lisbonEpoch(day, 0) + 36 * 36e5;
+  const raqPlates = (rota: string, plate: string | null) => {
+    const ps = new Set<string>();
+    if (plate) ps.add(plate);
+    for (const l of args.warehouse ?? []) if (l.rota === rota && l.plate) ps.add(l.plate);
+    return ps;
+  };
+  const visited = (plates: Set<string>, code: string) =>
+    stops.some((s) => {
+      if (!s.plate || !plates.has(s.plate) || !codeEq(s.code, code, coLocatedGroups)) return false;
+      const t = Date.parse(s.arrivedAt);
+      return t >= raqDayLo && t < raqDayHi;
+    });
+
   const works: Work[] = records.map((r, idx) => {
     const rota = String(r[cols.rotaCol] ?? "").trim();
-    const rawCode = normalizeStoreCode(r[cols.codeCol]);
-    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes, coLocatedGroups);
-    const designacao = cols.nomeCol
+    const sheetCode = normalizeStoreCode(r[cols.codeCol]);
+    let rawCode = sheetCode;
+    let designacao = cols.nomeCol
       ? String(r[cols.nomeCol] ?? "").trim()
       : "";
+    let raqNote = "";
+    let annulled = false;
+    let raqTo: StoreChange | null = null;
+    const hasTimes = String(r[cols.chegadaCol] ?? "").trim() !== "" && String(r[cols.saidaCol] ?? "").trim() !== "";
+    const ch = hasTimes
+      ? undefined
+      : (args.storeChanges ?? []).find(
+          (c) => !raqUsed.has(c) && c.rota === rota && c.from.toUpperCase() === sheetCode.toUpperCase(),
+        );
+    if (ch) {
+      raqUsed.add(ch);
+      const npl = normalizePlate(String(r[cols.plateCol] ?? "").trim());
+      const plates = raqPlates(rota, npl && npl.length >= 4 ? npl : null);
+      const fromLbl = `${ch.from}${ch.fromName ? ` ${ch.fromName}` : ""}`;
+      const toLbl = `${ch.to}${ch.toName ? ` ${ch.toName}` : ""}`;
+      if (ch.action === "ALTERADA" && ch.to) {
+        if (visited(plates, ch.to)) {
+          rawCode = ch.to;
+          if (ch.toName) designacao = ch.toName;
+          raqTo = ch;
+          raqNote = `Loja alterada pelo Auchan (RAQ): ${fromLbl} → ${toLbl}.`;
+        } else {
+          raqNote = `RAQ: o Auchan alterou esta loja para ${toLbl}, mas a viatura não esteve lá — confirmar.`;
+        }
+      } else if (ch.action === "ANULADA") {
+        annulled = true;
+        raqNote = `Loja anulada pelo Auchan (RAQ${ch.motivo ? `: ${ch.motivo}` : ""}).`;
+      }
+    }
+    const code = resolveMergedCode(rawCode, activeCodes, mergedCodes, coLocatedGroups);
     const rawPlate = String(r[cols.plateCol] ?? "").trim();
     const empty = !rota && !code && !rawPlate && !designacao;
 
@@ -928,6 +987,10 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       : "";
 
     const out: SheetRecord = { ...r };
+    if (raqTo) {
+      out[cols.codeCol] = raqTo.to!;
+      if (cols.nomeCol && raqTo.toName) out[cols.nomeCol] = raqTo.toName;
+    }
     if (cols.viaturaPlaneadoCol) {
       const rawViatura = String(r[cols.viaturaPlaneadoCol] ?? "").trim();
       if (rawViatura) {
@@ -962,6 +1025,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       keptArrMs: kept ? dmyhmEpoch(normalizeDateTimeCell(rawChegada, chegadaRaw, day)) : null,
       keptDepMs: kept ? dmyhmEpoch(normalizeDateTimeCell(rawSaida, saidaRaw, day)) : null,
       wh: null,
+      raqNote,
+      annulled,
     };
   });
 
@@ -1190,7 +1255,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     const delsOf = (rota: string): Del[] => {
       const out: Del[] = [];
       for (const w of works) {
-        if (w.rota !== rota || w.empty || !w.code || isYardType(w.code)) continue;
+        // loja anulada (RAQ): ninguém lá vai por esta rota
+        if (w.rota !== rota || w.empty || !w.code || w.annulled || isYardType(w.code)) continue;
         if (w.kept && w.keptArrMs != null) {
           const pad = 30 * 60_000;
           out.push({ code: w.code, lo: w.keptArrMs - pad, hi: (w.keptDepMs ?? w.keptArrMs) + pad, depHi: (w.keptDepMs ?? w.keptArrMs) + pad });
@@ -2632,6 +2698,8 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
 
+    // RAQ anulada: ninguém lá foi por esta rota — não é troca de viatura
+    if (g.rows.every((w) => w.annulled)) continue;
     const sw = findVehicleSwap({
       plate: g.plate,
       code: g.code,
@@ -2650,6 +2718,25 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       continue;
     }
 
+    // A visita do outro camião tem de caber na ordem da rota entre as linhas
+    // que a viatura da folha fez com o GPS dela. Se a rota já está noutro
+    // ponto a essa hora, a visita é de outra rota, não uma troca (19-11
+    // 186408319: CG-53-PT entrou no pátio, regresso, às 17:35; AS-16-CH esteve
+    // em Gaia 17:34–18:40 pela rota 186402815). 18-11 186388000 (50-JG-94
+    // 11:18–13:09 entre 7003 08:55 e regresso 13:59) continua troca.
+    {
+      const a = Date.parse(sw.suggStop.arrivedAt);
+      const d = Date.parse(sw.suggStop.departedAt ?? sw.suggStop.arrivedAt);
+      const clash = (routeMap.get(g.rota) ?? []).some((x) => {
+        const st = x.assignedStop;
+        if (x === g || x.conf !== "OK" || !st || st.plate !== g.plate) return false;
+        return x.order < g.order
+          ? Date.parse(st.departedAt ?? st.arrivedAt) > a
+          : Date.parse(st.arrivedAt) < d;
+      });
+      if (clash) continue;
+    }
+
     // The candidate stop must fit this route's calendar day(s) — a same-day /
     // free-text CICLO never reaches into the next day (see groupWindowMs).
     if (
@@ -2660,6 +2747,16 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
         g.winHiMs,
         g.winDepHiMs,
       )
+    ) {
+      continue;
+    }
+    // Fora da janela só com uma entrega a sério: 2 min numa loja na véspera
+    // não é a entrega desta rota (19-11 186398781/38: AC-41-DT 20:18–20:20).
+    if (
+      sw.outOfWindow &&
+      codeTypes.get(g.code) === "loja" &&
+      (Date.parse(sw.suggStop.departedAt ?? sw.suggStop.arrivedAt) - Date.parse(sw.suggStop.arrivedAt)) / 60_000 <
+        LOJA_MIN_PLAUSIBLE_DURATION_MIN
     ) {
       continue;
     }
@@ -2884,9 +2981,7 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     // (see placeholderNote above) always carries that explanation — prepended
     // ahead of whatever the normal match produced, even "OK" (a real stop was
     // found; the note documents that the file's own value was overridden).
-    w.out[REAL_COL] = w.placeholderNote
-      ? w.placeholderNote + (w.real ? ` ${w.real}` : "")
-      : w.real || "";
+    w.out[REAL_COL] = [w.raqNote, w.placeholderNote, w.real].filter(Boolean).join(" ");
 
     if (w.conf === "OK") ok++;
     else if (w.conf === SWAP) swap++;
