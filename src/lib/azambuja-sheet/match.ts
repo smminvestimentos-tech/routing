@@ -664,6 +664,8 @@ type Work = {
   raqNote: string;
   /** RAQ: loja anulada — nunca sugerir outra viatura para ela */
   annulled: boolean;
+  /** horas que vinham no ficheiro numa linha do pátio impossível (ver unkeep) */
+  unkept: { c: string; s: string; why: string } | null;
 };
 
 // "DD-MM-YYYY HH:MM[:SS]" (normalizeDateTimeCell's output, Lisbon wall-clock)
@@ -777,6 +779,8 @@ const REGRESSO_YARD_KM = 0.6;
 const REGRESSO_MAX_H = 8;
 // Linha do pátio com estadia maior que isto (viatura parada) → Rever.
 const YARD_LONG_REVIEW_H = 6;
+// linha do pátio preenchida com menos do que isto = toque no portão
+const YARD_KEPT_MIN_MIN = 3;
 const REGRESSO_DEFAULT_MIN = 15;
 const REGRESSO_PARKED_EXTRA_MIN = 45;
 const UNCODED_CHAIN_GAP_MIN = 15;
@@ -1033,8 +1037,59 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       wh: null,
       raqNote,
       annulled,
+      unkept: null,
     };
   });
+
+  // Linhas do pátio que vêm preenchidas (à mão / sistema TFS) mas não podem
+  // estar certas voltam ao GPS (20-11: 44 linhas do pátio com 0–2 min e 23
+  // fora de ordem passavam intactas como «Já preenchido»):
+  //   • menos de YARD_KEPT_MIN_MIN no pátio — é o toque no portão, não a
+  //     estadia (186410949 7001 18:49:21–18:49:58; doca 17:50–18:30);
+  //   • fora de ordem na rota — chega antes de a linha anterior sair, ou sai
+  //     depois de a seguinte chegar (186410947 7001 C 20:42→08:41 do dia
+  //     seguinte, com o 7002 às 21:02). Só a(s) linha(s) do pátio do par; as
+  //     lojas preenchidas batem com o GPS (20-11: 92 iguais).
+  // A nota guarda as horas que vinham no ficheiro.
+  {
+    const yardish = (code: string) => /^700\d/.test(code) || ["armazem", "centro_distribuicao"].includes(codeTypes.get(code) ?? "");
+    const unkeep = (w: Work, why: string) => {
+      if (!w.kept) return;
+      // same shape as a kept row's write-back: DD-MM-YYYY HH:MM:SS
+      const norm = (col: string) => {
+        const v = normalizeDateTimeCell(String(w.out[col] ?? "").trim(), rawRecords?.[w.idx]?.[col], day);
+        return /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/.test(v) ? `${v}:00` : v;
+      };
+      const c = norm(cols.chegadaCol);
+      const s = norm(cols.saidaCol);
+      w.kept = false;
+      w.conf = "";
+      w.unkept = { c, s, why };
+      w.placeholderNote = `Ficheiro trazia ${c} → ${s} (${why}) — substituída pelo GPS.`;
+      w.keptArrMs = null;
+      w.keptDepMs = null;
+    };
+    for (const w of works) {
+      if (!w.kept || !yardish(w.code) || w.keptArrMs == null || w.keptDepMs == null) continue;
+      const min = (w.keptDepMs - w.keptArrMs) / 60_000;
+      if (min < YARD_KEPT_MIN_MIN) unkeep(w, `${Math.round(min)} min no pátio: só a passagem no portão`);
+    }
+    const byRota = new Map<string, Work[]>();
+    for (const w of works) if (!w.empty && w.rota) (byRota.get(w.rota) ?? byRota.set(w.rota, []).get(w.rota)!).push(w);
+    for (const rs of byRota.values()) {
+      const timed = rs.filter((w) => w.kept && w.keptArrMs != null && w.keptDepMs != null);
+      const bad = new Set<Work>();
+      for (let i = 1; i < timed.length; i++) {
+        const [a, b] = [timed[i - 1], timed[i]];
+        if (codeKey(a.code, coLocatedGroups) === codeKey(b.code, coLocatedGroups)) continue;
+        if (b.keptArrMs! < a.keptDepMs! - ANCHOR_SLACK_MS) {
+          if (yardish(a.code)) bad.add(a);
+          if (yardish(b.code)) bad.add(b);
+        }
+      }
+      for (const w of bad) unkeep(w, "fora de ordem na rota");
+    }
+  }
 
   // Plano de Cargas -> each sheet row: same ROTA, same code, in SEQ order
   // (n-th row of code X in the route <-> n-th plan line of code X).
@@ -1189,16 +1244,16 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (!firstNonYardIdx.has(w.rota)) firstNonYardIdx.set(w.rota, w.idx);
   }
   {
-    const anchors = new Map<string, { idx: number; arr: number; dep: number }[]>();
+    const anchors = new Map<string, { idx: number; arr: number; dep: number; code: string; yard: boolean }[]>();
     const rowsByRota = new Map<string, number[]>();
     for (const w of works) {
       if (w.empty || !w.rota) continue;
       const ix = rowsByRota.get(w.rota) ?? [];
       ix.push(w.idx);
       rowsByRota.set(w.rota, ix);
-      if (!w.kept || w.keptArrMs == null || !w.code || isYardType(w.code)) continue;
+      if (!w.kept || w.keptArrMs == null || !w.code) continue;
       const arr = anchors.get(w.rota) ?? [];
-      arr.push({ idx: w.idx, arr: w.keptArrMs, dep: w.keptDepMs ?? w.keptArrMs });
+      arr.push({ idx: w.idx, arr: w.keptArrMs, dep: w.keptDepMs ?? w.keptArrMs, code: w.code, yard: isYardType(w.code) });
       anchors.set(w.rota, arr);
     }
     for (const g of groups) {
@@ -1207,10 +1262,19 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
       const ix = rowsByRota.get(g.rota) ?? [];
       g.isHead = ix.length > 0 && firstIdx === ix[0];
       g.isTail = ix.length > 0 && lastIdx === ix[ix.length - 1];
-      // only yard rows (carga/regresso) are bounded: deliveries are sometimes
-      // listed out of time order (16-11 186376933: 433 11:50 antes de 411 11:03)
-      if (!isYardType(g.code)) continue;
+      // Yard rows (carga/regresso) are bounded by every kept row; deliveries
+      // only by kept Azambuja-yard rows (7001/7003/7005) (they're sometimes listed out of time order
+      // among themselves — 16-11 186376933: 433 11:50 antes de 411 11:03 —
+      // but never before the carga or after the regresso: 20-11 186411419
+      // 19 D took 09:45, before the kept 7001 carga 13:48). 7001/7005 in one
+      // visit don't bound each other (the sheet's order there isn't the
+      // docks' order).
+      const gYard = isYardType(g.code);
       for (const a of anchors.get(g.rota) ?? []) {
+        // a store is bounded only by the Azambuja yard (carga/regresso), not
+        // by a pass-through platform listed anywhere (7004 Maia, test BG-75-IP)
+        if (!gYard && !/^700[135]/.test(a.code)) continue;
+        if (a.code !== g.code && /^700[15]/.test(a.code) && /^700[15]/.test(g.code)) continue;
         if (a.idx < firstIdx) g.anchorLoMs = Math.max(g.anchorLoMs, a.dep - ANCHOR_SLACK_MS);
         else if (a.idx > lastIdx) g.anchorHiMs = Math.min(g.anchorHiMs, a.arr + ANCHOR_SLACK_MS);
       }
@@ -2826,6 +2890,23 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     setGroup(g, applied.conf, applied.stop, applied.note);
   }
 
+  // Linha do pátio cuja visita GPS é só o toque no portão (< 3 min): a hora
+  // de entrada pode estar certa, mas não é a estadia — Rever (20-11: 9 cargas
+  // 7001 com Chegada = Saída marcadas OK, ex. 186411449 04:50:26–04:50:26).
+  for (const g of groups) {
+    const st = g.assignedStop;
+    if (g.conf !== "OK" || !st || !/^700\d/.test(g.code)) continue;
+    const d = Date.parse(st.departedAt ?? st.arrivedAt) - Date.parse(st.arrivedAt);
+    if (d >= YARD_KEPT_MIN_MIN * 60_000) continue;
+    g.conf = REVIEW;
+    for (const w of g.rows) {
+      w.conf = REVIEW;
+      w.real =
+        `GPS só registou a passagem no portão às ${fmtHM(st.arrivedAt)} (${Math.round(d / 60_000)} min) — ` +
+        `confirmar a estadia no pátio.` + (w.real ? ` ${w.real}` : "");
+    }
+  }
+
   // ----- write back -----
   let ok = 0;
   let review = 0;
@@ -2928,6 +3009,12 @@ export function runMatch(args: RunMatchArgs): RunMatchResult {
     if (w.assignedStop) {
       w.out[cols.chegadaCol] = fmtDateTimeLisbon(w.assignedStop.arrivedAt);
       w.out[cols.saidaCol] = fmtDateTimeLisbon(w.assignedStop.departedAt);
+    } else if (w.unkept) {
+      // sem paragem GPS melhor: fica o que vinha, para confirmar
+      w.out[cols.chegadaCol] = w.unkept.c;
+      w.out[cols.saidaCol] = w.unkept.s;
+      w.conf = REVIEW;
+      w.placeholderNote = `Hora do ficheiro (${w.unkept.why}) sem paragem GPS melhor — confirmar.`;
     } else {
       w.out[cols.chegadaCol] = "";
       w.out[cols.saidaCol] = "";

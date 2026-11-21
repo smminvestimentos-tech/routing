@@ -230,5 +230,37 @@ ok("n/a e estrangeiras ficam como estão", dashPlate("n/a") === "n/a" && dashPla
   ok("folha gerada: todas as MATRICULA com hífenes", r.rows.every((x) => x.MATRICULA === "74-RM-63"), r.rows.map((x) => x.MATRICULA));
 }
 
+// --- linhas do pátio preenchidas impossíveis voltam ao GPS (20-11) -----------
+console.log("\n== pátio preenchido impossível ==");
+{
+  const rec = (code: string, tipo: string, ch = "", sa = ""): SheetRecord => ({
+    ROTA: "186410949", N_LOJA: code, NOME: code, MATRICULA: "AS-16-CH", "Hora Chegada": ch, "Hora Saida": sa, CICLO: "11:30 | 23:30", TIPO: tipo,
+  });
+  const sts: DayStop[] = [
+    { id: "k1", vehicleId: 4, plate: "AS16CH", code: "7001", arrivedAt: "2026-11-20T17:50:00Z", departedAt: "2026-11-20T18:30:00Z" },
+    { id: "k2", vehicleId: 4, plate: "AS16CH", code: "25", arrivedAt: "2026-11-20T19:40:00Z", departedAt: "2026-11-20T20:35:00Z" },
+    { id: "k3", vehicleId: 4, plate: "AS16CH", code: "7001", arrivedAt: "2026-11-20T23:00:00Z", departedAt: "2026-11-20T23:00:20Z" },
+  ];
+  const base = { day: "2026-11-20", header, cols, stops: sts, platesWithGps: new Set(["AS16CH"]), pingWindowByPlate: new Map() };
+  // carga preenchida com 37 s (só o portão)
+  const r = runMatch({ ...base, records: [rec("7001", "C", "20-11-2026 18:49:21", "20-11-2026 18:49:58"), rec("25", "D")] });
+  ok("carga de 37 s volta ao GPS: 17:50–18:30", t(r.rows[0]) === "17:50-18:30" && r.rows[0]["Confiança"] === "OK", r.rows[0]);
+  ok("nota guarda a hora do ficheiro", String(r.rows[0].Real).startsWith("Ficheiro trazia 20-11-2026 18:49:21 → 20-11-2026 18:49:58 (1 min no pátio"), r.rows[0].Real);
+  // carga fora de ordem (sai depois de a loja seguinte chegar)
+  const r2 = runMatch({ ...base, records: [rec("7001", "C", "20-11-2026 17:00", "20-11-2026 23:59"), rec("25", "D", "20-11-2026 19:40", "20-11-2026 20:35")] });
+  ok("carga fora de ordem volta ao GPS", t(r2.rows[0]) === "17:50-18:30", r2.rows[0]);
+  ok("a loja preenchida fica", r2.rows[1]["Confiança"] !== "OK" && t(r2.rows[1]) === "19:40-20:35", r2.rows[1]);
+  // sem paragem GPS melhor: fica a hora do ficheiro, Rever
+  const r3 = runMatch({ ...base, stops: sts.filter((s) => s.id !== "k1"), records: [rec("7001", "C", "20-11-2026 18:49", "20-11-2026 18:50"), rec("25", "D")] });
+  ok("sem GPS: fica a hora do ficheiro, formatada, Rever", r3.rows[0]["Hora Chegada"] === "20-11-2026 18:49:00" && r3.rows[0]["Confiança"] === REVIEW, r3.rows[0]);
+  // loja vazia não pode ficar antes da carga preenchida
+  const r4 = runMatch({ ...base, stops: [...sts, { id: "k0", vehicleId: 4, plate: "AS16CH", code: "25", arrivedAt: "2026-11-20T09:00:00Z", departedAt: "2026-11-20T09:40:00Z" }],
+    records: [rec("7001", "C", "20-11-2026 17:50", "20-11-2026 18:30"), rec("25", "D")] });
+  ok("loja depois da carga preenchida: 19:40, não 09:00", t(r4.rows[1]) === "19:40-20:35", r4.rows.map(t));
+  // regresso só com toque no portão (20 s) -> Rever
+  const r5 = runMatch({ ...base, stops: sts.map((s) => s.id === "k1" ? { ...s, departedAt: "2026-11-20T17:50:30Z" } : s), records: [rec("7001", "C"), rec("25", "D")] });
+  ok("carga com 0 min de GPS -> Rever", r5.rows[0]["Confiança"] === REVIEW && String(r5.rows[0].Real).includes("passagem no portão"), r5.rows[0]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

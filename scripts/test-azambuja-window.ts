@@ -465,8 +465,8 @@ console.log("== runMatch: next-day stop rejected for same-day / free-text route 
     { ch: byLoja["7003"]["Hora Chegada"], sa: byLoja["7003"]["Hora Saida"], conf: byLoja["7003"]["Confiança"] },
   );
   ok(
-    '"02:00 | 14:00" row: skips the midnight-crossing stop, takes the 23:59 in-day one',
-    byLoja["7005"]["Confiança"] === "OK" && String(byLoja["7005"]["Hora Chegada"]).includes("09-09-2026 23:59"),
+    '"02:00 | 14:00" row: skips the midnight-crossing stop, takes the 23:59 in-day one (0 min → Rever, toque no portão)',
+    byLoja["7005"]["Confiança"] === REVIEW && String(byLoja["7005"]["Hora Chegada"]).includes("09-09-2026 23:59"),
     byLoja["7005"]["Hora Chegada"],
   );
   ok(
